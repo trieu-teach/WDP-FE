@@ -1,0 +1,102 @@
+@import '../Login/Login.css';
+
+.auth-page--register .auth-brand {
+  background: linear-gradient(145deg, #1a1917 0%, #1f2d2a 45%, #1d3d35 100%);
+}
+
+.auth-page--register .auth-brand::before {
+  background:
+    radial-gradient(circle at 25% 75%, rgba(29, 158, 117, 0.3) 0%, transparent 50%),
+    radial-gradient(circle at 75% 25%, rgba(127, 119, 221, 0.2) 0%, transparent 45%);
+}
+
+.auth-card--wide {
+  max-width: 520px;
+}
+
+.auth-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.auth-check--block {
+  align-items: flex-start;
+  line-height: 1.5;
+}
+
+.auth-check--block span {
+  font-size: 12.5px;
+}
+
+.auth-role-fieldset {
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.auth-role-legend {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-h);
+  margin-bottom: 10px;
+}
+
+.auth-role-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.auth-role-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  background: var(--surface-2);
+}
+
+.auth-role-card input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.auth-role-card--active {
+  border-color: var(--red);
+  background: var(--red-soft);
+}
+
+.auth-role-card__icon {
+  font-size: 24px;
+}
+
+.auth-role-card__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.auth-role-card__desc {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.auth-role-note {
+  margin-top: 10px;
+  font-size: 11.5px;
+  color: var(--text);
+  opacity: 0.75;
+}
+
+@media (max-width: 520px) {
+  .auth-form-grid,
+  .auth-role-grid {
+    grid-template-columns: 1fr;
+  }
+}

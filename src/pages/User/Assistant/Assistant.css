@@ -1,0 +1,365 @@
+@import '../Mangaka/Mangaka.css';
+
+.ws-page--assistant {
+  --ws-accent: var(--purple);
+  --ws-accent-soft: var(--purple-soft);
+  --ws-accent-text: var(--purple);
+}
+
+.ws-hero--assistant {
+  background: linear-gradient(135deg, #1a1917 0%, #1f1f2e 50%, #2a1f3d 100%);
+}
+
+.ws-page--assistant .ws-tab.active {
+  background: var(--purple);
+}
+
+.ws-page--assistant .ws-upload-zone:hover {
+  border-color: var(--purple);
+  background: var(--purple-soft);
+}
+
+.ws-page--assistant .ws-card--tip {
+  background: var(--purple-soft);
+}
+
+.ws-stats--assistant {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.as-toast {
+  margin: 0 auto 1rem;
+  max-width: 720px;
+  padding: 0.65rem 1rem;
+  border-radius: 8px;
+  background: var(--purple-soft);
+  color: var(--purple);
+  font-size: 0.88rem;
+  text-align: center;
+}
+
+.as-task-detail {
+  margin-bottom: 1rem;
+  padding: 1rem 1.15rem;
+}
+
+.as-downloads h3,
+.as-assignments h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+}
+
+.as-downloads ul,
+.as-assignments ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.as-downloads li + li,
+.as-assignments li + li {
+  margin-top: 0.35rem;
+}
+
+.as-assignments {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.as-assignments li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.5rem;
+  font-size: 0.85rem;
+}
+
+.as-assignments__type {
+  font-weight: 600;
+  color: var(--purple);
+  min-width: 4.5rem;
+}
+
+.as-income-card h3 {
+  margin: 0 0 0.65rem;
+  font-size: 0.95rem;
+}
+
+.as-income-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.as-income-list li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.35rem 0.75rem;
+  align-items: center;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.82rem;
+}
+
+.as-income-list li:last-child {
+  border-bottom: none;
+}
+
+.as-income-list__month {
+  font-weight: 600;
+}
+
+.as-income-list strong {
+  color: var(--purple);
+}
+
+.ws-main--assistant {
+  max-width: none;
+  width: 100%;
+  padding-inline: clamp(16px, 2.5vw, 40px);
+}
+
+.ws-layout--assistant {
+  max-width: none;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) 300px;
+}
+
+.as-inbox-panel {
+  margin-bottom: 0;
+}
+
+.as-inbox-empty {
+  margin: 0;
+  padding: 1rem 0;
+  font-size: 0.88rem;
+  color: var(--text);
+}
+
+.as-inbox-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.as-inbox-card {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.as-inbox-card:hover,
+.as-inbox-card.active {
+  border-color: var(--purple);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--purple) 25%, transparent);
+}
+
+.as-inbox-card__thumb {
+  width: 52px;
+  height: 72px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #1a1917;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.as-inbox-card__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.as-inbox-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: 0.82rem;
+}
+
+.as-inbox-card__body strong {
+  font-size: 0.9rem;
+  color: var(--text-h);
+}
+
+.as-inbox-card__meta {
+  color: var(--text);
+  opacity: 0.85;
+}
+
+.as-inbox-card__status {
+  margin-top: 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.as-inbox-card__status--pending_assistant {
+  color: var(--red);
+}
+
+.as-inbox-card__status--in_progress {
+  color: var(--purple);
+}
+
+.as-inbox-card__status--submitted_to_mangaka {
+  color: var(--teal-text);
+}
+
+.as-canvas-area .ws-canvas {
+  padding: 16px;
+  background: #0c0b0a;
+  display: flex;
+  justify-content: center;
+}
+
+.as-toolbar-tools {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ws-tool-btn.active {
+  border-color: var(--purple);
+  background: var(--purple-soft);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--purple) 30%, transparent);
+}
+
+.as-brush-size {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text);
+}
+
+.as-brush-size input {
+  width: 72px;
+}
+
+.as-brush-colors {
+  display: flex;
+  gap: 4px;
+}
+
+.as-color-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  cursor: pointer;
+  padding: 0;
+}
+
+.as-color-swatch.active {
+  border-color: var(--purple);
+  box-shadow: 0 0 0 2px var(--purple);
+}
+
+.as-assignments--compact {
+  padding: 12px 16px;
+  margin: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.as-assignments--compact h3 {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+}
+
+.as-assignments--compact ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.as-assignments--compact li {
+  font-size: 0.78rem;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.as-canvas-actions {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.as-send-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text);
+  flex: 1;
+}
+
+.as-canvas-actions__btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.as-layers-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.as-layers-card__head h3 {
+  margin: 0;
+}
+
+.as-layers-card {
+  padding: 16px 18px;
+}
+
+.as-canvas-title-bar {
+  border-bottom: none;
+  padding-bottom: 8px;
+}
+
+.ws-layer__name {
+  flex: 1;
+  text-align: left;
+  background: none;
+  border: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
+.ws-layer__remove {
+  background: none;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0 4px;
+}
+
+.ws-layer__remove:hover {
+  color: var(--red);
+}

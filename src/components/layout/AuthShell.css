@@ -1,0 +1,47 @@
+.auth-shell__brand {
+  background: #0f0f10;
+}
+
+.auth-shell__brand--register {
+  background: #0c1010;
+}
+
+.auth-shell__brand::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 80% 60% at 20% 100%, rgba(226, 75, 74, 0.45) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 50% at 90% 10%, rgba(99, 102, 241, 0.28) 0%, transparent 55%);
+  pointer-events: none;
+}
+
+.auth-shell__brand--register::before {
+  background:
+    radial-gradient(ellipse 80% 60% at 15% 90%, rgba(16, 185, 129, 0.35) 0%, transparent 58%),
+    radial-gradient(ellipse 55% 45% at 88% 12%, rgba(99, 102, 241, 0.22) 0%, transparent 52%);
+}
+
+.auth-shell__grid {
+  position: absolute;
+  inset: 0;
+  opacity: 0.04;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.6) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.6) 1px, transparent 1px);
+  background-size: 64px 64px;
+  pointer-events: none;
+}
+
+.auth-shell__main {
+  position: relative;
+  background:
+    radial-gradient(ellipse 70% 50% at 100% 0%, color-mix(in oklch, var(--primary) 6%, transparent) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 45% at 0% 100%, color-mix(in oklch, var(--ring) 5%, transparent) 0%, transparent 55%),
+    var(--background);
+}
+
+.auth-shell__content {
+  position: relative;
+  z-index: 1;
+}

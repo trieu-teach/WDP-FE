@@ -1,0 +1,134 @@
+.user-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.user-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: rgba(244, 243, 240, 0.92);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+
+.user-header__inner {
+  padding-top: 14px;
+  padding-bottom: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.user-header__logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: var(--text-h);
+}
+
+.user-header__logo-icon {
+  font-size: 26px;
+}
+
+.user-header__logo-text {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.user-header__nav {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.user-header__link {
+  font-size: 14px;
+  color: var(--text);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.user-header__link:hover {
+  color: var(--text-h);
+}
+
+.user-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.user-header__user {
+  font-size: 13px;
+  color: var(--text);
+  max-width: 140px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.user-header__badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--red-soft);
+  color: var(--red-text);
+}
+
+.user-header__badge--assistant {
+  background: var(--purple-soft);
+  color: var(--purple);
+}
+
+.user-header__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  padding: 0 16px;
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: opacity 0.15s;
+  border: none;
+}
+
+.user-header__btn--primary {
+  background: var(--red);
+  color: #fff;
+}
+
+.user-header__btn--primary:hover {
+  opacity: 0.92;
+}
+
+.user-header__btn--ghost {
+  background: var(--surface);
+  color: var(--text-h);
+  border: 1px solid var(--border);
+}
+
+.user-header__btn--ghost:hover {
+  background: var(--surface-2);
+}
+
+@media (max-width: 768px) {
+  .user-header__link:not(.user-header__btn) {
+    display: none;
+  }
+
+  .user-header__user {
+    display: none;
+  }
+}

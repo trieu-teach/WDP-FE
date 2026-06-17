@@ -1,0 +1,15 @@
+/* Layout chính */
+.app-layout {
+  display: flex;
+  min-height: 100svh;
+}
+
+.app-layout > aside {
+  width: 220px;
+  flex-shrink: 0;
+}
+
+.app-layout > main {
+  flex: 1;
+  min-width: 0;
+}

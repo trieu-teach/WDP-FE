@@ -1,0 +1,72 @@
+.as-layer-editor {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.as-layer-editor--empty {
+  min-height: 320px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  color: var(--text);
+  font-size: 0.9rem;
+  text-align: center;
+  background: var(--surface-2);
+  border-radius: 10px;
+}
+
+.as-layer-editor__frame {
+  position: relative;
+  box-shadow: 0 8px 32px rgba(12, 11, 10, 0.2);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.as-layer-editor__frame--active {
+  outline: 3px solid var(--active-layer-color, #9b5de5);
+  outline-offset: 2px;
+}
+
+.as-layer-editor__corner-badge {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  background: color-mix(in srgb, var(--active-layer-color, #9b5de5) 88%, #000);
+  border-radius: 8px;
+  pointer-events: none;
+  max-width: calc(100% - 16px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.as-layer-editor__corner-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
+  flex-shrink: 0;
+  animation: as-layer-pulse 1.8s ease-in-out infinite;
+}
+
+.as-layer-editor__host {
+  width: var(--manga-page-width);
+  max-width: 100%;
+  line-height: 0;
+}
+
+.as-layer-editor__host canvas {
+  display: block;
+  max-width: 100%;
+  height: auto !important;
+}

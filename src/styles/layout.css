@@ -1,0 +1,296 @@
+/**
+ * Layout — nền full width, khối nội dung căn giữa (không dồn trái).
+ */
+
+:root {
+  --page-px: clamp(20px, 4vw, 48px);
+  --page-py: clamp(24px, 3vh, 48px);
+  --page-max: 1320px;
+  --section-gap: clamp(20px, 2vw, 32px);
+  --panel-pad: clamp(20px, 2vw, 28px);
+  --layout-sidebar: 300px;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+  overflow-x: hidden;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Khối nội dung căn giữa màn hình */
+.page-inner {
+  width: 100%;
+  max-width: var(--page-max);
+  margin-inline: auto;
+  padding-inline: var(--page-px);
+  box-sizing: border-box;
+}
+
+.user-page {
+  width: 100%;
+  min-height: 100vh;
+}
+
+/* Header / Footer */
+.user-header__inner,
+.user-footer__inner {
+  width: 100%;
+  max-width: var(--page-max);
+  margin-inline: auto;
+  padding-inline: var(--page-px);
+  box-sizing: border-box;
+}
+
+/* Home — nền full, chữ căn giữa khối */
+.home-hero {
+  padding-top: 48px;
+  padding-bottom: 80px;
+}
+
+.home-hero__inner {
+  width: 100%;
+  max-width: var(--page-max);
+  margin-inline: auto;
+  padding-inline: var(--page-px);
+  box-sizing: border-box;
+}
+
+.home-section {
+  width: 100%;
+  max-width: var(--page-max);
+  margin-inline: auto;
+  padding-top: 72px;
+  padding-bottom: 72px;
+  padding-inline: var(--page-px);
+  box-sizing: border-box;
+}
+
+.home-section--alt {
+  max-width: none;
+  width: 100%;
+  padding-inline: 0;
+}
+
+.home-section--alt .home-section__head,
+.home-section--alt .home-features {
+  width: 100%;
+  max-width: var(--page-max);
+  margin-inline: auto;
+  padding-inline: var(--page-px);
+  box-sizing: border-box;
+}
+
+.home-cta {
+  padding-top: 88px;
+  padding-bottom: 88px;
+}
+
+.home-cta__inner {
+  width: 100%;
+  max-width: var(--page-max);
+  margin-inline: auto;
+  padding-inline: var(--page-px);
+  box-sizing: border-box;
+  text-align: center;
+}
+
+/* Workspace hero */
+.ws-hero,
+.mk-hero {
+  padding-top: 32px;
+  padding-bottom: 32px;
+}
+
+.mk-hero {
+  padding-top: 40px;
+  padding-bottom: 36px;
+}
+
+.ws-hero__inner,
+.mk-hero__inner {
+  width: 100%;
+  max-width: var(--page-max);
+  margin-inline: auto;
+  padding-inline: var(--page-px);
+  box-sizing: border-box;
+}
+
+/* Workspace main */
+.ws-main,
+.mk-main {
+  width: 100%;
+  max-width: var(--page-max);
+  margin-inline: auto;
+  padding-top: 28px;
+  padding-bottom: 48px;
+  padding-inline: var(--page-px);
+  box-sizing: border-box;
+}
+
+.mk-main {
+  padding-bottom: 56px;
+}
+
+/* Mangaka workspace: full width — Series / Chapter / Upload & Ghi chú */
+.ws-page--mangaka .mk-main {
+  max-width: none;
+  width: 100%;
+  padding-inline: clamp(16px, 2.5vw, 40px);
+}
+
+.ws-page--mangaka .mk-hero__inner {
+  max-width: none;
+  width: 100%;
+  padding-inline: clamp(16px, 2.5vw, 40px);
+  box-sizing: border-box;
+}
+
+/* Layout 2 cột — căn giữa cả khối (content + sidebar) */
+.mk-layout,
+.ws-layout {
+  width: 100%;
+  max-width: var(--page-max);
+  margin-inline: auto;
+}
+
+.ws-page--mangaka .mk-layout {
+  max-width: none;
+  width: 100%;
+  margin-inline: 0;
+}
+
+/* EB: một cột, căn giữa */
+.ws-page--eb .ws-layout {
+  grid-template-columns: 1fr;
+  max-width: 720px;
+  margin-inline: auto;
+}
+
+.ws-page--eb .ws-main {
+  max-width: var(--page-max);
+}
+
+/* Panel */
+.ws-panel,
+.mk-panel {
+  padding: var(--panel-pad);
+}
+
+/* Grid thẻ — căn giữa khi ít item */
+.mk-series-grid {
+  justify-content: center;
+}
+
+.home-manga-grid {
+  justify-content: center;
+}
+
+/* Section head căn giữa khi dùng --center */
+.home-section__head--center {
+  text-align: center;
+}
+
+.home-section__head--center p {
+  margin-inline: auto;
+}
+
+/* Admin */
+.layout__content {
+  width: 100%;
+  padding: var(--page-py) var(--page-px);
+  box-sizing: border-box;
+}
+
+.layout__content > .page,
+.layout__content > .dashboard {
+  width: 100%;
+  max-width: var(--page-max);
+  margin-inline: auto;
+}
+
+.page {
+  width: 100%;
+}
+
+/* Auth */
+.auth-brand {
+  padding-inline: var(--page-px);
+}
+
+.auth-brand__inner {
+  width: 100%;
+  max-width: 480px;
+  margin-inline: auto;
+}
+
+.auth-main {
+  padding-inline: var(--page-px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 440px;
+}
+
+.auth-card--wide {
+  max-width: 520px;
+}
+
+/* Tabs */
+@media (min-width: 900px) {
+  .mk-tabs {
+    width: 100%;
+  }
+}
+
+/* Wide */
+@media (min-width: 1200px) {
+
+  .home-feature-card {
+    flex: 0 1 280px;
+  }
+
+  .mk-series-grid {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    justify-content: center;
+  }
+
+  .ws-page--mangaka .mk-layout {
+    grid-template-columns: minmax(0, 1fr) 300px;
+  }
+
+  .ws-layout:not(.ws-layout--annotate) {
+    grid-template-columns: minmax(0, 1fr) var(--layout-sidebar);
+  }
+
+  .ws-layout--assistant {
+    grid-template-columns: minmax(0, 1fr) var(--layout-sidebar);
+  }
+}
+
+@media (min-width: 1600px) {
+  :root {
+    --page-max: 1440px;
+  }
+}
+
+@media (max-width: 899px) {
+  .mk-layout,
+  .ws-layout {
+    max-width: none;
+  }
+}

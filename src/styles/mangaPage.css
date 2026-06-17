@@ -1,0 +1,111 @@
+/**
+ * Khung trang manga số — 728×1030 px (tỉ lệ B5, chuẩn đọc single-page trên Manga Plus / Shonen Jump+).
+ * Dùng chung cho upload, ghi chú, đọc chapter và thumbnail.
+ */
+
+:root {
+  --manga-page-width: 728px;
+  --manga-page-height: 1030px;
+  --manga-page-ratio: 728 / 1030;
+  --manga-page-thumb-sm: 52px;
+  --manga-page-thumb-md: 56px;
+  --manga-page-thumb-strip: 48px;
+}
+
+.manga-page {
+  position: relative;
+  box-sizing: border-box;
+  overflow: hidden;
+  background: #141210;
+}
+
+/* Trang đầy đủ — reader & canvas upload */
+.manga-page--reader,
+.manga-page--canvas {
+  width: var(--manga-page-width);
+  max-width: 100%;
+  aspect-ratio: var(--manga-page-ratio);
+  margin-inline: auto;
+}
+
+.manga-page--reader {
+  flex-shrink: 0;
+}
+
+.manga-page--reader .manga-page__media,
+.manga-page--reader .manga-page__empty {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.manga-page--canvas {
+  flex-shrink: 0;
+}
+
+/* Thumbnail trong lưới chapter */
+.manga-page--card {
+  width: 100%;
+  aspect-ratio: var(--manga-page-ratio);
+}
+
+/* Thumbnail nhỏ — danh sách chapter */
+.manga-page--thumb-sm {
+  width: var(--manga-page-thumb-sm);
+  aspect-ratio: var(--manga-page-ratio);
+  flex-shrink: 0;
+  border-radius: 6px;
+}
+
+.manga-page--thumb-md {
+  width: var(--manga-page-thumb-md);
+  aspect-ratio: var(--manga-page-ratio);
+}
+
+.manga-page--thumb-strip {
+  width: var(--manga-page-thumb-strip);
+  aspect-ratio: var(--manga-page-ratio);
+  flex-shrink: 0;
+}
+
+.manga-page__media {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center top;
+  pointer-events: none;
+}
+
+.manga-page--card .manga-page__media,
+.manga-page--thumb-sm .manga-page__media,
+.manga-page--thumb-md .manga-page__media,
+.manga-page--thumb-strip .manga-page__media {
+  object-fit: cover;
+  object-position: center center;
+}
+
+.manga-page__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-height: 120px;
+  padding: 1rem;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.manga-page__empty strong,
+.manga-page__empty > span:first-child {
+  display: block;
+  font-size: 1rem;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.75);
+  margin-bottom: 0.35rem;
+}

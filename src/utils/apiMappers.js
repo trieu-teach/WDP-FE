@@ -1,0 +1,378 @@
+import { resolveMediaUrl } from '@/api/http.js'
+import { normalizeSeries, slugifySeriesTitle } from './seriesModel.js'
+
+const API_STATUS_TO_UI = {
+  draft: 'draft',
+  pending_assistant: 'assistant',
+  pending_TE: 'review',
+  TE_revision: 'assistant',
+  pending_EB: 'review',
+  EB_revision: 'assistant',
+  assigned: 'assistant',
+  in_progress: 'assistant',
+  submitted: 'review',
+  published: 'done',
+}
+
+const UI_STATUS_TO_API = {
+  draft: 'draft',
+  assistant: 'pending_assistant',
+  review: 'pending_TE',
+  tantou: 'pending_TE',
+  done: 'published',
+}
+
+const TARGET_AUDIENCE_TO_DEMO = {
+  shonen: 'shonen',
+  shojo: 'shojo',
+  seinen: 'seinen',
+  josei: 'josei',
+  all: 'all',
+  children: 'all',
+  teen: 'teen',
+  adult: 'mature',
+}
+
+export function apiSeriesToUi(raw, index = 0) {
+  const s = raw && typeof raw === 'object' ? raw : {}
+  const id = s._id ?? s.id
+  const title = String(s.name ?? s.title ?? '').trim() || `Series ${index + 1}`
+  const genreStr = String(s.genre ?? '').trim()
+  const genres = genreStr
+    ? genreStr.split(/[,;|]/).map(g => g.trim()).filter(Boolean)
+    : (Array.isArray(s.genres) ? s.genres : [])
+
+  // author_id can be a populated object {_id, username, full_name} or a raw ObjectId string
+  const authorObj = s.author_id
+  const authorId = authorObj && typeof authorObj === 'object' ? authorObj._id : authorObj
+  const authorName = authorObj && typeof authorObj === 'object'
+    ? (authorObj.full_name ?? authorObj.username ?? 'Mangaka')
+    : (s.author_name ?? s.authorName ?? 'Mangaka')
+
+  return normalizeSeries({
+    id,
+    slug: slugifySeriesTitle(title),
+    title,
+    altTitle: s.alt_title ?? s.altTitle ?? '',
+    synopsis: String(s.synopsis ?? s.description ?? '').trim(),
+    genres,
+    demographic: TARGET_AUDIENCE_TO_DEMO[s.target_audience] ?? s.demographic ?? 'shonen',
+    format: s.format ?? 'manga',
+    language: s.language ?? 'vi',
+    contentRating: s.content_rating ?? s.contentRating ?? 'all',
+    publicationStatus: s.is_public ? 'ongoing' : (s.publication_status ?? 'preparing'),
+    publishType: s.publish_type ?? 'debut',
+    authorName,
+    authorId,
+    createdAt: s.createdAt ?? s.created_at,
+    updatedAt: s.updatedAt ?? s.updated_at,
+    coverImage: resolveMediaUrl(s.cover_image_url ?? s.coverImage ?? null),
+    chapters: s.chapter_count ?? s.chapters ?? 0,
+    marks: s.marks ?? 0,
+    status: API_STATUS_TO_UI[s.status] ?? s.status ?? 'draft',
+    updated: formatRelativeDate(s.updatedAt ?? s.updated_at),
+    progress: s.progress ?? 0,
+    metadataComplete: Boolean(String(s.synopsis ?? s.description ?? '').trim()),
+    category: String(s.category ?? '').trim(),
+    tags: Array.isArray(s.tags) ? s.tags : [],
+    age_rating: s.age_rating ?? 'All ages',
+  })
+}
+
+export function uiSeriesFormToApi(form) {
+  return {
+    name: String(form.name ?? '').trim(),
+    description: String(form.description ?? '').trim(),
+    genre: String(form.genre ?? '').trim(),
+    target_audience: String(form.target_audience ?? '').trim(),
+    synopsis: String(form.description ?? '').trim(),
+    category: String(form.category ?? '').trim(),
+    tags: Array.isArray(form.tags) ? form.tags : [],
+    age_rating: String(form.age_rating ?? 'All ages').trim(),
+  }
+}
+
+export function apiChapterToRow(chapter, seriesTitle) {
+  const c = chapter ?? {}
+  const id = c._id ?? c.id
+
+  // assistant_id can be populated object {_id, username, full_name} or raw ObjectId string
+  const assistantObj = c.assistant_id
+  const assistantId = assistantObj && typeof assistantObj === 'object' ? assistantObj._id : assistantObj
+
+  return {
+    id,
+    seriesId: c.series_id?._id ?? c.series_id ?? null,
+    series: seriesTitle ?? c.seriesName ?? c.series_name ?? '',
+    num: c.chapter_number ?? c.num ?? 0,
+    type: 'PNG',
+    pages: c.page_count ?? c.pages ?? 0,
+    status: API_STATUS_TO_UI[c.status] ?? c.status ?? 'draft',
+    date: formatRelativeDate(c.updatedAt ?? c.updated_at ?? c.createdAt),
+    statusLabel: null,
+    title: c.title ?? '',
+    assistantId,
+  }
+}
+
+export function apiChapterToAnnotator(chapter, pages = [], seriesTitle) {
+  const c = chapter ?? {}
+  const id = c._id ?? c.id
+  return {
+    id,
+    seriesId: c.series_id?._id ?? c.series_id ?? null,
+    series: seriesTitle ?? '',
+    num: c.chapter_number ?? c.num ?? 0,
+    pages: pages.map(apiPageToUi),
+    createdAt: formatRelativeDate(c.createdAt ?? c.created_at),
+    cover: null,
+  }
+}
+
+export function apiPageToUi(page, index = 0) {
+  const p = page ?? {}
+  const rawUrl =
+    p.original_image_url
+    ?? p.image_url
+    ?? p.url
+    ?? p.imageUrl
+    ?? p.result_image_url
+    ?? null
+  return {
+    id: p._id ?? p.id ?? `page-${index}`,
+    name: p.name ?? p.filename ?? `Trang ${p.page_number ?? index + 1}`,
+    url: resolveMediaUrl(rawUrl),
+    pageNumber: p.page_number ?? index + 1,
+  }
+}
+
+export function apiRankingToUi(item, index) {
+  return {
+    title: item.series_name ?? item.name ?? item.title ?? '',
+    rank: item.rank ?? index + 1,
+    delta: item.delta ?? 0,
+    reads: item.reads ?? item.total_reads ?? item.view_count ?? 0,
+    atRisk: Boolean(item.at_risk ?? item.atRisk),
+    riskReason: item.message ?? item.risk_reason ?? item.riskReason ?? '',
+    averageScore: item.average_score ?? item.averageScore ?? 0,
+    seriesId: item.series_id ?? item._id ?? null,
+  }
+}
+
+export function apiAssignmentToUi(item) {
+  const a = item ?? {}
+  const chapterId = a._id ?? a.chapter_id ?? a.id
+  return {
+    id: chapterId,
+    chapterId,
+    seriesTitle: a.series_name ?? a.seriesName ?? a.series?.name ?? '',
+    seriesId: a.series_id?._id ?? a.series_id ?? null,
+    chapterNum: a.chapter_number ?? a.chapterNum ?? 0,
+    title: a.title ?? '',
+    status: mapAssignmentStatus(a.status ?? 'assigned'),
+    pageCount: a.page_count ?? a.pages?.length ?? 0,
+    taskProgress: a.task_progress ?? a.taskProgress ?? null,
+    pages: Array.isArray(a.pages) ? a.pages.map(apiPageToUi) : [],
+  }
+}
+
+/** Body cho POST /pages/:id/notes */
+export function uiNoteToApi(note) {
+  return {
+    text: note.text ?? '',
+    x: note.x ?? 0,
+    y: note.y ?? 0,
+    w: note.w ?? 0,
+    h: note.h ?? 0,
+    taskType: note.taskType ?? 'other',
+  }
+}
+
+/** @deprecated Dùng uiNoteToApi */
+export const uiNoteToApiContent = uiNoteToApi
+
+export function apiNoteToUi(raw) {
+  const n = raw ?? {}
+  const id = n._id ?? n.id
+  const base = {
+    clientKey: id ? String(id) : undefined,
+    assignee: n.assignee ?? '',
+  }
+  if (n.text !== undefined || n.x !== undefined || n.taskType !== undefined) {
+    return {
+      ...base,
+      id,
+      text: n.text ?? '',
+      x: n.x ?? 0,
+      y: n.y ?? 0,
+      w: n.w ?? 0,
+      h: n.h ?? 0,
+      taskType: n.taskType ?? 'other',
+    }
+  }
+
+  let parsed = {}
+  try {
+    parsed = typeof n.content === 'string' ? JSON.parse(n.content) : (n.content ?? {})
+  } catch {
+    parsed = { text: n.content ?? '' }
+  }
+  return {
+    ...base,
+    id,
+    text: parsed.text ?? n.content ?? '',
+    x: parsed.x ?? 0,
+    y: parsed.y ?? 0,
+    w: parsed.w ?? 0,
+    h: parsed.h ?? 0,
+    taskType: parsed.taskType ?? 'other',
+    assignee: parsed.assignee ?? '',
+  }
+}
+
+export function uiChapterStatusToApi(status) {
+  return UI_STATUS_TO_API[status] ?? status
+}
+
+const UI_TASK_TYPE_TO_API = {
+  background: 'background',
+  shading: 'shading',
+  fx: 'effects',
+  effects: 'effects',
+  details: 'details',
+  other: 'other',
+}
+
+export function uiTaskTypeToApi(taskType) {
+  return UI_TASK_TYPE_TO_API[taskType] ?? 'other'
+}
+
+export function noteRegionToApi(note) {
+  return {
+    x: note.x ?? 0,
+    y: note.y ?? 0,
+    width: note.w ?? note.width ?? 0,
+    height: note.h ?? note.height ?? 0,
+  }
+}
+
+export function uiNoteToTaskCreate(note, { pageId, assignedTo, price }) {
+  return {
+    page_id: pageId,
+    assigned_to: assignedTo,
+    work_type: uiTaskTypeToApi(note.taskType),
+    region: noteRegionToApi(note),
+    description: note.text ?? '',
+    ...(price != null ? { price } : {}),
+  }
+}
+
+/**
+ * Tạo 1 task duy nhất cho cả chapter (flow mới: 1 task = 1 chapter).
+ * TODO backend: cập nhật `POST /tasks` để nhận `chapter_id` thay vì bắt buộc `page_id` + `region`.
+ * Hiện tại gửi kèm page_id của trang đầu + region toàn ảnh làm fallback tạm thời.
+ */
+export function uiChapterToTaskCreate({ chapterId, pageId, assignedTo, description, price, workType }) {
+  return {
+    chapter_id: chapterId,
+    page_id: pageId,
+    assigned_to: assignedTo,
+    work_type: workType ?? 'background',
+    region: { x: 0, y: 0, width: 1, height: 1 },
+    description: description ?? '',
+    ...(price != null ? { price } : {}),
+  }
+}
+
+export function apiTaskToUi(raw) {
+  const t = raw ?? {}
+  return {
+    id: t._id ?? t.id,
+    pageId: t.page_id?._id ?? t.page_id ?? null,
+    chapterId: t.chapter_id?._id ?? t.chapter_id ?? null,
+    assignedBy: t.assigned_by?._id ?? t.assigned_by ?? null,
+    assignedTo: t.assigned_to?._id ?? t.assigned_to ?? null,
+    workType: t.work_type ?? 'other',
+    region: t.region ?? null,
+    description: t.description ?? '',
+    revisionNote: t.revision_note ?? '',
+    /**
+     * Lịch sử các lần Mangaka yêu cầu chỉnh sửa.
+     * TODO backend: BE nên trả về `revision_history: [{ at, by, note, request_revision_count }]`
+     * để hiển thị timeline. Tạm thời fallback về mảng 1 phần tử từ `revision_note`.
+     */
+    revisionHistory: Array.isArray(t.revision_history)
+      ? t.revision_history.map((r) => ({
+          at: r.at ?? r.createdAt ?? r.updatedAt ?? null,
+          by: r.by ?? r.requested_by ?? null,
+          note: r.note ?? r.revision_note ?? '',
+        }))
+      : t.revision_note
+        ? [{ at: t.updatedAt ?? t.createdAt ?? null, by: t.assigned_by ?? null, note: t.revision_note }]
+        : [],
+    status: t.status ?? 'pending',
+    resultImageUrl: resolveMediaUrl(t.result_image_url ?? null),
+    /**
+     * Flow mới (1 task = 1 chapter): backend có thể trả về mảng URL
+     * nhiều trang kết quả trong `result_image_urls` hoặc zip trong `result_archive_url`.
+     */
+    resultImageUrls: Array.isArray(t.result_image_urls)
+      ? t.result_image_urls.map(resolveMediaUrl)
+      : [],
+    price: t.price ?? null,
+    createdAt: t.createdAt ?? t.created_at,
+    updatedAt: t.updatedAt ?? t.updated_at,
+  }
+}
+
+export function apiSubmissionChapterToUi(raw, index = 0) {
+  const c = raw ?? {}
+  const series = c.series_id ?? {}
+  const seriesName = typeof series === 'string' ? '' : (series.name ?? series.title ?? '')
+  return {
+    id: c._id ?? c.id,
+    seriesId: series._id ?? series.id ?? (typeof c.series_id === 'string' ? c.series_id : null),
+    seriesName,
+    status: c.status ?? '',
+    chapterNumber: c.chapter_number ?? c.num ?? index + 1,
+    createdAt: c.createdAt ?? c.created_at,
+    updatedAt: c.updatedAt ?? c.updated_at,
+  }
+}
+
+function formatRelativeDate(iso) {
+  if (!iso) return '—'
+  try {
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) return '—'
+    return d.toLocaleDateString('vi-VN')
+  } catch {
+    return '—'
+  }
+}
+
+export function mapAssignmentStatus(status) {
+  const map = {
+    draft: 'pending_assistant',
+    assigned: 'pending_assistant',
+    pending_assistant: 'pending_assistant',
+    pending_TE: 'pending_TE',
+    TE_revision: 'TE_revision',
+    pending_EB: 'pending_EB',
+    EB_revision: 'EB_revision',
+    in_progress: 'in_progress',
+    submitted: 'submitted_to_mangaka',
+    approved: 'approved',
+    revision: 'revision',
+    published: 'submitted_to_mangaka',
+  }
+  return map[status] ?? 'pending_assistant'
+}
+
+export function findSeriesByIdOrSlug(list, idOrSlug) {
+  if (!idOrSlug) return null
+  return list.find(s => String(s.id) === String(idOrSlug))
+    ?? list.find(s => s.slug === idOrSlug)
+    ?? list.find(s => slugifySeriesTitle(s.title) === idOrSlug)
+    ?? null
+}

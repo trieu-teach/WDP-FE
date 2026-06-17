@@ -1,0 +1,135 @@
+/* EB workspace — gọn, tái dụng ws-* từ Mangaka.css */
+
+.ws-page--eb {
+  --ws-accent: #2a9d8f;
+  --ws-accent-soft: rgba(42, 157, 143, 0.14);
+  --ws-accent-text: #1d6a5c;
+}
+
+.ws-hero--eb {
+  background: linear-gradient(135deg, #1a1917 0%, #143834 45%, #1a2836 100%);
+}
+
+.ws-hero--eb .ws-label {
+  color: #7ae8dc;
+}
+
+.ws-hero--eb h1 {
+  color: #fff;
+}
+
+.ws-hero--eb p {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 15px;
+}
+
+.ws-page--eb .ws-panel__head h2 {
+  font-size: 20px;
+}
+
+.ws-page--eb .ws-panel__head p {
+  font-size: 14px;
+}
+
+.eb-intro {
+  font-size: 14px;
+  color: var(--text);
+  line-height: 1.5;
+  margin-bottom: 20px;
+  padding: 14px 16px;
+  text-align: center;
+  background: color-mix(in srgb, var(--ws-accent, #2a9d8f) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--ws-accent, #2a9d8f) 28%, var(--border));
+  border-radius: 12px;
+}
+
+.eb-intro a {
+  font-weight: 600;
+  color: var(--ws-accent-text, #1d6a5c);
+}
+
+.eb-queue {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+  list-style: none;
+  margin: 0 auto;
+  padding: 0;
+  width: 100%;
+  max-width: 560px;
+}
+
+.eb-queue-item {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 14px;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  text-align: center;
+}
+
+.eb-rep-banner {
+  line-height: 1.45;
+}
+
+.eb-council-table th,
+.eb-council-table td {
+  vertical-align: middle;
+}
+
+.eb-council-table__avg td {
+  background: color-mix(in srgb, var(--ws-accent, #2a9d8f) 8%, transparent);
+}
+
+.eb-queue-item__meta strong {
+  display: block;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-h);
+  margin-bottom: 6px;
+}
+
+.eb-queue-item__sub {
+  display: block;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.eb-queue-item__btn {
+  width: 100%;
+  max-width: 280px;
+  margin: 0 auto;
+  height: 40px;
+  font-size: 14px;
+}
+
+.eb-queue-empty {
+  font-size: 15px;
+  color: var(--text);
+  padding: 32px 20px;
+  text-align: center;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+@media (min-width: 640px) {
+  .eb-queue-item {
+    flex-direction: row;
+    align-items: center;
+    text-align: left;
+  }
+
+  .eb-queue-item__btn {
+    width: auto;
+    min-width: 140px;
+    margin: 0;
+    flex-shrink: 0;
+  }
+}
