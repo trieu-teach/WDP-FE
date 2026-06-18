@@ -71,13 +71,16 @@ export function updateSession(updates) {
 
 function normalizeUser(apiUser) {
   if (!apiUser) return null
+  const fullName = apiUser.fullName ?? apiUser.full_name ?? apiUser.name
+  const username = apiUser.username ?? ''
+  const fallback = fullName || username || apiUser.email?.split('@')[0] || 'Người dùng'
   return {
-    id: apiUser.userId ?? apiUser.accountId,
-    name: apiUser.fullName ?? apiUser.name ?? '',
+    id: apiUser.userId ?? apiUser.accountId ?? apiUser._id ?? apiUser.id,
+    name: fallback,
     email: apiUser.email ?? '',
-    username: apiUser.username ?? '',
+    username,
     role: API_ROLE_TO_APP[apiUser.role] ?? apiUser.role?.toLowerCase?.() ?? apiUser.role,
-    avatarUrl: apiUser.avatarUrl ?? '',
+    avatarUrl: apiUser.avatarUrl ?? apiUser.avatar_url ?? '',
     isProMember: Boolean(apiUser.isProMember),
   }
 }

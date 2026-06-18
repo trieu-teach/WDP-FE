@@ -32,7 +32,7 @@ import {
 } from "@/utils/ebDebutStorage.js";
 import { updateSeriesEbAssessmentInWorkspace } from "@/utils/mangakaWorkspaceReader.js";
 import { listTantouSubmissions } from "@/utils/tantouWorkspaceStorage.js";
-import { placeholderPageDataUrl } from "@/utils/assistantWorkspaceStorage.js";
+import { placeholderPageDataUrl } from "@/utils/placeholderPageDataUrl.js";
 import { LABEL_EDITOR_BOARD } from "@/constants/roleTerminology.js";
 import {
   EB_COUNCIL_MEMBERS,

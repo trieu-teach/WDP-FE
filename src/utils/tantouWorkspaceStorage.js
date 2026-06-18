@@ -3,7 +3,7 @@
  */
 
 import { readEbDebutApproved, readEbDebutPending } from './ebDebutStorage.js'
-import { placeholderPageDataUrl } from './assistantWorkspaceStorage.js'
+import { placeholderPageDataUrl } from './placeholderPageDataUrl.js'
 
 export const TANTOU_SUBMISSIONS_KEY = 'mk-tantou-submissions-v1'
 export const TANTOU_SCHEDULE_KEY = 'mk-tantou-publish-schedule-v1'
