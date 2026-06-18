@@ -208,6 +208,11 @@ export function apiNoteToUi(raw) {
       w: n.w ?? 0,
       h: n.h ?? 0,
       taskType: n.taskType ?? 'other',
+      layerIndex: n.layerIndex ?? n.layer_index ?? null,
+      noteKind: n.noteKind ?? n.note_kind ?? 'paint',
+      status: n.status ?? 'open',
+      pageId: n.pageId ?? n.page_id ?? null,
+      authorRole: n.authorRole ?? n.author_role ?? null,
     }
   }
 
@@ -227,6 +232,11 @@ export function apiNoteToUi(raw) {
     h: parsed.h ?? 0,
     taskType: parsed.taskType ?? 'other',
     assignee: parsed.assignee ?? '',
+    layerIndex: parsed.layerIndex ?? parsed.layer_index ?? null,
+    noteKind: parsed.noteKind ?? parsed.note_kind ?? 'paint',
+    status: parsed.status ?? n.status ?? 'open',
+    pageId: parsed.pageId ?? parsed.page_id ?? n.pageId ?? n.page_id ?? null,
+    authorRole: parsed.authorRole ?? parsed.author_role ?? n.authorRole ?? n.author_role ?? null,
   }
 }
 

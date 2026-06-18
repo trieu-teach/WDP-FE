@@ -23,6 +23,8 @@ export function useMangakaCooperation() {
         cooperationService.getSentRequests(),
         cooperationService.getAllAssistants(),
       ])
+      console.log('[COOP] raw mangaka cooperations', coops)
+      console.log('[COOP] raw sent requests', requests)
       setRoster((Array.isArray(coops) ? coops : []).map(apiCooperationToRosterEntry))
       setSentRequests((Array.isArray(requests) ? requests : []).map(apiRequestToUi))
       setAssistants(Array.isArray(allAssistants) ? allAssistants : [])

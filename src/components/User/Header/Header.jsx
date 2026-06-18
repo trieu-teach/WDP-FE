@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { BookOpen, LogOut, Menu } from 'lucide-react'
-import { getSession, getRolePath, ROLE_LABELS } from '@/lib/auth.js'
+import { getSession, getRolePath, logout, ROLE_LABELS } from '@/lib/auth.js'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -14,11 +15,17 @@ import { NotificationBell } from '@/components/layout/NotificationBell.jsx'
 import { cn } from '@/lib/utils'
 
 export default function Header({ links = [], onLogout, className }) {
+  const navigate = useNavigate()
   const user = getSession()
   const workspacePath = user ? getRolePath(user.role) : null
 
   function handleLogoutClick() {
-    onLogout?.()
+    if (onLogout) {
+      onLogout()
+      return
+    }
+    logout()
+    navigate('/login')
   }
 
   return (
@@ -51,11 +58,11 @@ export default function Header({ links = [], onLogout, className }) {
 
         <div className="flex items-center gap-2">
           {user ? <NotificationBell /> : null}
-          {user && onLogout ? (
+          {user ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm" className="gap-2">
-                  <span className="max-w-[120px] truncate">{user.name}</span>
+                  <span className="max-w-[120px] truncate">{user.name || user.username || 'Tài khoản'}</span>
                   <Badge variant="secondary" className="hidden sm:inline-flex">
                     {ROLE_LABELS[user.role]}
                   </Badge>
@@ -74,7 +81,7 @@ export default function Header({ links = [], onLogout, className }) {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-          ) : workspacePath && !onLogout ? (
+          ) : workspacePath ? (
             <Button asChild size="sm">
               <Link to={workspacePath}>Workspace</Link>
             </Button>
