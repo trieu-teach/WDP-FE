@@ -1,7 +1,10 @@
 import { http } from './http.js'
 
 function unwrap(res) {
-  return res?.data !== undefined && res?.success !== undefined ? res.data : res
+  if (res && typeof res === 'object' && res.success !== undefined && res.data !== undefined) {
+    return unwrap(res.data)
+  }
+  return res
 }
 
 export const seriesService = {

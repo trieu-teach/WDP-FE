@@ -132,17 +132,19 @@ export function apiChapterToAnnotator(chapter, pages = [], seriesTitle) {
 export function apiPageToUi(page, index = 0) {
   const p = page ?? {}
   const rawUrl =
-    p.original_image_url
+    p.result_image_url
+    ?? p.original_image_url
     ?? p.image_url
     ?? p.url
     ?? p.imageUrl
-    ?? p.result_image_url
     ?? null
   return {
     id: p._id ?? p.id ?? `page-${index}`,
     name: p.name ?? p.filename ?? `Trang ${p.page_number ?? index + 1}`,
     url: resolveMediaUrl(rawUrl),
     pageNumber: p.page_number ?? index + 1,
+    width: p.width ?? 800,
+    height: p.height ?? 1100,
   }
 }
 
@@ -278,34 +280,72 @@ export function uiNoteToTaskCreate(note, { pageId, assignedTo, price }) {
 }
 
 /**
- * Tạo 1 task duy nhất cho cả chapter (flow mới: 1 task = 1 chapter).
- * TODO backend: cập nhật `POST /tasks` để nhận `chapter_id` thay vì bắt buộc `page_id` + `region`.
- * Hiện tại gửi kèm page_id của trang đầu + region toàn ảnh làm fallback tạm thời.
+ * Tạo 1 task duy nhất cho cả chapter (luồng mới: 1 task = 1 chapter).
+ * Gửi chapter_id thay vì page_id.
  */
-export function uiChapterToTaskCreate({ chapterId, pageId, assignedTo, description, price, workType }) {
+export function uiChapterToTaskCreate({ chapterId, assignedTo, description, price, workType }) {
   return {
     chapter_id: chapterId,
-    page_id: pageId,
     assigned_to: assignedTo,
     work_type: workType ?? 'background',
-    region: { x: 0, y: 0, width: 1, height: 1 },
     description: description ?? '',
     ...(price != null ? { price } : {}),
   }
 }
 
+/**
+ * Chuyển region (%) từ BE thành pixel coordinates.
+ * @param {object} region - { x, y, width, height } tính bằng % (0-100)
+ * @param {number} imgWidth - chiều rộng thực của ảnh (px)
+ * @param {number} imgHeight - chiều cao thực của ảnh (px)
+ * @returns {{ x: number, y: number, width: number, height: number }} pixel coords
+ */
+export function regionToPixels(region, imgWidth, imgHeight) {
+  if (!region) return { x: 0, y: 0, width: imgWidth ?? 0, height: imgHeight ?? 0 }
+  return {
+    x: Math.round((region.x ?? 0) * (imgWidth || 1) / 100),
+    y: Math.round((region.y ?? 0) * (imgHeight || 1) / 100),
+    width: Math.round((region.width ?? 100) * (imgWidth || 1) / 100),
+    height: Math.round((region.height ?? 100) * (imgHeight || 1) / 100),
+  }
+}
+
 export function apiTaskToUi(raw) {
   const t = raw ?? {}
+  const region = t.region ?? null
   return {
     id: t._id ?? t.id,
     pageId: t.page_id?._id ?? t.page_id ?? null,
     chapterId: t.chapter_id?._id ?? t.chapter_id ?? null,
+    seriesName: t.seriesName ?? t.series_name ?? t.chapter_id?.seriesName ?? t.chapter_id?.series_name ?? t.chapter_id?.series?.name ?? null,
     assignedBy: t.assigned_by?._id ?? t.assigned_by ?? null,
     assignedTo: t.assigned_to?._id ?? t.assigned_to ?? null,
     workType: t.work_type ?? 'other',
-    region: t.region ?? null,
+    /**
+     * region: BE trả { x, y, width, height } tính bằng % (0-100).
+     * Dùng regionToPixels(region, imgWidth, imgHeight) để chuyển sang pixel khi vẽ overlay.
+     */
+    region,
     description: t.description ?? '',
     revisionNote: t.revision_note ?? '',
+    /**
+     * note_ids: mảng PageNote gắn với task.
+     * BE populate đầy đủ: [{ _id, text, x, y, w, h, taskType, status, createdAt }]
+     * FE nên dùng mảng này thay vì gọi riêng GET /pages/:id/notes.
+     */
+    noteIds: Array.isArray(t.note_ids)
+      ? t.note_ids.map(n => ({
+          id: n._id ?? n.id,
+          text: n.text ?? '',
+          x: n.x ?? 0,
+          y: n.y ?? 0,
+          w: n.w ?? n.width ?? 0,
+          h: n.h ?? n.height ?? 0,
+          taskType: n.taskType ?? 'other',
+          status: n.status ?? 'open',
+          createdAt: n.createdAt ?? n.created_at ?? null,
+        }))
+      : [],
     /**
      * Lịch sử các lần Mangaka yêu cầu chỉnh sửa.
      * TODO backend: BE nên trả về `revision_history: [{ at, by, note, request_revision_count }]`

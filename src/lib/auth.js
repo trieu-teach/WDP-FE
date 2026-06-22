@@ -136,7 +136,7 @@ export async function login(usernameOrEmail, password) {
   }
 }
 
-export function buildRegisterPayload({ username, name, email, password, role }) {
+export function buildRegisterPayload({ username, name, email, password, role, phone }) {
   if (role !== ROLES.MANGAKA && role !== ROLES.ASSISTANT) {
     throw { message: 'Chỉ Mangaka và Assistant được phép đăng ký.' }
   }
@@ -145,17 +145,22 @@ export function buildRegisterPayload({ username, name, email, password, role }) 
   if (!normalizedUsername) {
     throw { message: 'Vui lòng nhập tên đăng nhập.' }
   }
-  return {
+  const payload = {
     username: normalizedUsername,
     password,
     full_name: name.trim(),
     email: normalizedEmail,
     role: APP_ROLE_TO_API[role],
   }
+  const normalizedPhone = (phone ?? '').replace(/[\s.-]/g, '').trim()
+  if (normalizedPhone) {
+    payload.phoneNumber = normalizedPhone
+  }
+  return payload
 }
 
-export async function register({ username, name, email, password, role }) {
-  const payload = buildRegisterPayload({ username, name, email, password, role })
+export async function register({ username, name, email, password, role, phone }) {
+  const payload = buildRegisterPayload({ username, name, email, password, role, phone })
   try {
     await authService.register(payload)
     return await login(payload.username, password)

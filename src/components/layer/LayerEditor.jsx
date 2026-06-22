@@ -1,14 +1,25 @@
-import { useEffect, useMemo, useState } from 'react'
-import { ArrowDownToLine, ChevronLeft, ChevronRight, FileDown, Layers as LayersIcon, Loader2, Maximize2, RefreshCw, Send } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  ArrowDownToLine,
+  ChevronLeft,
+  ChevronRight,
+  Eye,
+  EyeOff,
+  FileDown,
+  Image as ImageIcon,
+  Layers as LayersIcon,
+  Loader2,
+  Maximize2,
+  RefreshCw,
+  Send,
+  Sparkles,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Card } from '@/components/ui/card'
 import { usePageLayers } from '@/hooks/usePageLayers.js'
 import { layersService } from '@/api/layers.service.js'
-import { apiNoteToUi } from '@/utils/apiMappers.js'
+import { apiNoteToUi, apiTaskToUi } from '@/utils/apiMappers.js'
 import { chaptersService } from '@/api/chapters.service.js'
 import { getApiErrorMessage } from '@/api/http.js'
 import { cn } from '@/lib/utils'
@@ -24,26 +35,41 @@ function buildLayerNote(layers, notes) {
   return { note: blocked, layer }
 }
 
-async function urlToFile(url, filename) {
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`Không fetch được ${url}`)
-  const blob = await res.blob()
-  return new File([blob], filename, { type: blob.type || 'image/png' })
-}
+const CANVAS_W = 960
+const CANVAS_H = 1360
+const PADDING = 12
 
-export default function LayerEditor({ chapter, onSubmitted }) {
-  const pages = chapter?.pages ?? []
+export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskProp, onSubmitted, pages: pagesProp, fullscreen = false }) {
+  const chapterPages = chapter?.pages ?? []
+  const pages = pagesProp ?? chapterPages
   const [pageIdx, setPageIdx] = useState(0)
   const [submittingAll, setSubmittingAll] = useState(false)
+  const [showOriginal, setShowOriginal] = useState(true)
+  const [showRegionOverlay, setShowRegionOverlay] = useState(true)
+  const [showNoteOverlay, setShowNoteOverlay] = useState(true)
+  const [lightboxImage, setLightboxImage] = useState(null)
+  const [lightboxTitle, setLightboxTitle] = useState('')
+  // Track trang nào đã có ảnh gộp (finalized) và đã gửi cho Mangaka
+  const [finalizedPages, setFinalizedPages] = useState({})   // pageId → true
+  const [submittedPages, setSubmittedPages] = useState({})  // pageId → true
+  // Cache ảnh gộp (URL) cho từng page, để hiển thị ngay sau khi gộp
+  const [finalImagesByPage, setFinalImagesByPage] = useState({})  // pageId → url
+
+  const taskFromProp = taskProp ? (typeof taskProp === 'object' ? apiTaskToUi(taskProp) : null) : null
+  const task = chapter?._task ?? taskFromProp
+  const taskNotes = task?.noteIds ?? []
 
   const safeIdx = Math.min(Math.max(0, pageIdx), Math.max(0, pages.length - 1))
   const safePage = pages[safeIdx] ?? null
+  const activePageId = safePage?.id ?? safePage?._id ?? pageIdProp ?? null
 
-  const layersApi = usePageLayers(safePage?.id ?? null)
+  const layersApi = usePageLayers(activePageId)
   const {
     layers,
     versions,
+    originalImage,
     finalImage,
+    finalError,
     loading,
     uploading,
     finalizing,
@@ -58,28 +84,84 @@ export default function LayerEditor({ chapter, onSubmitted }) {
     refresh,
   } = layersApi
 
+  // Finalize cho trang hiện tại, đồng thời mark là đã finalize + cache URL ảnh gộp
+  const handleFinalize = useCallback(async () => {
+    if (!activePageId) return
+    try {
+      const url = await finalize()
+      setFinalizedPages(prev => ({ ...prev, [activePageId]: true }))
+      if (url) {
+        // Lưu URL ảnh gộp vào cache theo pageId
+        setFinalImagesByPage(prev => ({ ...prev, [activePageId]: url }))
+      }
+    } catch { /* finalize đã toast lỗi rồi */ }
+  }, [activePageId, finalize])
+
+  // Sync finalizedPages: nếu finalImage null → không còn đã finalize
+  useEffect(() => {
+    if (!finalImage && activePageId) {
+      setFinalizedPages(prev => {
+        const next = { ...prev }
+        delete next[activePageId]
+        return next
+      })
+    }
+    // Đồng bộ cache ảnh gộp theo pageId
+    if (activePageId) {
+      setFinalImagesByPage(prev => {
+        if (finalImage) {
+          // Có ảnh gộp mới → lưu vào cache
+          if (prev[activePageId] === finalImage) return prev
+          return { ...prev, [activePageId]: finalImage }
+        }
+        // Không có ảnh gộp → xóa khỏi cache (nếu có)
+        if (!(activePageId in prev)) return prev
+        const next = { ...prev }
+        delete next[activePageId]
+        return next
+      })
+    }
+  }, [finalImage, activePageId])
+
   const [pageNotes, setPageNotes] = useState([])
   const [notesLoading, setNotesLoading] = useState(false)
 
   async function loadNotes() {
-    if (!safePage?.id) return
+    if (taskNotes.length > 0) {
+      setPageNotes(taskNotes.map(n => ({
+        ...n,
+        clientKey: n.id ? String(n.id) : undefined,
+        status: n.status ?? 'open',
+        x: n.x ?? 0,
+        y: n.y ?? 0,
+        w: n.w ?? 0,
+        h: n.h ?? 0,
+        taskType: n.taskType ?? 'other',
+        text: n.text ?? '',
+      })))
+      return
+    }
+    if (!activePageId) return
     setNotesLoading(true)
     try {
-      const res = await chaptersService.getPageNotes(safePage.id).catch(() => [])
+      const res = await chaptersService.getPageNotes(activePageId).catch(() => [])
       setPageNotes((Array.isArray(res) ? res : []).map(apiNoteToUi))
     } finally {
       setNotesLoading(false)
     }
   }
 
-  useEffect(() => { loadNotes() }, [safePage?.id])
+  useEffect(() => { void loadNotes() }, [activePageId, taskNotes.length])
 
   const layerNoteInfo = useMemo(() => buildLayerNote(layers, pageNotes), [layers, pageNotes])
 
-  const canvasW = safePage?.width ?? 800
-  const canvasH = safePage?.height ?? 1100
+  const baseImage = safePage?.url ?? originalImage ?? null
 
   async function handleAddLayer(file) {
+    if (!activePageId) {
+      toast.error('Chưa có trang để thêm layer. Hãy chọn 1 trang trước.')
+      return
+    }
     const nextIdx = layers.length
     await addLayer({ file, index: nextIdx })
   }
@@ -92,61 +174,35 @@ export default function LayerEditor({ chapter, onSubmitted }) {
     await uploadNewVersion(layerId, { file, note })
   }
 
-  async function handleSubmitAllPages({ chapterTaskId, chapterId }) {
-    if (!chapterTaskId) {
-      toast.error('Chưa có task — chờ Mangaka gửi chapter cho bạn.')
+  /**
+   * GỬI cả chapter cho Mangaka (không gộp lại).
+   * BE tự lấy page.result_image_url (nếu đã gộp) hoặc page.original_image_url.
+   * Page nào chưa gộp → BE tự fallback về ảnh gốc.
+   */
+  async function handleSubmitChapter({ chapterTaskId, chapterId }) {
+    if (!chapterId) {
+      toast.error('Không tìm thấy chapterId — không thể gửi.')
       return
     }
-    if (!pages.length) return
     setSubmittingAll(true)
     try {
-      const files = []
-      for (let i = 0; i < pages.length; i++) {
-        const page = pages[i]
-        if (!page?.id) continue
-        toast.info(`Đang gộp trang ${i + 1}/${pages.length}…`)
-        try {
-          await layersService.finalize(page.id)
-        } catch {
-          toast.error(`Trang ${i + 1}: finalize thất bại — bỏ qua.`)
-          continue
-        }
-        await new Promise(r => window.setTimeout(r, 500))
-        try {
-          const finalRes = await layersService.getFinal(page.id)
-          const url = finalRes?.final_image_url ?? finalRes?.imageUrl ?? finalRes?.url ?? null
-          if (!url) {
-            toast.error(`Trang ${i + 1}: không có ảnh final — bỏ qua.`)
-            continue
-          }
-          const filename = `${chapter?.seriesTitle ?? 'Ch' + chapter?.chapterNum}-p${i + 1}.png`
-          const file = await urlToFile(url, filename)
-          files.push(file)
-        } catch {
-          toast.error(`Trang ${i + 1}: lỗi khi lấy ảnh final — bỏ qua.`)
-        }
-      }
-
-      if (!files.length) {
-        toast.error('Không có trang nào có ảnh final để gửi.')
-        return
-      }
-
-      toast.info(`Đang gửi ${files.length} trang cho Mangaka…`)
+      toast.info('Đang gửi chapter cho Mangaka…')
       const { tasksService } = await import('@/api/tasks.service.js')
       const { apiTaskToUi } = await import('@/utils/apiMappers.js')
-      let updated
-      if (files.length > 1) {
-        updated = await tasksService.submitChapter(chapterTaskId, files)
-      } else {
-        updated = await tasksService.submit(chapterTaskId, files[0])
-      }
-      const task = apiTaskToUi(updated)
-      toast.success(
-        `Đã gửi ${files.length} trang cho Mangaka.`,
-      )
-      onSubmitted?.(task)
+      // Không truyền files → BE tự dùng result_image_url / original_image_url
+      const updated = await tasksService.submitChapter(chapterId, null)
+      const newTask = apiTaskToUi(updated)
+      // Mark tất cả pages đã gửi
+      const submittedIds = pages.map(p => p?.id).filter(Boolean)
+      setSubmittedPages(prev => {
+        const next = { ...prev }
+        submittedIds.forEach(id => { next[id] = true })
+        return next
+      })
+      toast.success(`Đã gửi ${submittedIds.length} trang cho Mangaka.`)
+      onSubmitted?.(newTask)
     } catch (err) {
+      console.error('[handleSubmitChapter] submit failed:', err)
       toast.error(getApiErrorMessage(err, 'Gửi chapter thất bại.'))
     } finally {
       setSubmittingAll(false)
@@ -156,56 +212,167 @@ export default function LayerEditor({ chapter, onSubmitted }) {
   const baseFileName = `${chapter?.seriesTitle ?? ''}-Ch${chapter?.chapterNum ?? ''}`
 
   return (
-    <Card className="flex h-[calc(100vh-180px)] min-h-[640px] flex-col overflow-hidden p-0">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold">
-            {chapter?.seriesTitle} · Ch.{chapter?.chapterNum}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Trang {safeIdx + 1} / {pages.length} ·{' '}
-            {layers.length} layer
-          </p>
+    <div className={cn(
+      'relative flex h-full flex-col overflow-hidden rounded-2xl bg-[#0f0f1a]',
+      'border border-white/5',
+      fullscreen ? 'rounded-none border-none' : 'shadow-xl shadow-slate-900/20',
+    )}>
+      {/* ── TOPBAR ── */}
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-white/5 bg-[#0f0f1a]/95 px-4 py-2 backdrop-blur">
+        {/* Left: icon + title */}
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 text-white shadow-md shadow-violet-500/20">
+            <Sparkles className="size-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold tracking-tight text-white/90">
+              {chapter?.seriesTitle} · Ch.{chapter?.chapterNum}
+            </p>
+            <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-white/40">
+              <span>
+                <span className="font-medium text-white/60">
+                  Trang {safeIdx + 1} / {pages.length}
+                </span>
+                {pages.length > 1 && (
+                  <div className="mt-1 flex items-center gap-1">
+                    {pages.map((page, i) => {
+                      const pid = page?.id ?? page?._id ?? i
+                      const isSubmitted = !!submittedPages[pid]
+                      const isFinalized = !!finalizedPages[pid]
+                      const isCurrent = i === safeIdx
+                      return (
+                        <button
+                          key={pid}
+                          type="button"
+                          onClick={() => setPageIdx(i)}
+                          title={`Trang ${i + 1}${isSubmitted ? ' — đã gửi' : isFinalized ? ' — đã gộp' : ''}`}
+                          className={cn(
+                            'size-2 shrink-0 rounded-full transition-all',
+                            isCurrent
+                              ? 'scale-125 bg-white ring-2 ring-white/40'
+                              : isSubmitted
+                                ? 'bg-emerald-400'
+                                : isFinalized
+                                  ? 'bg-violet-400'
+                                  : 'bg-white/20 hover:bg-white/40',
+                          )}
+                        />
+                      )
+                    })}
+                  </div>
+                )}
+              </span>
+              <span className="text-white/20">·</span>
+              <span>
+                <span className="font-semibold text-violet-400">{layers.length}</span>{' '}
+                layer{layers.length !== 1 ? 's' : ''}
+              </span>
+              {finalImage && (
+                <>
+                  <span className="text-white/20">·</span>
+                  <span className="inline-flex items-center gap-1 font-medium text-emerald-400">
+                    <span className="size-1.5 animate-pulse rounded-full bg-emerald-400" />
+                    đã gộp
+                  </span>
+                </>
+              )}
+              {submittedPages[activePageId] && (
+                <>
+                  <span className="text-white/20">·</span>
+                  <span className="inline-flex items-center gap-1 font-medium text-emerald-300">
+                    ✓ đã gửi Mangaka
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-1.5">
+
+        {/* Center: page nav */}
+        <div className="flex shrink-0 items-center gap-1.5">
+          <div className="flex items-center rounded-xl border border-white/10 bg-white/5 p-0.5 backdrop-blur">
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              className="size-7 rounded-lg text-white/60 hover:bg-white/10 hover:text-white"
+              disabled={safeIdx <= 0}
+              onClick={() => setPageIdx(i => Math.max(0, i - 1))}
+              title="Trang trước"
+            >
+              <ChevronLeft className="size-4" />
+            </Button>
+            <span className="min-w-[3.5rem] px-2 text-center text-xs font-bold tabular-nums text-white/80">
+              {safeIdx + 1} / {pages.length}
+            </span>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              className="size-7 rounded-lg text-white/60 hover:bg-white/10 hover:text-white"
+              disabled={safeIdx >= pages.length - 1}
+              onClick={() => setPageIdx(i => Math.min(pages.length - 1, i + 1))}
+              title="Trang sau"
+            >
+              <ChevronRight className="size-4" />
+            </Button>
+          </div>
+
+          <div className="mx-1 h-6 w-px bg-white/10" />
+
           <Button
             size="sm"
-            variant="ghost"
-            className="h-7 px-2"
-            disabled={safeIdx <= 0}
-            onClick={() => setPageIdx(i => Math.max(0, i - 1))}
-            title="Trang trước"
+            variant={showOriginal ? 'secondary' : 'ghost'}
+            className={cn(
+              'h-8 gap-1.5 px-2.5 text-xs font-medium',
+              showOriginal
+                ? 'border border-violet-500/40 bg-violet-500/20 text-violet-300 hover:bg-violet-500/30'
+                : 'text-white/50 hover:bg-white/10 hover:text-white/80',
+            )}
+            onClick={() => setShowOriginal(v => !v)}
           >
-            <ChevronLeft className="h-4 w-4" />
+            {showOriginal ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+            Gốc
           </Button>
-          <span className="text-xs tabular-nums text-muted-foreground">
-            {safeIdx + 1} / {pages.length}
-          </span>
+
+          {task?.region && (
+            <Button
+              size="sm"
+              variant={showRegionOverlay ? 'secondary' : 'ghost'}
+              className={cn(
+                'h-8 gap-1.5 px-2.5 text-xs font-medium',
+                showRegionOverlay
+                  ? 'border border-violet-500/40 bg-violet-500/20 text-violet-300 hover:bg-violet-500/30'
+                  : 'text-white/50 hover:bg-white/10 hover:text-white/80',
+              )}
+              onClick={() => setShowRegionOverlay(v => !v)}
+            >
+              <span className="inline-block size-2 rounded-sm bg-violet-500" />
+              Vùng
+            </Button>
+          )}
+
+          {taskNotes.length > 0 && (
+            <Button
+              size="sm"
+              variant={showNoteOverlay ? 'secondary' : 'ghost'}
+              className={cn(
+                'h-8 gap-1.5 px-2.5 text-xs font-medium',
+                showNoteOverlay
+                  ? 'border border-amber-500/40 bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
+                  : 'text-white/50 hover:bg-white/10 hover:text-white/80',
+              )}
+              onClick={() => setShowNoteOverlay(v => !v)}
+            >
+              <span className="inline-block size-2 rounded-sm bg-amber-500" />
+              Note
+            </Button>
+          )}
+
+          <div className="mx-1 h-6 w-px bg-white/10" />
+
           <Button
-            size="sm"
+            size="icon-sm"
             variant="ghost"
-            className="h-7 px-2"
-            disabled={safeIdx >= pages.length - 1}
-            onClick={() => setPageIdx(i => Math.min(pages.length - 1, i + 1))}
-            title="Trang sau"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 px-2"
-            onClick={() => { refresh(); loadNotes() }}
-            disabled={loading}
-            title="Làm mới"
-          >
-            <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
-          </Button>
-          <div className="h-5 w-px bg-border" />
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 px-2 text-xs"
+            className="size-8 text-white/50 hover:bg-white/10 hover:text-white"
             onClick={() => {
               const url = safePage?.url
               if (!url) return
@@ -215,170 +382,280 @@ export default function LayerEditor({ chapter, onSubmitted }) {
               document.body.appendChild(a)
               a.click()
               document.body.removeChild(a)
-              toast.success('Đã tải ảnh gốc trang hiện tại.')
+              toast.success('Đã tải ảnh gốc.')
             }}
             disabled={!safePage?.url}
-            title="Tải ảnh gốc trang hiện tại"
+            title="Tải ảnh gốc"
           >
-            <ArrowDownToLine className="h-3.5 w-3.5" />
+            <ArrowDownToLine className="size-3.5" />
           </Button>
-          {finalImage && (
-            <a
-              href={finalImage}
-              download={`${baseFileName}-p${safeIdx + 1}-final.png`}
-              className="inline-flex"
-            >
-              <Button size="sm" variant="outline" className="h-7 px-2 text-xs">
-                <FileDown className="h-3.5 w-3.5" />
-              </Button>
-            </a>
-          )}
-        </div>
-      </div>
 
+          {finalImage && (
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              className="size-8 text-white/50 hover:bg-white/10 hover:text-white"
+              onClick={() => {
+                const a = document.createElement('a')
+                a.href = finalImage
+                a.download = `${baseFileName}-p${safeIdx + 1}-final.png`
+                document.body.appendChild(a)
+                a.click()
+                document.body.removeChild(a)
+                toast.success('Đã tải ảnh gộp.')
+              }}
+              title="Tải ảnh gộp"
+            >
+              <FileDown className="size-3.5" />
+            </Button>
+          )}
+
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            className={cn(
+              'size-8 text-white/50 hover:bg-white/10 hover:text-white',
+              loading && 'animate-spin',
+            )}
+            onClick={() => { refresh(); loadNotes() }}
+            title="Làm mới"
+          >
+            <RefreshCw className="size-4" />
+          </Button>
+
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            className="size-8 text-white/50 hover:bg-white/10 hover:text-white"
+            onClick={() => {
+              setLightboxImage(finalImage || baseImage)
+              setLightboxTitle(`Trang ${safeIdx + 1} · ${layers.length} layer`)
+            }}
+            disabled={!baseImage && !finalImage}
+            title="Phóng to ảnh"
+          >
+            <Maximize2 className="size-4" />
+          </Button>
+        </div>
+      </header>
+
+      {/* ── REVISION BANNER ── */}
       {layerNoteInfo && (
-        <Alert className="m-3 border-amber-300 bg-amber-50">
-          <AlertDescription className="flex items-start gap-2 text-xs">
-            <span className="shrink-0 font-semibold text-amber-800">
-              Mangaka yêu cầu sửa layer #{layerNoteInfo.layer.index}
-              {layerNoteInfo.layer.name ? ` (${layerNoteInfo.layer.name})` : ''}:
-            </span>
-            <span className="text-amber-700">
-              {layerNoteInfo.note.content ?? layerNoteInfo.note.text ?? '(không có nội dung)'}
-            </span>
-          </AlertDescription>
-        </Alert>
+        <div className="mx-4 mt-3 shrink-0">
+          <Alert className="border-amber-500/30 bg-amber-500/10">
+            <AlertDescription className="flex items-start gap-2 text-xs text-amber-200">
+              <span className="shrink-0 rounded-md bg-amber-500/30 px-1.5 py-0.5 font-semibold text-amber-200">
+                Sửa layer #{layerNoteInfo.layer.index}
+                {layerNoteInfo.layer.name ? ` (${layerNoteInfo.layer.name})` : ''}
+              </span>
+              <span className="text-amber-200/80">
+                {layerNoteInfo.note.content ?? layerNoteInfo.note.text ?? '(không có nội dung)'}
+              </span>
+            </AlertDescription>
+          </Alert>
+        </div>
       )}
 
-      <div className="grid flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="flex min-h-0 flex-col items-stretch justify-start overflow-auto bg-slate-100 p-4">
+      {/* ── MAIN AREA: canvas + sidebar ── */}
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        {/* Canvas side — scrollable if canvas is taller than available space */}
+        <div className="flex min-h-0 flex-1 flex-col overflow-auto bg-[#0f0f0f]">
+          {/* Lightbox trigger */}
+          {(baseImage || finalImage) && (
+            <button
+              type="button"
+              className="absolute right-4 top-4 z-20 inline-flex size-9 items-center justify-center rounded-2xl border border-white/10 bg-black/60 text-white/60 shadow-xl backdrop-blur-md transition-all hover:scale-105 hover:bg-black/80 hover:text-white"
+              style={{ top: layerNoteInfo ? '72px' : '16px' }}
+              onClick={() => {
+                setLightboxImage(finalImage || baseImage)
+                setLightboxTitle(`Trang ${safeIdx + 1} · ${layers.length} layer`)
+              }}
+              title="Phóng to"
+            >
+              <Maximize2 className="size-4" />
+            </button>
+          )}
+
+          {/* Canvas container — fills available space, canvas scales to fit */}
           <div
-            className="group/canvas relative mx-auto"
-            style={{
-              width: canvasW,
-              maxWidth: '100%',
-              aspectRatio: `${canvasW} / ${canvasH}`,
-            }}
+            className="relative flex min-h-0 flex-1 items-center justify-center overflow-auto p-3"
           >
-            {safePage?.url ? (
-              <img
-                src={safePage.url}
-                alt="Gốc"
-                className="pointer-events-none absolute inset-0 h-full w-full opacity-25"
-                style={{ objectFit: 'fill' }}
-                draggable={false}
-              />
-            ) : null}
-            <LayerCanvas
-              layers={layers}
-              width={canvasW}
-              height={canvasH}
-              mode="edit"
-              className="relative z-10 h-full w-full"
-            />
-            <div className="absolute inset-0 z-20 cursor-zoom-in opacity-0 transition-opacity group-hover/canvas:opacity-100">
-              <ImageLightbox
-                src={finalImage || safePage?.url}
-                alt={`Trang ${safeIdx + 1}`}
-                title={`Trang ${safeIdx + 1} · ${layers.length} layer`}
+            {/* Aspect-ratio box so canvas keeps 960×1360 ratio when scaled */}
+            <div
+              className="relative w-full overflow-hidden rounded-sm shadow-2xl shadow-black/60 ring-1 ring-white/10"
+              style={{ aspectRatio: `${CANVAS_W} / ${CANVAS_H}` }}
+            >
+              {/* Layer canvas — ảnh gốc được vẽ làm nền, layers xếp đè lên */}
+              <LayerCanvas
+                layers={layers}
+                width={CANVAS_W}
+                height={CANVAS_H}
+                mode="edit"
+                fullscreen={fullscreen}
+                baseImage={showOriginal ? baseImage : null}
+                className="absolute inset-0 h-full w-full"
+                region={task?.region ?? null}
+                notes={taskNotes}
+                showRegion={showRegionOverlay}
+                showNotes={showNoteOverlay}
               />
             </div>
           </div>
 
-          {finalImage && (
-            <div className="mt-4 w-full self-center rounded border border-violet-200 bg-white p-3">
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-xs font-semibold text-violet-800">
-                  Ảnh đã gộp trang {safeIdx + 1}
+          {/* Bottom toolbar */}
+          <div className="flex shrink-0 items-center justify-between gap-3 border-t border-white/5 bg-[#0f0f1a]/95 px-4 py-2 backdrop-blur">
+            <div className="flex items-center gap-3">
+              {(uploading || notesLoading || finalizing) && (
+                <div className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-medium text-white/60 backdrop-blur">
+                  <Loader2 className="h-3 w-3 animate-spin text-violet-400" />
+                  {uploading ? 'Đang upload layer…' : finalizing ? 'Đang gộp ảnh…' : 'Đang tải ghi chú…'}
+                </div>
+              )}
+              {pages.length > 1 && (
+                <span className="text-[11px] text-white/30">
+                  {pages.length} trang trong chapter
                 </span>
-                <span className="text-[10px] text-violet-500">
-                  {layers.length} layer
-                </span>
-              </div>
-              <div className="group/final relative">
-                <img
-                  src={finalImage}
-                  alt="Final"
-                  className="block h-auto w-full rounded border border-violet-100"
-                  style={{ maxHeight: '70vh', objectFit: 'contain' }}
-                />
-                <ImageLightbox
-                  src={finalImage}
-                  alt={`Final trang ${safeIdx + 1}`}
-                  title={`Ảnh gộp trang ${safeIdx + 1} · ${layers.length} layer`}
-                  trigger={
-                    <Button
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+                {layers.length > 0 && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className={cn(
+                      'h-8 gap-1.5 border px-3 text-xs font-medium',
+                      submittedPages[activePageId]
+                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20'
+                        : finalImage
+                          ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20'
+                          : 'border-violet-500/30 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20 hover:border-violet-500/50',
+                    )}
+                    onClick={handleFinalize}
+                    disabled={finalizing}
+                    title={submittedPages[activePageId] ? 'Trang đã gửi rồi' : ''}
+                  >
+                    {finalizing ? (
+                      <><Loader2 className="size-3.5 animate-spin" /> Đang gộp…</>
+                    ) : submittedPages[activePageId] ? (
+                      <><Eye className="size-3.5" /> Đã gửi</>
+                    ) : finalImage ? (
+                      <><LayersIcon className="size-3.5" /> Gộp lại</>
+                    ) : (
+                      <><LayersIcon className="size-3.5" /> Gộp layer</>
+                    )}
+                  </Button>
+                )}
+                {/* Button "Gửi Mangaka" — nộp cả chapter, BE tự dùng result_image_url đã gộp */}
+                <Button
+                  size="sm"
+                  className={cn(
+                    'h-8 gap-1.5 px-4 text-xs font-semibold shadow-lg',
+                    submittedPages[activePageId]
+                      ? 'border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 hover:border-emerald-500/50'
+                      : 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-violet-500/20 hover:from-violet-500 hover:to-indigo-500',
+                  )}
+                  disabled={submittingAll || finalizing || pages.length === 0}
+                  onClick={() => handleSubmitChapter({ chapterTaskId: chapter?._task?.id, chapterId: chapter?.chapterId })}
+                >
+                  {submittingAll ? (
+                    <><Loader2 className="size-3.5 animate-spin" /> Đang gửi {pages.length} trang…</>
+                  ) : submittedPages[activePageId] ? (
+                    <><Eye className="size-3.5" /> Đã gửi</>
+                  ) : (
+                    <><Send className="size-3.5" /> Gửi Mangaka</>
+                  )}
+                </Button>
+            </div>
+          </div>
+        </div>
+
+        {/* Sidebar */}
+        <div className="flex w-96 shrink-0 flex-col border-l border-white/5 bg-[#0f0f1a]">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            {/* Final image preview — dùng URL cache theo pageId, fallback sang finalImage */}
+            {(finalImagesByPage[activePageId] || finalImage) && (
+              <div className="border-b border-white/5 p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="flex size-6 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 text-white">
+                      <ImageIcon className="size-3" />
+                    </div>
+                    <span className="text-xs font-semibold text-white/80">Ảnh gộp</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="rounded-full border border-emerald-500/30 bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">
+                      sẵn sàng
+                    </span>
+                    <button
                       type="button"
-                      variant="secondary"
-                      size="icon-sm"
-                      className="absolute right-2 top-2 z-20 size-7 rounded-full bg-white/90 opacity-0 shadow-sm backdrop-blur transition-opacity hover:bg-white group-hover/final:opacity-100"
-                      title="Xem ảnh phóng to"
-                      aria-label="Xem ảnh phóng to"
+                      onClick={() => {
+                        setLightboxImage(finalImagesByPage[activePageId] || finalImage)
+                        setLightboxTitle(`Ảnh gộp trang ${safeIdx + 1}`)
+                      }}
+                      className="inline-flex size-6 items-center justify-center rounded-md text-white/40 transition-colors hover:bg-white/10 hover:text-white"
+                      title="Phóng to"
                     >
-                      <Maximize2 className="size-3.5" />
-                    </Button>
-                  }
-                />
+                      <Maximize2 className="size-3" />
+                    </button>
+                  </div>
+                </div>
+                <div
+                  className="group/final relative cursor-pointer overflow-hidden rounded-xl border border-white/10 bg-white/5 transition-shadow hover:shadow-lg hover:shadow-violet-500/10"
+                  onClick={() => {
+                    setLightboxImage(finalImagesByPage[activePageId] || finalImage)
+                    setLightboxTitle(`Ảnh gộp trang ${safeIdx + 1}`)
+                  }}
+                >
+                  <img
+                    src={finalImagesByPage[activePageId] || finalImage}
+                    alt="Final"
+                    className="block h-28 w-full object-contain transition-transform duration-300 group-hover/final:scale-[1.03]"
+                    style={{ background: 'rgba(255,255,255,0.03)' }}
+                  />
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors group-hover/final:bg-black/20">
+                    <div className="flex items-center gap-1 rounded-full border border-white/20 bg-black/60 px-2 py-1 text-[10px] font-medium text-white opacity-0 backdrop-blur transition-opacity group-hover/final:opacity-100">
+                      <Maximize2 className="size-3" />
+                      Xem phóng to
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {(uploading || notesLoading) && (
-            <div className="mt-2 flex items-center gap-2 text-[11px] text-slate-500">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              {uploading ? 'Đang upload…' : 'Đang tải ghi chú…'}
+            {/* Layer stack — scrollable */}
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <LayerStackPanel
+                layers={layers}
+                versions={versions}
+                loading={loading}
+                uploading={uploading}
+                finalizing={finalizing}
+                finalImage={finalImage}
+                onAddLayer={handleAddLayer}
+                onUpdateLayer={updateLayer}
+                onDeleteLayer={deleteLayer}
+                onUploadVersion={handleUploadVersion}
+                onRollback={rollback}
+                onLoadVersions={loadVersions}
+                onReorder={reorderLayers}
+                onFinalize={finalize}
+                canEdit
+                className="rounded-none border-0 bg-transparent p-3"
+              />
             </div>
-          )}
-        </div>
-
-        <div className="border-l">
-          <ScrollArea className="h-full">
-            <LayerStackPanel
-              layers={layers}
-              versions={versions}
-              loading={loading}
-              uploading={uploading}
-              finalizing={finalizing}
-              finalImage={finalImage}
-              onAddLayer={handleAddLayer}
-              onUpdateLayer={updateLayer}
-              onDeleteLayer={deleteLayer}
-              onUploadVersion={handleUploadVersion}
-              onRollback={rollback}
-              onLoadVersions={loadVersions}
-              onReorder={reorderLayers}
-              onFinalize={finalize}
-              canEdit
-              className="rounded-none border-0 bg-slate-50/60"
-            />
-          </ScrollArea>
+          </div>
         </div>
       </div>
 
-      <div className="border-t bg-muted/20 px-4 py-3">
-        <Button
-          className="w-full bg-violet-600 hover:bg-violet-700"
-          disabled={submittingAll || finalizing || pages.length === 0}
-          onClick={() => handleSubmitAllPages({ chapterTaskId: chapter?._task?.id, chapterId: chapter?.chapterId })}
-        >
-          {submittingAll ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Đang gửi {pages.length} trang…
-            </>
-          ) : (
-            <>
-              <Send className="mr-2 h-4 w-4" />
-              Gửi {pages.length} trang cho Mangaka
-            </>
-          )}
-        </Button>
-        {pages.length > 1 && (
-          <p className="mt-1 text-center text-[10px] text-muted-foreground">
-            Sẽ gộp từng trang rồi gửi cả chapter cùng lúc.
-          </p>
-        )}
-      </div>
-    </Card>
+      {/* ── LIGHTBOX ── */}
+      {lightboxImage && (
+        <ImageLightbox
+          src={lightboxImage}
+          alt={lightboxTitle}
+          title={lightboxTitle}
+          onClose={() => { setLightboxImage(null); setLightboxTitle('') }}
+        />
+      )}
+    </div>
   )
 }

@@ -1,7 +1,19 @@
 import { useRef, useState } from 'react'
-import { Eye, EyeOff, GripVertical, ImagePlus, Layers, MoreVertical, RotateCcw, Trash2, Upload, X } from 'lucide-react'
+import {
+  ChevronDown,
+  Eye,
+  EyeOff,
+  Image as ImageIcon,
+  ImagePlus,
+  Layers as LayersIcon,
+  MoreHorizontal,
+  Plus,
+  RotateCcw,
+  Trash2,
+  Upload,
+  X,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import { BLEND_MODES } from '@/utils/layersMappers.js'
@@ -21,8 +33,8 @@ function LayerThumb({ url, name }) {
   const [errored, setErrored] = useState(false)
   if (!url || errored) {
     return (
-      <div className="flex h-full w-full items-center justify-center bg-slate-100 text-slate-400">
-        <ImagePlus className="h-5 w-5" />
+      <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-white/5 to-white/10 text-white/20">
+        <ImageIcon className="h-4 w-4" />
       </div>
     )
   }
@@ -37,7 +49,43 @@ function LayerThumb({ url, name }) {
   )
 }
 
-function LayerRow({ layer, isTop, isBottom, onMoveUp, onMoveDown, onToggleVisible, onOpacity, onBlend, onUploadVersion, onDelete, onOpenVersions, onRename, onDragStart, onDragOver, onDrop, isDragOver }) {
+function RowActionButton({ children, className, title, onClick, disabled }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={cn(
+        'inline-flex size-6 items-center justify-center rounded-md text-white/40 transition-colors',
+        'hover:bg-white/10 hover:text-white',
+        'disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-white/40',
+        className,
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+function LayerRow({
+  layer,
+  isTop,
+  isBottom,
+  onMoveUp,
+  onMoveDown,
+  onToggleVisible,
+  onOpacity,
+  onBlend,
+  onUploadVersion,
+  onDelete,
+  onOpenVersions,
+  onRename,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  isDragOver,
+}) {
   const fileRef = useRef(null)
   const [menuOpen, setMenuOpen] = useState(false)
 
@@ -46,142 +94,143 @@ function LayerRow({ layer, isTop, isBottom, onMoveUp, onMoveDown, onToggleVisibl
       onDragOver={(e) => { e.preventDefault(); onDragOver?.(layer.id) }}
       onDrop={(e) => { e.preventDefault(); onDrop?.(layer.id) }}
       className={cn(
-        'group flex items-stretch gap-2 rounded-md border bg-white p-2 transition',
-        layer.visible ? 'border-slate-200' : 'border-slate-200 bg-slate-50 opacity-70',
-        isDragOver && 'ring-2 ring-violet-400',
+        'group relative overflow-hidden rounded-xl border transition-all duration-150',
+        layer.visible
+          ? 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/[0.07]'
+          : 'border-white/5 bg-white/0 opacity-50',
+        isDragOver && 'border-violet-400 ring-2 ring-violet-400/40',
       )}
     >
-      <div
-        className="flex h-14 w-14 shrink-0 cursor-grab items-center justify-center overflow-hidden rounded border border-slate-200 bg-slate-50 active:cursor-grabbing"
-        draggable
-        onDragStart={(e) => {
-          e.dataTransfer.setData('text/layer-id', layer.id)
-          e.dataTransfer.effectAllowed = 'move'
-          onDragStart?.(layer.id)
-        }}
-        title="Kéo để sắp xếp lại"
-      >
-        <LayerThumb url={layer.imageUrl} name={layer.name} />
-      </div>
-
-      <div className="flex min-w-0 flex-1 flex-col justify-between">
-        <div className="flex items-center gap-1">
-          <Badge variant="outline" className="shrink-0 border-violet-200 bg-violet-50 text-[10px] font-mono text-violet-700">
-            #{layer.index}
-          </Badge>
-          <input
-            value={layer.name || ''}
-            onChange={(e) => onRename?.(layer.id, e.target.value)}
-            placeholder={`Layer ${layer.index}`}
-            className="min-w-0 flex-1 truncate rounded border border-transparent bg-transparent px-1 text-xs font-medium text-slate-800 hover:border-slate-200 focus:border-violet-400 focus:outline-none"
-          />
-          {layer.currentVersionNo ? (
-            <span className="shrink-0 rounded bg-slate-100 px-1 py-0.5 font-mono text-[10px] text-slate-600">
-              v{layer.currentVersionNo}
-            </span>
-          ) : null}
-        </div>
-
-        <div className="flex items-center gap-1.5">
-          <input
-            type="range"
-            min={0}
-            max={100}
-            value={layer.opacity}
-            onChange={(e) => onOpacity?.(layer.id, Number(e.target.value))}
-            className="h-1 flex-1 cursor-pointer accent-violet-600"
-            title={`Opacity ${layer.opacity}%`}
-          />
-          <span className="w-7 text-right font-mono text-[10px] text-slate-500">{layer.opacity}%</span>
-        </div>
-
-        <div className="flex items-center gap-1">
-          <select
-            value={layer.blendMode}
-            onChange={(e) => onBlend?.(layer.id, e.target.value)}
-            className="h-5 flex-1 rounded border border-slate-200 bg-white px-1 text-[10px] text-slate-700 focus:border-violet-400 focus:outline-none"
-            title="Blend mode"
-          >
-            {BLEND_MODES.map((m) => (
-              <option key={m} value={m}>{BLEND_LABEL[m]}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      <div className="flex w-7 flex-col items-center justify-between gap-1">
-        <button
-          type="button"
-          onClick={() => onToggleVisible?.(layer.id)}
-          className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
-          title={layer.visible ? 'Ẩn layer' : 'Hiện layer'}
-        >
-          {layer.visible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
-        </button>
-
-        <div className="relative">
-          <button
-            type="button"
-            onClick={() => setMenuOpen((v) => !v)}
-            className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
-            title="Thêm tác vụ"
-          >
-            <MoreVertical className="h-3.5 w-3.5" />
-          </button>
-          {menuOpen && (
-            <div
-              className="absolute right-0 top-6 z-20 w-40 rounded-md border border-slate-200 bg-white py-1 shadow-lg"
-              onMouseLeave={() => setMenuOpen(false)}
-            >
-              <button
-                onClick={() => { setMenuOpen(false); fileRef.current?.click() }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-slate-50"
-              >
-                <Upload className="h-3 w-3" /> Upload version mới
-              </button>
-              <button
-                onClick={() => { setMenuOpen(false); onOpenVersions?.(layer.id) }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-slate-50"
-              >
-                <RotateCcw className="h-3 w-3" /> Lịch sử version
-              </button>
-              <button
-                onClick={() => { setMenuOpen(false); onMoveUp?.(layer.id) }}
-                disabled={isTop}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-slate-50 disabled:opacity-40"
-              >
-                ↑ Lên trên
-              </button>
-              <button
-                onClick={() => { setMenuOpen(false); onMoveDown?.(layer.id) }}
-                disabled={isBottom}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-slate-50 disabled:opacity-40"
-              >
-                ↓ Xuống dưới
-              </button>
-              <div className="my-1 border-t border-slate-100" />
-              <button
-                onClick={() => { setMenuOpen(false); onDelete?.(layer.id) }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-red-600 hover:bg-red-50"
-              >
-                <Trash2 className="h-3 w-3" /> Xóa layer
-              </button>
-            </div>
+      <div className="flex items-stretch gap-2.5 p-2.5">
+        {/* Drag handle / Thumb */}
+        <div
+          className={cn(
+            'relative flex h-14 w-14 shrink-0 cursor-grab items-center justify-center overflow-hidden rounded-lg border border-white/10 bg-white/5 shadow-inner transition-transform active:cursor-grabbing',
           )}
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.setData('text/layer-id', layer.id)
+            e.dataTransfer.effectAllowed = 'move'
+            onDragStart?.(layer.id)
+          }}
+          title="Kéo để sắp xếp lại"
+        >
+          <LayerThumb url={layer.imageUrl} name={layer.name} />
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
         </div>
-      </div>
 
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0]
-          if (file) onUploadVersion?.(layer.id, file)
-          e.target.value = ''
-        }}
-      />
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          {/* Title row */}
+          <div className="flex items-center gap-1.5">
+            <span
+              className={cn(
+                'flex size-5 shrink-0 items-center justify-center rounded-md font-mono text-[10px] font-bold',
+                'bg-gradient-to-br from-violet-500 to-indigo-600 text-white shadow-sm',
+              )}
+            >
+              {layer.index}
+            </span>
+            <input
+              value={layer.name || ''}
+              onChange={(e) => onRename?.(layer.id, e.target.value)}
+              placeholder={`Layer ${layer.index}`}
+              className="min-w-0 flex-1 truncate rounded-md border border-transparent bg-transparent px-1.5 py-0.5 text-xs font-semibold text-white/80 transition-colors hover:border-white/10 focus:border-violet-500/60 focus:bg-white/5 focus:outline-none focus:ring-1 focus:ring-violet-500/30"
+            />
+            {layer.currentVersionNo ? (
+              <span className="shrink-0 rounded-md bg-white/5 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-white/40">
+                v{layer.currentVersionNo}
+              </span>
+            ) : null}
+          </div>
+
+          {/* Opacity row */}
+          <div className="flex items-center gap-2">
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={layer.opacity}
+              onChange={(e) => onOpacity?.(layer.id, Number(e.target.value))}
+              className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-white/10 accent-violet-500 [&::-webkit-slider-thumb]:size-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gradient-to-br [&::-webkit-slider-thumb]:from-violet-400 [&::-webkit-slider-thumb]:to-indigo-500 [&::-webkit-slider-thumb]:shadow-md"
+              title={`Opacity ${layer.opacity}%`}
+            />
+            <span className="w-8 text-right font-mono text-[10px] font-semibold tabular-nums text-white/40">
+              {layer.opacity}%
+            </span>
+          </div>
+
+          {/* Blend mode */}
+          <div className="flex items-center gap-1">
+            <select
+              value={layer.blendMode}
+              onChange={(e) => onBlend?.(layer.id, e.target.value)}
+              className="h-6 flex-1 cursor-pointer rounded-md border border-white/10 bg-white/5 px-1.5 text-[10px] font-medium text-white/70 transition-colors hover:border-white/20 hover:bg-white/10 focus:border-violet-500/60 focus:bg-white/5 focus:outline-none"
+              title="Blend mode"
+            >
+              {BLEND_MODES.map((m) => (
+                <option key={m} value={m}>{BLEND_LABEL[m]}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Action buttons — own row, always visible */}
+          <div className="flex items-center gap-1">
+            <RowActionButton
+              onClick={() => onToggleVisible?.(layer.id)}
+              title={layer.visible ? 'Ẩn layer' : 'Hiện layer'}
+            >
+              {layer.visible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+            </RowActionButton>
+            <RowActionButton
+              onClick={() => onDelete?.(layer.id)}
+              title="Xóa layer"
+              className="text-red-400/50 hover:bg-red-500/10 hover:text-red-400"
+            >
+              <Trash2 className="size-3.5" />
+            </RowActionButton>
+            <div className="relative">
+              <RowActionButton
+                onClick={() => setMenuOpen((v) => !v)}
+                title="Thêm tác vụ"
+              >
+                <MoreHorizontal className="size-3.5" />
+              </RowActionButton>
+              {menuOpen && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+                  <div className="absolute left-0 top-7 z-20 w-44 overflow-hidden rounded-xl border border-white/10 bg-[#13132a] py-1 shadow-xl shadow-black/40">
+                    <button onClick={() => { setMenuOpen(false); fileRef.current?.click() }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-white/70 transition-colors hover:bg-white/5 hover:text-white">
+                      <Upload className="size-3 text-violet-400" /> Upload version mới
+                    </button>
+                    <button onClick={() => { setMenuOpen(false); onOpenVersions?.(layer.id) }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-white/70 transition-colors hover:bg-white/5 hover:text-white">
+                      <RotateCcw className="size-3 text-violet-400" /> Lịch sử version
+                    </button>
+                    <div className="my-1 border-t border-white/5" />
+                    <button onClick={() => { setMenuOpen(false); onMoveUp?.(layer.id) }} disabled={isTop} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-white/70 transition-colors hover:bg-white/5 hover:text-white disabled:opacity-30">
+                      <ChevronDown className="size-3 -rotate-90" /> Lên trên
+                    </button>
+                    <button onClick={() => { setMenuOpen(false); onMoveDown?.(layer.id) }} disabled={isBottom} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-white/70 transition-colors hover:bg-white/5 hover:text-white disabled:opacity-30">
+                      <ChevronDown className="size-3 rotate-90" /> Xuống dưới
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0]
+            if (file) onUploadVersion?.(layer.id, file)
+            e.target.value = ''
+          }}
+        />
+      </div>
     </div>
   )
 }
@@ -189,36 +238,58 @@ function LayerRow({ layer, isTop, isBottom, onMoveUp, onMoveDown, onToggleVisibl
 function VersionHistory({ layer, versions, onRollback, onClose }) {
   if (!layer) return null
   return (
-    <div className="rounded-md border border-slate-200 bg-white p-3">
+    <div className="rounded-xl border border-white/10 bg-white/5 p-3">
       <div className="mb-2 flex items-center justify-between">
-        <div className="text-xs font-semibold text-slate-700">Lịch sử version — Layer #{layer.index}</div>
-        <button onClick={onClose} className="rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
-          <X className="h-3.5 w-3.5" />
+        <div className="flex items-center gap-1.5">
+          <RotateCcw className="size-3.5 text-violet-400" />
+          <div className="text-xs font-semibold text-white/80">
+            Lịch sử version — Layer #{layer.index}
+          </div>
+        </div>
+        <button
+          onClick={onClose}
+          className="inline-flex size-6 items-center justify-center rounded-md text-white/40 transition-colors hover:bg-white/10 hover:text-white"
+        >
+          <X className="size-3.5" />
         </button>
       </div>
       <div className="space-y-1.5">
         {versions.length === 0 ? (
-          <div className="text-xs text-slate-400">Chưa có version nào.</div>
+          <div className="rounded-lg border border-dashed border-white/10 bg-white/0 py-4 text-center text-[11px] text-white/30">
+            Chưa có version nào.
+          </div>
         ) : (
           versions.map((v) => (
-            <div key={v.id} className="flex items-center gap-2 rounded border border-slate-100 bg-slate-50 p-1.5">
-              <div className="h-10 w-10 shrink-0 overflow-hidden rounded">
+            <div
+              key={v.id}
+              className="group flex items-center gap-2 rounded-lg border border-white/5 bg-white/0 p-1.5 transition-colors hover:border-violet-500/30 hover:bg-white/5"
+            >
+              <div className="h-10 w-10 shrink-0 overflow-hidden rounded-md border border-white/10 bg-white/5">
                 <LayerThumb url={v.imageUrl} name={`v${v.versionNo}`} />
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
-                  <span className="font-mono text-[10px] text-slate-600">v{v.versionNo}</span>
+                  <span className="rounded bg-violet-500/20 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-violet-300">
+                    v{v.versionNo}
+                  </span>
                   {v.uploadedAt ? (
-                    <span className="text-[10px] text-slate-400">
+                    <span className="text-[10px] text-white/40">
                       {new Date(v.uploadedAt).toLocaleString('vi-VN')}
                     </span>
                   ) : null}
                 </div>
-                {v.note && <div className="truncate text-[10px] text-slate-500">{v.note}</div>}
+                {v.note && (
+                  <div className="mt-0.5 truncate text-[10px] text-white/50">{v.note}</div>
+                )}
               </div>
               {v.versionNo !== layer.currentVersionNo && (
-                <Button size="sm" variant="outline" className="h-6 px-2 text-[10px]" onClick={() => onRollback?.(v.id)}>
-                  <RotateCcw className="mr-1 h-2.5 w-2.5" /> Rollback
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 border-white/10 bg-white/5 px-2 text-[10px] font-medium text-white/60 hover:bg-white/10 hover:text-white"
+                  onClick={() => onRollback?.(v.id)}
+                >
+                  <RotateCcw className="mr-1 size-2.5" /> Rollback
                 </Button>
               )}
             </div>
@@ -299,33 +370,56 @@ export default function LayerStackPanel({
   }
 
   return (
-    <div className={cn('flex h-full flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50/60 p-3', className)}>
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
-          <Layers className="h-4 w-4 text-violet-600" />
-          <span className="text-sm font-semibold text-slate-800">Layer</span>
-          <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">{layers.length}</Badge>
+    <div className={cn('flex h-full flex-col gap-3', className)}>
+      {/* Header */}
+      <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 p-2.5">
+        <div className="flex items-center gap-2">
+          <div className="flex size-7 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 text-white shadow-sm">
+            <LayersIcon className="size-3.5" />
+          </div>
+          <div>
+            <div className="text-sm font-semibold tracking-tight text-white/80">Layer</div>
+            <div className="text-[10px] text-white/40">{layers.length} mục</div>
+          </div>
         </div>
         {canEdit && (
-          <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => fileRef.current?.click()} disabled={uploading}>
-            <ImagePlus className="mr-1 h-3 w-3" />
-            Thêm layer
+          <Button
+            size="sm"
+            className="h-8 gap-1 bg-gradient-to-r from-violet-600 to-indigo-600 px-3 text-xs font-medium text-white shadow-sm hover:from-violet-500 hover:to-indigo-500"
+            onClick={() => fileRef.current?.click()}
+            disabled={uploading}
+          >
+            <Plus className="size-3.5" />
+            Thêm
           </Button>
         )}
         <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleAddFile} />
       </div>
 
+      {/* Layer list */}
       <ScrollArea className="flex-1 pr-1">
-        <div className="space-y-1.5 pb-2">
+        <div className="space-y-2 pb-2">
           {loading ? (
-            <div className="py-8 text-center text-xs text-slate-400">Đang tải layer…</div>
+            <div className="rounded-xl border border-white/10 bg-white/5 py-10 text-center">
+              <div className="mx-auto mb-2 size-8 animate-spin rounded-full border-2 border-white/10 border-t-violet-500" />
+              <div className="text-xs text-white/40">Đang tải layer…</div>
+            </div>
           ) : layers.length === 0 ? (
-            <div className="rounded-md border border-dashed border-slate-300 bg-white py-8 text-center">
-              <Layers className="mx-auto mb-1 h-6 w-6 text-slate-300" />
-              <div className="text-xs text-slate-500">Chưa có layer nào.</div>
+            <div className="rounded-xl border border-dashed border-white/10 bg-white/0 py-10 text-center">
+              <div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500/20 to-indigo-500/20 text-violet-400">
+                <ImagePlus className="size-6" />
+              </div>
+              <div className="text-sm font-semibold text-white/60">Chưa có layer nào</div>
+              <p className="mx-auto mt-1 max-w-[200px] text-[11px] text-white/30">
+                Upload ảnh PNG trong suốt để bắt đầu ghép.
+              </p>
               {canEdit && (
-                <button onClick={() => fileRef.current?.click()} className="mt-2 text-xs font-medium text-violet-600 hover:underline">
-                  + Upload layer đầu tiên
+                <button
+                  onClick={() => fileRef.current?.click()}
+                  className="mt-3 inline-flex items-center gap-1 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-all hover:shadow-md"
+                >
+                  <Plus className="size-3" />
+                  Upload layer đầu tiên
                 </button>
               )}
             </div>
@@ -333,7 +427,7 @@ export default function LayerStackPanel({
             reversed.map((layer) => {
               const pos = reversed.findIndex((l) => l.id === layer.id)
               return (
-                <div key={layer.id} className="space-y-1.5">
+                <div key={layer.id} className="space-y-2">
                   <LayerRow
                     layer={layer}
                     isTop={pos === 0}
@@ -367,30 +461,57 @@ export default function LayerStackPanel({
         </div>
       </ScrollArea>
 
-      <div className="rounded-md border border-violet-200 bg-violet-50/60 p-2">
-        <div className="mb-1.5 flex items-center justify-between">
-          <div className="text-xs font-semibold text-violet-800">Ảnh hoàn chỉnh</div>
+      {/* Finalize footer */}
+      <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <div className="flex size-6 items-center justify-center rounded-md bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white">
+              <ImageIcon className="size-3" />
+            </div>
+            <div className="text-xs font-semibold text-white/80">Ảnh hoàn chỉnh</div>
+          </div>
           {finalImage && (
-            <span className="text-[10px] text-violet-600">đã gộp {layers.length} layer</span>
+            <span className="rounded-full border border-emerald-500/30 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-400">
+              đã gộp
+            </span>
           )}
         </div>
         {finalImage ? (
-          <a href={finalImage} target="_blank" rel="noreferrer" className="block">
-            <img src={finalImage} alt="Final" className="h-20 w-full rounded border border-violet-200 object-contain bg-white" />
+          <a
+            href={finalImage}
+            target="_blank"
+            rel="noreferrer"
+            className="group/final block overflow-hidden rounded-lg border border-white/10 bg-white/5 transition-shadow hover:shadow-md hover:shadow-violet-500/10"
+          >
+            <img
+              src={finalImage}
+              alt="Final"
+              className="h-20 w-full object-contain transition-transform duration-300 group-hover/final:scale-[1.02]"
+            />
           </a>
         ) : (
-          <div className="rounded border border-dashed border-violet-200 bg-white py-3 text-center text-[11px] text-slate-500">
+          <div className="rounded-lg border border-dashed border-white/10 bg-white/0 py-4 text-center text-[11px] text-white/30">
             Chưa có ảnh hoàn chỉnh.
           </div>
         )}
         {canEdit && (
           <Button
             size="sm"
-            className="mt-2 h-7 w-full bg-violet-600 text-xs hover:bg-violet-700"
+            className="mt-2.5 h-8 w-full gap-1.5 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-xs font-semibold text-white shadow-sm hover:from-violet-500 hover:to-fuchsia-500"
             onClick={onFinalize}
             disabled={finalizing || layers.length === 0}
           >
-            {finalizing ? 'Đang gộp…' : 'Gộp layer & gửi Mangaka'}
+            {finalizing ? (
+              <>
+                <div className="size-3 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                Đang gộp…
+              </>
+            ) : (
+              <>
+                <LayersIcon className="size-3" />
+                Gộp layer & gửi Mangaka
+              </>
+            )}
           </Button>
         )}
       </div>

@@ -1,6 +1,7 @@
-import { Maximize2 } from 'lucide-react'
+import { Download, Maximize2, X } from 'lucide-react'
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogTitle,
   DialogTrigger,
@@ -12,7 +13,7 @@ import { cn } from '@/lib/utils'
  * Nút mở lightbox xem ảnh phóng to.
  * - `src` / `alt` là ảnh hiển thị.
  * - `title` hiển thị trên header của dialog.
- * - `trigger` tuỳ chỉnh (mặc định là nút Maximize2).
+ * - `trigger` tuỳ chỉnh (mặc định là nút Maximize2 absolute ở góc phải-trên).
  */
 export function ImageLightbox({ src, alt, title, className, trigger }) {
   if (!src) return null
@@ -26,7 +27,7 @@ export function ImageLightbox({ src, alt, title, className, trigger }) {
             variant="secondary"
             size="icon-sm"
             className={cn(
-              'absolute right-2 top-2 z-20 size-7 rounded-full bg-white/90 shadow-sm backdrop-blur hover:bg-white',
+              'size-8 rounded-full border border-slate-200/80 bg-white/90 text-slate-700 shadow-sm backdrop-blur transition-all hover:scale-105 hover:bg-white',
               className,
             )}
             title="Xem ảnh phóng to"
@@ -38,21 +39,58 @@ export function ImageLightbox({ src, alt, title, className, trigger }) {
         )}
       </DialogTrigger>
       <DialogContent
-        showCloseButton
-        className="max-w-[95vw] gap-2 border-none bg-transparent p-2 shadow-none sm:max-w-[95vw]"
+        showCloseButton={false}
+        className="max-w-[96vw] gap-0 overflow-hidden border-none bg-slate-950/95 p-0 shadow-2xl backdrop-blur sm:max-w-[96vw]"
       >
         {title ? (
-          <DialogTitle className="px-2 text-sm font-medium text-white">
-            {title}
-          </DialogTitle>
+          <DialogTitle className="sr-only">{title}</DialogTitle>
         ) : (
           <DialogTitle className="sr-only">{alt || 'Xem ảnh'}</DialogTitle>
         )}
-        <div className="flex max-h-[92vh] min-h-0 items-center justify-center overflow-auto">
+
+        <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-gradient-to-b from-slate-900/80 to-transparent px-4 py-3 text-white">
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 text-white shadow-md">
+              <Maximize2 className="size-3.5" />
+            </div>
+            <span className="truncate text-sm font-semibold tracking-tight">
+              {title || alt || 'Xem ảnh'}
+            </span>
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <a
+              href={src}
+              download
+              className="inline-flex"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                className="size-8 text-white hover:bg-white/10"
+                title="Tải ảnh"
+              >
+                <Download className="size-4" />
+              </Button>
+            </a>
+            <DialogClose asChild>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                className="size-8 text-white hover:bg-white/10"
+                title="Đóng"
+              >
+                <X className="size-4" />
+              </Button>
+            </DialogClose>
+          </div>
+        </div>
+
+        <div className="flex max-h-[88vh] min-h-0 items-center justify-center overflow-auto p-4">
           <img
             src={src}
             alt={alt || ''}
-            className="mx-auto max-h-[90vh] w-auto rounded-md object-contain shadow-2xl"
+            className="mx-auto max-h-[84vh] w-auto rounded-md object-contain shadow-2xl ring-1 ring-white/10"
             draggable={false}
           />
         </div>

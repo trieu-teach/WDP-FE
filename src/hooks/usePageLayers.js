@@ -11,21 +11,42 @@ import {
 export function usePageLayers(pageId) {
   const [layers, setLayers] = useState([])
   const [versions, setVersions] = useState({})
+  const [originalImage, setOriginalImage] = useState(null)
   const [finalImage, setFinalImage] = useState(null)
   const [finalComposedAt, setFinalComposedAt] = useState(null)
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [finalizing, setFinalizing] = useState(false)
+  const [finalError, setFinalError] = useState(null)
 
   const refresh = useCallback(async () => {
     if (!pageId) return
     setLoading(true)
     try {
-      const [list, finalRes] = await Promise.all([
-        layersService.list(pageId).catch(() => []),
+      const [listRes, finalRes] = await Promise.all([
+        layersService.list(pageId).catch(() => null),
         layersService.getFinal(pageId).catch(() => null),
       ])
-      const mapped = (Array.isArray(list) ? list : []).map(apiLayerToUi)
+
+      // /pages/:id/layers returns { page_id, original_image_url, result_image_url, layers: [...] }
+      const payload = listRes && typeof listRes === 'object' && Array.isArray(listRes.layers)
+        ? listRes
+        : null
+      const rawLayers = payload ? payload.layers : (Array.isArray(listRes) ? listRes : [])
+
+      const origUrl = payload?.original_image_url ?? payload?.result_image_url ?? null
+      setOriginalImage(origUrl)
+      if (pageId) {
+        // Debug — xem payload trả gì để biết tại sao ảnh nền không hiện.
+        console.debug('[usePageLayers]', pageId, {
+          hasPayload: !!payload,
+          keys: payload ? Object.keys(payload) : null,
+          original_image_url: origUrl,
+          layerCount: rawLayers.length,
+        })
+      }
+
+      const mapped = rawLayers.map(apiLayerToUi)
       mapped.sort((a, b) => a.index - b.index)
       setLayers(mapped)
       if (finalRes) {
@@ -211,15 +232,37 @@ export function usePageLayers(pageId) {
   const finalize = useCallback(async () => {
     if (!pageId) return null
     setFinalizing(true)
+    setFinalError(null)
     try {
       const res = await layersService.finalize(pageId)
-      const url = res?.final_image_url ?? res?.imageUrl ?? res?.url ?? null
+      console.debug('[usePageLayers.finalize] response:', res)
+      // BE trả nhiều shape: { final_image_url } | { result_image_url } | { data: { ... } } | response trực tiếp
+      const data = res?.data ?? res
+      const url =
+        data?.final_image_url ??
+        data?.result_image_url ??
+        data?.composed_image_url ??
+        data?.merged_url ??
+        data?.imageUrl ??
+        data?.url ??
+        res?.final_image_url ??
+        res?.result_image_url ??
+        res?.imageUrl ??
+        res?.url ??
+        null
+      if (!url) {
+        console.error('[usePageLayers.finalize] no url in response:', res)
+        throw new Error('BE không trả về ảnh gộp. Kiểm tra console.')
+      }
       setFinalImage(url)
-      setFinalComposedAt(res?.final_composed_at ?? res?.composedAt ?? new Date().toISOString())
+      setFinalComposedAt(data?.final_composed_at ?? data?.composedAt ?? res?.final_composed_at ?? new Date().toISOString())
       toast.success('Đã gộp layer thành ảnh hoàn chỉnh.')
       return res
     } catch (err) {
-      toast.error(getApiErrorMessage(err, 'Không gộp được layer.'))
+      const msg = getApiErrorMessage(err, 'Không gộp được layer.')
+      console.error('[usePageLayers.finalize] error:', err, 'message:', msg)
+      setFinalError(msg)
+      toast.error(msg)
       throw err
     } finally {
       setFinalizing(false)
@@ -232,7 +275,9 @@ export function usePageLayers(pageId) {
     layers,
     visibleLayers,
     versions,
+    originalImage,
     finalImage,
+    finalError,
     finalComposedAt,
     loading,
     uploading,

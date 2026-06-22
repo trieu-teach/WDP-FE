@@ -89,6 +89,16 @@ http.interceptors.response.use(
       )
     }
 
+    if (status === 401 && localStorage.getItem('token')) {
+      localStorage.removeItem('token')
+      sessionStorage.removeItem('manga_user')
+    }
+
+    // Đánh dấu lỗi 5xx để caller (vd useAssistantTasks) suppress log spam
+    if (status >= 500) {
+      err.isServerError = true
+    }
+
     return Promise.reject(err)
   },
 )

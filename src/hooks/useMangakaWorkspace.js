@@ -178,15 +178,31 @@ export function useMangakaWorkspace(user) {
     setAnnotatorChapters(prev => prev.filter(ch => ch.seriesId !== seriesId))
   }, [])
 
-  const createChapter = useCallback(async (seriesId, seriesTitle, chapterNumber, assistantId = null) => {
-    const created = await chaptersService.create({
-      series_id: seriesId,
-      chapter_number: chapterNumber,
-      title: `Chapter ${chapterNumber}`,
-      assistant_id: assistantId,
-    })
+  const createChapter = useCallback(async (seriesId, seriesTitle, chapterNumber, assistantId = null, files = []) => {
+    let created, uploadedPages
+
+    if (files.length > 0) {
+      const fd = new FormData()
+      fd.append('series_id', seriesId)
+      fd.append('chapter_number', String(chapterNumber))
+      fd.append('title', `Chapter ${chapterNumber}`)
+      if (assistantId) fd.append('assistant_id', assistantId)
+      Array.from(files).forEach(file => fd.append('pages', file))
+      const result = await chaptersService.uploadChapterWithPages(fd)
+      created = result.chapter ?? result.data ?? result
+      uploadedPages = (result.pages ?? []).map(apiPageToUi)
+    } else {
+      created = await chaptersService.create({
+        series_id: seriesId,
+        chapter_number: chapterNumber,
+        title: `Chapter ${chapterNumber}`,
+        assistant_id: assistantId,
+      })
+      uploadedPages = []
+    }
+
     const row = apiChapterToRow(created, seriesTitle)
-    const annotator = apiChapterToAnnotator(created, [], seriesTitle)
+    const annotator = apiChapterToAnnotator(created, uploadedPages, seriesTitle)
     setChapterRows(prev => [row, ...prev])
     setAnnotatorChapters(prev => [annotator, ...prev])
     setSeriesList(prev => prev.map(s =>
@@ -200,9 +216,21 @@ export function useMangakaWorkspace(user) {
     return annotator
   }, [])
 
-  const uploadChapterPages = useCallback(async (chapterId, files) => {
-    const uploaded = await chaptersService.uploadPages(chapterId, files)
-    const pageList = (Array.isArray(uploaded) ? uploaded : []).map(apiPageToUi)
+  /** Gộp tạo chapter + upload pages trong 1 request multipart. */
+  const createChapterWithPages = useCallback(
+    async (seriesId, seriesTitle, chapterNumber, assistantId = null, files = []) => {
+      return createChapter(seriesId, seriesTitle, chapterNumber, assistantId, files)
+    },
+    [createChapter],
+  )
+
+  const uploadChapterPages = useCallback(async (chapterId, files, pageNotes = []) => {
+    const uploaded = await chaptersService.uploadPages(chapterId, files, pageNotes)
+    const pageList = (Array.isArray(uploaded) ? uploaded : [uploaded])
+      .flat()
+      .filter(Boolean)
+      .map(p => (Array.isArray(p) ? p[0] : p))
+      .map(apiPageToUi)
     setAnnotatorChapters(prev => prev.map(ch => {
       if (ch.id !== chapterId) return ch
       return { ...ch, pages: [...ch.pages, ...pageList] }
@@ -212,6 +240,11 @@ export function useMangakaWorkspace(user) {
       return { ...r, pages: (r.pages ?? 0) + pageList.length, date: new Date().toLocaleDateString('vi-VN') }
     }))
     return pageList
+  }, [])
+
+  const deleteChapterPage = useCallback(async (chapterId, pageId) => {
+    if (!pageId || String(pageId).startsWith('note-')) return
+    await chaptersService.deletePage(pageId)
   }, [])
 
   const updateChapterStatus = useCallback(async (chapterId, uiStatus) => {
@@ -224,11 +257,11 @@ export function useMangakaWorkspace(user) {
 
   const assignChapter = useCallback(async (chapterId, assistantId) => {
     await chaptersService.assignAssistant(chapterId, assistantId)
-    await updateChapterStatus(chapterId, 'assistant')
+    // BE tự đổi status → pending_assistant khi tạo Task
     setChapterRows(prev => prev.map(r =>
-      r.id === chapterId ? { ...r, assistantId, status: 'assistant' } : r,
+      r.id === chapterId ? { ...r, assistantId } : r,
     ))
-  }, [updateChapterStatus])
+  }, [])
 
   const unassignChapter = useCallback(async (chapterId) => {
     await chaptersService.unassignAssistant(chapterId)
@@ -301,7 +334,9 @@ export function useMangakaWorkspace(user) {
     updateSeries,
     removeSeries,
     createChapter,
+    createChapterWithPages,
     uploadChapterPages,
+    deleteChapterPage,
     updateChapterStatus,
     assignChapter,
     unassignChapter,

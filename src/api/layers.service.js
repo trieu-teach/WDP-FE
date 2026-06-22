@@ -1,7 +1,15 @@
 import { http } from './http.js'
 
 function unwrap(res) {
-  return res?.data !== undefined && res?.success !== undefined ? res.data : res
+  if (res && typeof res === 'object' && res.success !== undefined && res.data !== undefined) {
+    return unwrap(res.data)
+  }
+  // BE trả { layer: {...} } hoặc { version: {...} }
+  if (res && typeof res === 'object') {
+    if (res.layer) return unwrap(res.layer)
+    if (res.version) return unwrap(res.version)
+  }
+  return res
 }
 
 export const layersService = {
@@ -11,7 +19,7 @@ export const layersService = {
 
   uploadLayer(pageId, { file, index, onUploadProgress }) {
     const fd = new FormData()
-    fd.append('image', file)
+    fd.append('file', file)
     if (index !== undefined && index !== null) fd.append('index', String(index))
     return http
       .post(`/chapters/pages/${pageId}/layers`, fd, {
