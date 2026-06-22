@@ -17,6 +17,9 @@ import {
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { getSession, logout } from "@/lib/auth.js";
+import { submissionsService } from "@/api/submissions.service.js";
+import { teReviewsService } from "@/api/teReviews.service.js";
+import { getApiErrorMessage, resolveMediaUrl } from "@/api/http.js";
 import {
   LABEL_EDITOR_BOARD,
   LABEL_TANTOU_EDITOR,
@@ -25,15 +28,9 @@ import {
 import { readEbDebutApproved } from "@/utils/ebDebutStorage.js";
 import {
   applyScheduleForEbApprovedSeries,
-  approveRecurringSubmission,
-  forwardSubmissionToEb,
   isSeriesEbApproved,
   listPublishSchedules,
-  listTantouSubmissions,
-  rejectSubmissionToMangaka,
-  seedTantouDemoIfEmpty,
   suggestPublishCadence,
-  updateTantouSubmission,
 } from "@/utils/tantouWorkspaceStorage.js";
 import TantouPageReview from "./TantouPageReview.jsx";
 
@@ -106,28 +103,63 @@ function SubmissionCard({ sub, onReview, onQuickApprove, showQuickApprove }) {
 export default function TantouEditor() {
   const navigate = useNavigate();
   const user = getSession();
-  const [tick, setTick] = useState(0);
+  const [submissions, setSubmissions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [tick, setTick] = useState(0);
 
   const refresh = useCallback(() => setTick((n) => n + 1), []);
 
-  useEffect(() => {
-    seedTantouDemoIfEmpty();
-    refresh();
-  }, [refresh]);
+  const loadQueue = useCallback(async () => {
+    setLoading(true);
+    try {
+      const queue = await submissionsService.getTeQueue();
+      const mapped = await Promise.all(
+        (Array.isArray(queue) ? queue : []).map(async (item) => {
+          const chapterId = String(item?._id ?? "");
+          const seriesTitle = item?.series_id?.name ?? "Series";
+          const submittedBy = item?.submitted_by ?? {};
+          let preview = null;
+          try {
+            preview = await teReviewsService.getChapterPages(chapterId, 1);
+          } catch {
+            preview = null;
+          }
+          const previewPage = preview?.page ?? null;
+          return {
+            id: chapterId,
+            chapterId,
+            seriesId: item?.series_id?._id ? String(item.series_id._id) : null,
+            seriesTitle,
+            chapterNum: String(item?.chapter_number ?? ""),
+            pageIndex: 0,
+            pageLabel: previewPage?.page_number ? `Trang ${previewPage.page_number}` : "Trang 1",
+            mangakaImageUrl: resolveMediaUrl(
+              previewPage?.result_image_url ?? previewPage?.original_image_url ?? null,
+            ),
+            mangakaName: submittedBy.full_name ?? submittedBy.username ?? "Mangaka",
+            pipeline: "debut",
+            status: "pending",
+            sentAt: item?.updatedAt ?? item?.createdAt ?? null,
+            pagesMeta: Array.isArray(preview?.pages) ? preview.pages : [],
+          };
+        }),
+      );
+      setSubmissions(mapped);
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không tải được hàng chờ Tantou."));
+      setSubmissions([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const onSync = () => refresh();
-    window.addEventListener("mk-tantou-storage", onSync);
-    window.addEventListener("mk-eb-approved-update", onSync);
-    return () => {
-      window.removeEventListener("mk-tantou-storage", onSync);
-      window.removeEventListener("mk-eb-approved-update", onSync);
-    };
-  }, [refresh]);
+    void loadQueue();
+  }, [loadQueue, tick]);
 
-  const submissions = useMemo(() => listTantouSubmissions(), [tick]);
   const schedules = useMemo(() => listPublishSchedules(), [tick]);
   const ebApproved = useMemo(() => readEbDebutApproved(), [tick]);
 
@@ -192,7 +224,78 @@ export default function TantouEditor() {
     refresh();
   }
 
-  function handleSaveReview(reviewData, options = {}) {
+  function buildSeriesReviewScores(reviewData) {
+    const ratings = reviewData?.ratings ?? {};
+    return {
+      pacing_content: Math.round(Number(ratings.pacingContent ?? 0)),
+      visual_art_writing: Math.round(Number(ratings.visualArt ?? 0)),
+      layout_storyboard: Math.round(Number(ratings.layoutStoryboard ?? 0)),
+      localization_technical: Math.round(Number(ratings.localizationTech ?? 0)),
+    };
+  }
+
+  function mapNoteTypeToErrorType(taskType) {
+    const value = String(taskType ?? "").toLowerCase();
+    if (value.includes("dialog")) return "dialogue";
+    if (value.includes("script")) return "script";
+    if (value.includes("art")) return "art";
+    if (value.includes("content")) return "content";
+    return "other";
+  }
+
+  async function syncChapterAnnotations(chapter) {
+    if (!chapter?.chapterId) return;
+    const pages = Array.isArray(chapter.pagesMeta) ? chapter.pagesMeta : [];
+    if (!pages.length) return;
+
+    await Promise.all(
+      pages.map(async (page) => {
+        const existing = await teReviewsService.getPageAnnotations(
+          chapter.chapterId,
+          page._id,
+        );
+        await Promise.all(
+          (Array.isArray(existing) ? existing : []).map((annotation) =>
+            teReviewsService.deleteAnnotation(chapter.chapterId, annotation._id),
+          ),
+        );
+      }),
+    );
+  }
+
+  async function createChapterAnnotations(chapter, editorialNotesByPage) {
+    if (!chapter?.chapterId) return;
+    const pages = Array.isArray(chapter.pagesMeta) ? chapter.pagesMeta : [];
+    if (!pages.length) return;
+
+    const notesMap = editorialNotesByPage ?? {};
+    const createJobs = [];
+
+    pages.forEach((page, pageIndex) => {
+      const notes = Array.isArray(notesMap[pageIndex]) ? notesMap[pageIndex] : [];
+      notes.forEach((note) => {
+        createJobs.push(
+          teReviewsService.createAnnotation(chapter.chapterId, {
+            page_id: page._id,
+            region: {
+              x: Number(note.x ?? 0),
+              y: Number(note.y ?? 0),
+              width: Number(note.w ?? 0),
+              height: Number(note.h ?? 0),
+            },
+            content: String(note.text ?? "").trim() || "No detail",
+            error_type: mapNoteTypeToErrorType(note.taskType),
+          }),
+        );
+      });
+    });
+
+    if (createJobs.length) {
+      await Promise.all(createJobs);
+    }
+  }
+
+  async function handleSaveReview(reviewData, options = {}) {
     if (!selected) return;
 
     const advanceNext = options.advanceNext === true;
@@ -209,36 +312,12 @@ export default function TantouEditor() {
       ? reviewData.genres
       : [];
     const nextSynopsis = String(reviewData.synopsis ?? "").trim();
+    const editorialNotesByPage = reviewData.editorialNotesByPage ?? {};
 
     if (nextStatus === "reject" && !nextText) {
       toast.error("Nhập lý do trước khi gửi Mangaka chỉnh.");
       return;
     }
-
-    const editorialNotes = Array.isArray(reviewData.editorialNotes)
-      ? reviewData.editorialNotes
-      : [];
-    const editorialNotesByPage = reviewData.editorialNotesByPage ?? undefined;
-
-    updateTantouSubmission(selected.id, {
-      seriesTitle: nextTitle,
-      mangakaName: nextAuthor,
-      mangakaImageUrl: reviewData.coverImageUrl ?? selected.mangakaImageUrl,
-      seriesMeta: {
-        ...(selected.seriesMeta ?? {}),
-        genres: nextGenres,
-        authorName: nextAuthor,
-        synopsis: nextSynopsis,
-      },
-      reviewStatus: nextStatus,
-      reviewRatings: reviewData.ratings ?? {},
-      reviewAverageScore: nextAverage,
-      reviewText: nextText,
-      editorialComment: nextText,
-      editorialNotes,
-      editorialNotesByPage,
-      reviewedAt: new Date().toISOString(),
-    });
 
     const pool = submissions.filter((s) => s.status === "pending");
     const currentIndex = pool.findIndex((s) => s.id === selected.id);
@@ -257,48 +336,55 @@ export default function TantouEditor() {
       return false;
     }
 
-    if (nextStatus === "reject") {
-      rejectSubmissionToMangaka(selected.id, {
-        editorialComment: nextText,
-        reviewNotes: reviewData.ratings ?? {},
-        editorialNotes,
-      });
-      toast.success("Đã gửi review và lý do về Mangaka.");
-      if (!maybeAdvance()) {
-        setReviewOpen(false);
-        refresh();
-      }
+    if (!selected.seriesId) {
+      toast.error("Thiếu series_id để gửi review.");
       return;
     }
 
-    if (nextStatus === "publish") {
-      if (selected.pipeline === "debut") {
-        forwardSubmissionToEb(selected.id);
-        toast.success(
-          "Đã lưu review và chuyển series lần đầu sang Editor Board.",
+    setSaving(true);
+    try {
+      const payload = {
+        scores: buildSeriesReviewScores(reviewData),
+        feedback: nextText,
+        quick_notes: nextText,
+        revision_feedback: nextStatus === "reject" ? nextText : "",
+        metadata: {
+          title: nextTitle,
+          author: nextAuthor,
+          genres: nextGenres,
+          synopsis: nextSynopsis,
+          average_score: nextAverage,
+        },
+      };
+
+      await syncChapterAnnotations(selected);
+      await createChapterAnnotations(selected, editorialNotesByPage);
+
+      if (nextStatus === "publish" || nextStatus === "reject") {
+        const result = await teReviewsService.submitSeriesReview(
+          selected.seriesId,
+          payload,
         );
+        const route = result?.auto_route;
+        if (route === "EB") {
+          toast.success("Đã chuyển series sang Editor Board.");
+        } else {
+          toast.success("Đã gửi review về Mangaka.");
+        }
       } else {
-        approveRecurringSubmission(selected.id);
-        toast.success("Đã lưu review và duyệt chapter phát hành.");
+        await teReviewsService.saveSeriesReview(selected.seriesId, payload);
+        toast.success("Đã lưu bản nháp review.");
       }
+
       if (!maybeAdvance()) {
         setReviewOpen(false);
-        refresh();
       }
-      return;
-    }
-
-    toast.success("Đã lưu bản nháp review.");
-    if (!maybeAdvance()) {
-      setReviewOpen(false);
       refresh();
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không lưu được review."));
+    } finally {
+      setSaving(false);
     }
-  }
-
-  function handleApproveRecurring(id) {
-    approveRecurringSubmission(id);
-    toast.success("Chapter đã duyệt — sẵn sàng phát hành.");
-    refresh();
   }
 
   function handleSetSchedule(title, q, p, cadence) {
@@ -356,7 +442,7 @@ export default function TantouEditor() {
               {debutQueue.length === 0 ? (
                 <Card>
                   <CardContent className="py-12 text-center text-muted-foreground">
-                    Không có series chờ duyệt.
+                    {loading ? "Đang tải hàng chờ..." : "Không có series chờ duyệt."}
                   </CardContent>
                 </Card>
               ) : (
@@ -365,7 +451,6 @@ export default function TantouEditor() {
                     key={sub.id}
                     sub={sub}
                     onReview={openReview}
-                    onQuickApprove={handleApproveRecurring}
                   />
                 ))
               )}
@@ -399,7 +484,7 @@ export default function TantouEditor() {
                     key={sub.id}
                     sub={sub}
                     onReview={openReview}
-                    onQuickApprove={handleApproveRecurring}
+                    onQuickApprove={() => {}}
                     showQuickApprove
                   />
                 ))

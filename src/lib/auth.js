@@ -10,12 +10,14 @@ export const ROLE_OPTIONS = [
 export const ROLE_LABELS = {
   [ROLES.MANGAKA]: 'Mangaka',
   [ROLES.ASSISTANT]: 'Assistant',
+  admin: 'Admin',
   editor: 'Editor',
   eb: 'Editor Board',
   reader: 'Reader',
 }
 
 const API_ROLE_TO_APP = {
+  Admin: 'admin',
   Mangaka: ROLES.MANGAKA,
   Assistant: ROLES.ASSISTANT,
   Editor: 'editor',
@@ -29,6 +31,7 @@ const APP_ROLE_TO_API = {
 }
 
 const ROLE_PATH = {
+  admin: '/admin/dashboard',
   [ROLES.MANGAKA]: '/mangaka',
   [ROLES.ASSISTANT]: '/assistant',
   editor: '/tantou',

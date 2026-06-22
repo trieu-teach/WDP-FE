@@ -34,22 +34,65 @@ import {
 import { cn } from '@/lib/utils'
 
 const STATUS_LABEL = {
-  ongoing: { label: 'Đang ra', class: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400' },
-  completed: { label: 'Hoàn thành', class: 'bg-sky-100 text-sky-700 hover:bg-sky-100 dark:bg-sky-500/15 dark:text-sky-400' },
-  hiatus: { label: 'Tạm dừng', class: 'bg-amber-100 text-amber-700 hover:bg-amber-100 dark:bg-amber-500/15 dark:text-amber-400' },
+  draft: { label: 'Nháp', class: 'bg-muted text-muted-foreground' },
+  submitted: { label: 'Đã gửi', class: 'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-400' },
+  approved: { label: 'Đã duyệt', class: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400' },
+  rejected: { label: 'Từ chối', class: 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400' },
+  published: { label: 'Đã xuất bản', class: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400' },
+  cancelled: { label: 'Đã huỷ', class: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400' },
+  ongoing: { label: 'Đang ra', class: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400' },
+  completed: { label: 'Hoàn thành', class: 'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-400' },
+  hiatus: { label: 'Tạm dừng', class: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400' },
 }
 
 const STATUS_OPTIONS = [
   { value: 'all', label: 'Tất cả trạng thái' },
-  { value: 'ongoing', label: 'Đang ra' },
-  { value: 'completed', label: 'Hoàn thành' },
-  { value: 'hiatus', label: 'Tạm dừng' },
+  { value: 'draft', label: 'Nháp' },
+  { value: 'submitted', label: 'Đã gửi' },
+  { value: 'approved', label: 'Đã duyệt' },
+  { value: 'published', label: 'Đã xuất bản' },
+  { value: 'rejected', label: 'Từ chối' },
+  { value: 'cancelled', label: 'Đã huỷ' },
 ]
+
+const SERIES_STATUS_VALUES = ['draft', 'submitted', 'approved', 'rejected', 'published', 'cancelled']
 
 function formatReads(n) {
   if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`
   if (n >= 1000) return `${(n / 1000).toFixed(1)}K`
   return n
+}
+
+function formatDate(value) {
+  if (!value) return '—'
+  try {
+    return new Date(value).toLocaleDateString('vi-VN')
+  } catch {
+    return '—'
+  }
+}
+
+function normalizeMangaDetail(raw) {
+  const d = raw?.data ?? raw ?? {}
+  const title = d.title ?? '—'
+  const tags = Array.isArray(d.tags) ? d.tags : []
+  return {
+    id: d.id,
+    title,
+    author: d.author ?? '—',
+    genre: tags,
+    status: d.status ?? 'draft',
+    chapters: Array.isArray(d.chapters) ? d.chapters.length : 0,
+    chapterList: Array.isArray(d.chapters) ? d.chapters : [],
+    reads: d.views ?? 0,
+    description: d.description ?? '',
+    category: d.category ?? '',
+    ageRating: d.age_rating ?? '',
+    createdAt: formatDate(d.createdAt),
+    updatedAt: formatDate(d.updatedAt),
+    initials: title.slice(0, 2).toUpperCase(),
+    bg: `hsl(${(title.charCodeAt(0) * 37) % 360} 55% 42%)`,
+  }
 }
 
 function MangaDialog({ manga, open, onClose, onSave }) {
@@ -58,7 +101,7 @@ function MangaDialog({ manga, open, onClose, onSave }) {
     title: '',
     author: '',
     genre: '',
-    status: 'ongoing',
+    status: 'draft',
   })
   const [saving, setSaving] = useState(false)
 
@@ -68,7 +111,7 @@ function MangaDialog({ manga, open, onClose, onSave }) {
         title: manga?.title ?? '',
         author: manga?.author ?? '',
         genre: manga?.genre?.join(', ') ?? '',
-        status: manga?.status ?? 'ongoing',
+        status: manga?.status ?? 'draft',
       })
     }
   }, [open, manga])
@@ -78,7 +121,8 @@ function MangaDialog({ manga, open, onClose, onSave }) {
   async function handleSave() {
     if (!form.title.trim()) return
     setSaving(true)
-    const payload = { ...form, genre: form.genre.split(',').map(s => s.trim()).filter(Boolean) }
+    const tags = form.genre.split(',').map(s => s.trim()).filter(Boolean)
+    const payload = { title: form.title, author: form.author, tags, status: form.status }
     await (isEdit ? api.updateManga(manga.id, payload) : api.createManga(payload))
     setSaving(false)
     onSave()
@@ -108,9 +152,9 @@ function MangaDialog({ manga, open, onClose, onSave }) {
               <Select value={form.status} onValueChange={v => set('status', v)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="ongoing">Đang ra</SelectItem>
-                  <SelectItem value="completed">Hoàn thành</SelectItem>
-                  <SelectItem value="hiatus">Tạm dừng</SelectItem>
+                  {SERIES_STATUS_VALUES.map(s => (
+                    <SelectItem key={s} value={s}>{STATUS_LABEL[s]?.label ?? s}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -133,8 +177,48 @@ function MangaDialog({ manga, open, onClose, onSave }) {
   )
 }
 
-function MangaDrawer({ manga, onClose, onEdit, onDelete }) {
-  const st = STATUS_LABEL[manga.status]
+function MangaDrawer({ mangaId, preview, onClose, onEdit, onDelete, onStatusChange }) {
+  const [detail, setDetail] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [statusSaving, setStatusSaving] = useState(false)
+
+  useEffect(() => {
+    if (!mangaId) return
+    let cancelled = false
+    setLoading(true)
+    setError('')
+    api.getMangaById(mangaId)
+      .then((data) => {
+        if (!cancelled) setDetail(normalizeMangaDetail(data))
+      })
+      .catch(() => {
+        if (!cancelled) setError('Không tải được chi tiết truyện.')
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [mangaId])
+
+  const manga = detail ?? preview ?? null
+
+  async function handleStatusChange(status) {
+    if (!mangaId) return
+    setStatusSaving(true)
+    try {
+      await api.updateSeriesStatus(mangaId, status)
+      setDetail((prev) => (prev ? { ...prev, status } : prev))
+      onStatusChange?.(mangaId, status)
+    } catch {
+      setError('Không cập nhật được trạng thái.')
+    } finally {
+      setStatusSaving(false)
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex">
       <div className="flex-1 bg-black/30 backdrop-blur-sm" onClick={onClose} />
@@ -146,48 +230,90 @@ function MangaDrawer({ manga, onClose, onEdit, onDelete }) {
           </Button>
         </div>
         <div className="flex-1 overflow-y-auto p-5">
-          <div
-            className="mb-5 flex aspect-[3/4] items-center justify-center rounded-xl text-5xl font-bold text-white shadow-lg"
-            style={{ background: manga.bg }}
-          >
-            {manga.initials}
-          </div>
-          <h2 className="mb-1 text-xl font-bold">{manga.title}</h2>
-          <p className="mb-4 text-sm text-muted-foreground">bởi {manga.author}</p>
-          <div className="mb-4 flex flex-wrap gap-1.5">
-            {manga.genre.map(g => (
-              <Badge key={g} variant="outline">{g}</Badge>
-            ))}
-          </div>
-          <div className="space-y-3 text-sm">
-            <div className="flex justify-between border-b py-2">
-              <span className="text-muted-foreground">Trạng thái</span>
-              <Badge className={st.class} variant="secondary">{st.label}</Badge>
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+              <Loader2 className="size-7 animate-spin" />
+              <p className="mt-3 text-sm">Đang tải chi tiết...</p>
             </div>
-            <div className="flex justify-between border-b py-2">
-              <span className="text-muted-foreground">Số chương</span>
-              <span className="font-medium">{manga.chapters}</span>
-            </div>
-            <div className="flex justify-between border-b py-2">
-              <span className="text-muted-foreground">Lượt đọc</span>
-              <span className="font-medium">{formatReads(manga.reads)}</span>
-            </div>
-            <div className="flex justify-between border-b py-2">
-              <span className="text-muted-foreground">Ngày tạo</span>
-              <span className="font-medium">{manga.createdAt}</span>
-            </div>
-            <div className="flex justify-between py-2">
-              <span className="text-muted-foreground">Cập nhật</span>
-              <span className="font-medium">{manga.updatedAt}</span>
-            </div>
-          </div>
+          ) : error ? (
+            <p className="py-8 text-center text-sm text-destructive">{error}</p>
+          ) : manga ? (
+            <>
+              <div
+                className="mb-5 flex aspect-[3/4] items-center justify-center rounded-xl text-5xl font-bold text-white shadow-lg"
+                style={{ background: manga.bg }}
+              >
+                {manga.initials}
+              </div>
+              <h2 className="mb-1 text-xl font-bold">{manga.title}</h2>
+              <p className="mb-4 text-sm text-muted-foreground">bởi {manga.author}</p>
+              {manga.description ? (
+                <p className="mb-4 text-sm text-muted-foreground">{manga.description}</p>
+              ) : null}
+              <div className="mb-4 flex flex-wrap gap-1.5">
+                {(manga.genre ?? []).map(g => (
+                  <Badge key={g} variant="outline">{g}</Badge>
+                ))}
+              </div>
+              <div className="space-y-3 text-sm">
+                <div className="flex justify-between border-b py-2">
+                  <span className="text-muted-foreground">Trạng thái</span>
+                  <Select
+                    value={manga.status}
+                    onValueChange={handleStatusChange}
+                    disabled={statusSaving}
+                  >
+                    <SelectTrigger className="h-8 w-40">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {SERIES_STATUS_VALUES.map(s => (
+                        <SelectItem key={s} value={s}>{STATUS_LABEL[s]?.label ?? s}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex justify-between border-b py-2">
+                  <span className="text-muted-foreground">Số chương</span>
+                  <span className="font-medium">{manga.chapters}</span>
+                </div>
+                <div className="flex justify-between border-b py-2">
+                  <span className="text-muted-foreground">Lượt đọc</span>
+                  <span className="font-medium">{formatReads(manga.reads)}</span>
+                </div>
+                {manga.category ? (
+                  <div className="flex justify-between border-b py-2">
+                    <span className="text-muted-foreground">Danh mục</span>
+                    <span className="font-medium">{manga.category}</span>
+                  </div>
+                ) : null}
+                <div className="flex justify-between border-b py-2">
+                  <span className="text-muted-foreground">Ngày tạo</span>
+                  <span className="font-medium">{manga.createdAt}</span>
+                </div>
+              </div>
+              {manga.chapterList?.length ? (
+                <div className="mt-5">
+                  <h4 className="mb-2 text-sm font-semibold">Danh sách chương</h4>
+                  <ul className="max-h-48 space-y-2 overflow-y-auto rounded-lg border p-3 text-sm">
+                    {manga.chapterList.map(ch => (
+                      <li key={ch.id} className="flex justify-between gap-2">
+                        <span className="font-medium">Ch. {ch.number ?? ch.chapter_number}</span>
+                        <span className="truncate text-muted-foreground">{ch.title || '—'}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </>
+          ) : null}
         </div>
         <div className="flex gap-2 border-t p-4">
-          <Button onClick={onEdit} className="flex-1">
+          <Button onClick={onEdit} className="flex-1" disabled={loading || !manga}>
             <Edit className="size-4" />
             Sửa
           </Button>
-          <Button variant="destructive" onClick={onDelete}>
+          <Button variant="destructive" onClick={onDelete} disabled={loading || !manga}>
             <Trash2 className="size-4" />
             Xoá
           </Button>
@@ -207,7 +333,11 @@ export default function Manga() {
   const [modal, setModal] = useState(null)
 
   useEffect(() => {
-    api.getMangaList().then(d => { setList(d); setLoading(false) })
+    api
+      .getMangaList()
+      .then((d) => setList(Array.isArray(d) ? d : []))
+      .catch(() => setList([]))
+      .finally(() => setLoading(false))
   }, [])
 
   async function handleSave() {
@@ -227,7 +357,10 @@ export default function Manga() {
 
   const filtered = list.filter(m => {
     const q = search.toLowerCase()
-    const matchSearch = !q || m.title.toLowerCase().includes(q) || m.author.toLowerCase().includes(q)
+    const matchSearch =
+      !q ||
+      (m.title ?? '').toLowerCase().includes(q) ||
+      (m.author ?? '').toLowerCase().includes(q)
     const matchStatus = statusFilter === 'all' || m.status === statusFilter
     return matchSearch && matchStatus
   })
@@ -293,7 +426,7 @@ export default function Manga() {
       ) : view === 'grid' ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {filtered.map(m => {
-            const st = STATUS_LABEL[m.status]
+            const st = STATUS_LABEL[m.status] ?? { label: m.status ?? '—', class: '' }
             return (
               <Card
                 key={m.id}
@@ -335,7 +468,7 @@ export default function Manga() {
               </thead>
               <tbody className="divide-y">
                 {filtered.map(m => {
-                  const st = STATUS_LABEL[m.status]
+                  const st = STATUS_LABEL[m.status] ?? { label: m.status ?? '—', class: '' }
                   return (
                     <tr key={m.id} className="hover:bg-muted/30">
                       <td className="px-4 py-2">
@@ -352,7 +485,7 @@ export default function Manga() {
                       </td>
                       <td className="px-4 py-2">
                         <div className="flex flex-wrap gap-1">
-                          {m.genre.slice(0, 2).map(g => (
+                          {(m.genre ?? []).slice(0, 2).map(g => (
                             <Badge key={g} variant="outline" className="text-[10px]">{g}</Badge>
                           ))}
                         </div>
@@ -393,10 +526,14 @@ export default function Manga() {
 
       {selected ? (
         <MangaDrawer
-          manga={selected}
+          mangaId={selected.id}
+          preview={selected}
           onClose={() => setSelected(null)}
           onEdit={() => { setModal(selected); setSelected(null) }}
           onDelete={() => handleDelete(selected.id)}
+          onStatusChange={(id, status) => {
+            setList((prev) => prev.map((m) => (m.id === id ? { ...m, status } : m)))
+          }}
         />
       ) : null}
 
