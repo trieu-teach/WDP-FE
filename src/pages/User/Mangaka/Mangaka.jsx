@@ -19,7 +19,9 @@ import {
   Trash2,
   TrendingUp,
   Upload,
+  User,
   UserPlus,
+  Users,
   Workflow,
 } from "lucide-react";
 import Header from "@/components/User/Header/Header.jsx";
@@ -412,7 +414,6 @@ export default function Mangaka() {
     pendingReviews,
     loading: tasksLoading,
     refresh: refreshMangakaTasks,
-    approveChapterTasks,
     requestRevision,
     acknowledgeTask,
   } = useMangakaTasks(chapterRows);
@@ -435,6 +436,90 @@ export default function Mangaka() {
   const [revisionNote, setRevisionNote] = useState("");
   const [revisionBusy, setRevisionBusy] = useState(false);
   const [ackBusy, setAckBusy] = useState(false);
+
+  // TE assignment — luồng mới
+  const [teUsers, setTeUsers] = useState([]);          // danh sách TE active
+  const [teLoading, setTeLoading] = useState(false);
+  const [teSelectorOpen, setTeSelectorOpen] = useState(false); // dialog chọn TE
+  const [selectedTeId, setSelectedTeId] = useState(null);      // TE đã chọn cho lastApprovedChapter
+  const [teAssigning, setTeAssigning] = useState(false);      // đang gán
+  const [teSending, setTeSending] = useState(false);          // đang gửi sang TE
+
+  // Load danh sách TE khi mở selector
+  useEffect(() => {
+    if (!teSelectorOpen) return;
+    let cancelled = false;
+    setTeLoading(true);
+    submissionsService.getTeUsers()
+      .then((users) => { if (!cancelled) setTeUsers(Array.isArray(users) ? users : []) })
+      .catch(() => { if (!cancelled) setTeUsers([]) })
+      .finally(() => { if (!cancelled) setTeLoading(false) });
+    return () => { cancelled = true; };
+  }, [teSelectorOpen]);
+
+  /**
+   * Gán TE cho chapter rồi gửi sang TE.
+   * Bước 1: PATCH assign-te
+   * Bước 2: POST submit-to-te
+   *
+   * @param {string|null} teId  — TE được chọn trong dialog
+   */
+  async function handleAssignTeAndSend(teId) {
+    const chapter = lastApprovedChapter ?? pendingCompositeReview
+    if (!chapter) return
+    const chapterId = chapter.id
+    setTeAssigning(true)
+
+    // Bước 0: nếu chapter vẫn ở submitted_by_assistant thì approve trước
+    // (PATCH /approve chỉ chấp nhận draft | pending_assistant | TE_revision | review | submitted_by_assistant)
+    if (chapter.status === 'submitted_by_assistant') {
+      try {
+        await submissionsService.approveChapter(chapterId)
+        chapter.status = 'review'
+      } catch (err) {
+        toast.error(getApiErrorMessage(err, 'Duyệt chapter thất bại.'))
+        setTeAssigning(false)
+        return
+      }
+    }
+
+    try {
+      await submissionsService.assignTe(chapterId, teId)
+      setSelectedTeId(teId)
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Gán TE thất bại.'))
+      setTeAssigning(false)
+      return
+    }
+    setTeAssigning(false);
+
+    // Gửi sang TE
+    setTeSending(true);
+    try {
+      await submissionsService.submitChapterToTe(chapterId);
+      toast.success(
+        `Đã gửi Ch. ${chapter.num} sang ${LABEL_TANTOU_EDITOR}.`,
+      );
+      setTeSelectorOpen(false);
+      setLastApprovedChapter(null);
+      await refreshMangakaTasks();
+      await refreshWorkspace();
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, `Gửi sang ${LABEL_TANTOU_EDITOR} thất bại.`));
+    } finally {
+      setTeSending(false);
+    }
+  }
+
+  async function handleRemoveTe(chapterId) {
+    try {
+      await submissionsService.removeTe(chapterId);
+      toast.success('Đã gỡ TE khỏi chapter.');
+      await refreshMangakaTasks();
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Gỡ TE thất bại.'));
+    }
+  }
 
   const statValues = useMemo(() => {
     const pendingAssistant = chapterRows.filter(
@@ -521,15 +606,13 @@ export default function Mangaka() {
 
   async function handleCardApprove(row, review) {
     if (!review?.submission?.id && !row?.id) return;
-    try {
-      await approveChapterTasks([review]);
-      await updateChapterStatus(row.id, "done");
-      toast.success(`Đã chấp nhận chapter ${row.num} — ${row.series}.`);
-      await refreshMangakaTasks();
-      await refreshWorkspace();
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, "Chấp nhận chapter thất bại."));
+    // Đảm bảo row có status API để handleAssignTeAndSend biết có cần approve hay không
+    if (!row.status && review?.submission?.status) {
+      row.status = review.submission.status
     }
+    setLastApprovedChapter(row);
+    setSelectedTeId(null);
+    setTeSelectorOpen(true);
   }
 
   async function handleCardSendBack() {
@@ -812,19 +895,13 @@ export default function Mangaka() {
 
   async function handleApproveChapter() {
     if (!pendingReview?.chapter) return;
-    try {
-      await approveChapterTasks([pendingReview]);
-      await updateChapterStatus(pendingReview.chapter.id, "done");
-      const approvedChapter = pendingReview.chapter;
-      setLastApprovedChapter(approvedChapter);
-      toast.success(
-        `Đã phê duyệt chapter ${approvedChapter.num} — ${approvedChapter.series}.`,
-      );
-      await refreshMangakaTasks();
-      await refreshWorkspace();
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, "Phê duyệt chapter thất bại."));
+    const row = pendingReview.chapter;
+    if (!row.status && pendingReview.submission?.status) {
+      row.status = pendingReview.submission.status;
     }
+    setLastApprovedChapter(row);
+    setSelectedTeId(null);
+    setTeSelectorOpen(true);
   }
 
   async function handleAcknowledgeTask() {
@@ -1522,6 +1599,37 @@ export default function Mangaka() {
                     </p>
                   ) : null}
 
+                  {/* TE info — nếu đã gán TE trong submission */}
+                  {pendingReview?.submission?.te_id ? (
+                    <div className="flex items-center gap-2 rounded-lg border border-sky-200/60 bg-sky-50/40 px-3 py-2 dark:border-sky-500/20 dark:bg-sky-500/5">
+                      <User className="size-3.5 shrink-0 text-sky-600 dark:text-sky-400" />
+                      <span className="text-xs text-sky-700 dark:text-sky-300">
+                        TE đã gán
+                      </span>
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        className="ml-auto h-5 px-1.5 text-[10px] text-muted-foreground hover:text-destructive"
+                        onClick={() => void handleRemoveTe(pendingCompositeReview.id)}
+                      >
+                        Gỡ
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => {
+                        setSelectedTeId(null)
+                        setTeSelectorOpen(true)
+                      }}
+                    >
+                      <Users className="size-3.5" />
+                      Chọn {LABEL_TANTOU_EDITOR} và gửi
+                    </Button>
+                  )}
+
                   {pendingChapterView?.revisionHistory?.length ? (
                     <div className="rounded-lg border border-amber-200/70 bg-amber-50/40 p-3 text-xs dark:border-amber-500/20 dark:bg-amber-500/5">
                       <p className="mb-1.5 font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-400">
@@ -1599,7 +1707,7 @@ export default function Mangaka() {
                       Đã duyệt chapter {lastApprovedChapter.num} — {lastApprovedChapter.series}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      Gửi sang {LABEL_TANTOU_EDITOR} để hoàn tất pipeline.
+                      Chọn {LABEL_TANTOU_EDITOR} rồi gửi để hoàn tất pipeline.
                     </p>
                   </div>
                   <div className="flex gap-2">
@@ -1613,15 +1721,13 @@ export default function Mangaka() {
                     <Button
                       size="sm"
                       onClick={() => {
-                        handleSendToTantou({
-                          chapter: lastApprovedChapter,
-                          pageIndex: 0,
-                        })
-                        setLastApprovedChapter(null)
+                        // Lưu chapter đang chờ để gán TE
+                        setSelectedTeId(null)
+                        setTeSelectorOpen(true)
                       }}
                     >
-                      <Send className="size-3.5" />
-                      Gửi {LABEL_TANTOU_EDITOR} ngay
+                      <Users className="size-3.5" />
+                      Chọn {LABEL_TANTOU_EDITOR}
                     </Button>
                   </div>
                 </CardContent>
@@ -1819,6 +1925,80 @@ export default function Mangaka() {
             >
               <Send className="size-3.5" />
               {cardRevision?.busy ? "Đang gửi..." : "Gửi lại cho Assistant"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* TE Selector Dialog — luồng mới */}
+      <Dialog open={teSelectorOpen} onOpenChange={setTeSelectorOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Users className="size-4" />
+              Chọn {LABEL_TANTOU_EDITOR}
+            </DialogTitle>
+            <DialogDescription>
+              {lastApprovedChapter
+                ? `Gán TE cho Ch. ${lastApprovedChapter.num} — ${lastApprovedChapter.series} rồi gửi sang duyệt.`
+                : 'Chọn TE để gán cho chapter này.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          {teLoading ? (
+            <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
+              <span>Đang tải danh sách TE...</span>
+            </div>
+          ) : teUsers.length === 0 ? (
+            <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+              <Users className="mx-auto mb-2 size-8 opacity-30" />
+              <p>Không tìm thấy TE nào đang active.</p>
+              <p className="mt-1 text-xs">
+                Vui lòng liên hệ admin để thêm TE vào hệ thống.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-[300px] overflow-y-auto">
+              {teUsers.map((te) => (
+                <button
+                  key={te._id}
+                  className={cn(
+                    "w-full flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors",
+                    "hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+                    selectedTeId === te._id
+                      ? "border-primary bg-primary/5"
+                      : "border-transparent bg-muted/30",
+                  )}
+                  onClick={() => setSelectedTeId(te._id)}
+                >
+                  <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold">
+                    {(te.full_name || te.username || 'TE')[0].toUpperCase()}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium">
+                      {te.full_name || te.username || 'TE'}
+                    </p>
+                    {te.email ? (
+                      <p className="truncate text-xs text-muted-foreground">{te.email}</p>
+                    ) : null}
+                  </div>
+                  {selectedTeId === te._id ? (
+                    <CheckCircle2 className="size-4 shrink-0 text-primary" />
+                  ) : null}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTeSelectorOpen(false)} disabled={teAssigning || teSending}>
+              Huỷ
+            </Button>
+            <Button
+              disabled={!selectedTeId || teAssigning || teSending || teLoading}
+              onClick={() => void handleAssignTeAndSend(selectedTeId)}
+            >
+              {teAssigning ? 'Đang gán TE...' : teSending ? 'Đang gửi...' : 'Gán và gửi sang TE'}
             </Button>
           </DialogFooter>
         </DialogContent>

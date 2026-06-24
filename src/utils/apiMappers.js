@@ -138,11 +138,14 @@ export function apiPageToUi(page, index = 0) {
     ?? p.url
     ?? p.imageUrl
     ?? null
+  const pageNum = p.page_number ?? index + 1
   return {
-    id: p._id ?? p.id ?? `page-${index}`,
-    name: p.name ?? p.filename ?? `Trang ${p.page_number ?? index + 1}`,
+    // Ưu tiên _id từ BE. Nếu BE tạo page trong 1 request mà không trả _id,
+    // dùng page_number (số thứ tự trang) — đây là giá trị ổn định thay vì `page-${index}`.
+    id: p._id ?? p.id ?? (p.page_number != null ? String(p.page_number) : `page-${index}`),
+    name: p.name ?? p.filename ?? `Trang ${pageNum}`,
     url: resolveMediaUrl(rawUrl),
-    pageNumber: p.page_number ?? index + 1,
+    pageNumber: pageNum,
     width: p.width ?? 800,
     height: p.height ?? 1100,
   }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
+  AlertTriangle,
   CheckCircle2,
   Clock,
   DollarSign,
@@ -42,10 +43,10 @@ import LayerEditor from '@/components/layer/LayerEditor.jsx'
 const NAV_LINKS = [{ to: '/', label: 'Trang chủ' }]
 
 const STATS = [
-  { label: 'Chapter nhận', icon: Inbox, color: 'sky' },
+  { label: 'Đã nhận', icon: Inbox, color: 'amber' },
   { label: 'Đang làm', icon: LayersIcon, color: 'violet' },
-  { label: 'Chờ duyệt', icon: Clock, color: 'amber' },
-  { label: 'Đã duyệt', icon: CheckCircle2, color: 'emerald' },
+  { label: 'Đã gửi', icon: Clock, color: 'sky' },
+  { label: 'Đã xong', icon: CheckCircle2, color: 'emerald' },
   { label: 'Thu nhập tháng', icon: DollarSign, color: 'rose' },
 ]
 
@@ -200,6 +201,13 @@ export default function Assistant() {
     return list.filter(a => a._task?.status === taskFilter)
   }, [assignments, chapterTaskMap, taskFilter])
 
+  const listForCount = useMemo(() => {
+    return (assignments ?? []).map(a => ({
+      ...a,
+      _task: chapterTaskMap[String(a.chapterId)] ?? null,
+    }))
+  }, [assignments, chapterTaskMap])
+
   const statsDisplayed = useMemo(() => {
     const byChapter = {}
     for (const t of allTasks) {
@@ -212,13 +220,13 @@ export default function Assistant() {
     const review = chapterList.filter(t => t.status === 'submitted').length
     const approved = chapterList.filter(t => t.status === 'approved').length
     return [
-      { ...STATS[0], value: String(chapterList.length || assignments.length) },
-      { ...STATS[1], value: String(progress || (selectedChapter ? 1 : 0)) },
+      { ...STATS[0], value: String(pending) },
+      { ...STATS[1], value: String(progress) },
       { ...STATS[2], value: String(review) },
       { ...STATS[3], value: String(approved) },
       { ...STATS[4], value: formatEarnings(taskStats?.earningsThisMonth) },
     ]
-  }, [allTasks, assignments.length, selectedChapter, taskStats])
+  }, [allTasks, taskStats])
 
   function handleLogout() {
     logout()
@@ -281,6 +289,36 @@ export default function Assistant() {
       </WorkspaceHero>
 
       <main className="page-container flex-1 py-8">
+        {/* Revision alert banner — chapters bị Mangaka từ chối */}
+        {(() => {
+          const revisionAssignments = (assignments ?? []).filter(a => {
+            const task = chapterTaskMap[String(a.chapterId)]
+            return task?.status === 'revision'
+          })
+          if (revisionAssignments.length === 0) return null
+          return (
+            <div className="mb-6 flex items-center gap-3 rounded-xl border border-red-300 bg-red-50 px-4 py-3 dark:border-red-500/30 dark:bg-red-500/10">
+              <AlertTriangle className="size-5 shrink-0 text-red-500" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-red-700 dark:text-red-400">
+                  {revisionAssignments.length} chapter bị từ chối — cần sửa lại
+                </p>
+                <p className="text-xs text-red-600/80 dark:text-red-400/70">
+                  Chọn chapter trong danh sách bên trái, xem ghi chú ở dưới editor, và upload layer sửa lại.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="shrink-0 border-red-300 text-red-600 hover:bg-red-100 dark:border-red-500/40 dark:text-red-400 dark:hover:bg-red-500/20"
+                onClick={() => setTaskFilter('revision')}
+              >
+                Xem ngay
+              </Button>
+            </div>
+          )
+        })()}
+
         {/* Cooperation requests */}
         {cooperationLoading ? (
           <Card className="mb-6">
@@ -417,26 +455,41 @@ export default function Assistant() {
                 <div className="-mb-1 mt-1 flex flex-wrap gap-1 pt-2">
                   {[
                     { id: 'all', label: 'Tất cả' },
-                    { id: 'needs-attention', label: 'Cần xử lý' },
-                    { id: 'pending', label: 'Chờ' },
-                    { id: 'in_progress', label: 'Làm' },
-                    { id: 'revision', label: 'Sửa' },
-                    { id: 'submitted', label: 'Chờ duyệt' },
-                  ].map(f => (
-                    <button
-                      key={f.id}
-                      type="button"
-                      onClick={() => setTaskFilter(f.id)}
-                      className={cn(
-                        'rounded-full border px-2 py-0.5 text-[11px] transition-colors',
-                        taskFilter === f.id
-                          ? 'border-primary bg-primary/10 text-primary'
-                          : 'border-muted text-muted-foreground hover:border-foreground/30 hover:text-foreground',
-                      )}
-                    >
-                      {f.label}
-                    </button>
-                  ))}
+                    { id: 'pending', label: 'Đã nhận' },
+                    { id: 'in_progress', label: 'Đang làm' },
+                    { id: 'submitted', label: 'Đã gửi' },
+                    { id: 'approved', label: 'Đã xong' },
+                    { id: 'revision', label: 'Bị từ chối' },
+                  ].map(f => {
+                    const count = f.id === 'all'
+                      ? filteredChapters.length
+                      : listForCount.filter(a => a._task?.status === f.id).length
+                    return (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => setTaskFilter(f.id)}
+                        className={cn(
+                          'rounded-full border px-2 py-0.5 text-[11px] transition-colors',
+                          taskFilter === f.id
+                            ? 'border-primary bg-primary/10 text-primary'
+                            : 'border-muted text-muted-foreground hover:border-foreground/30 hover:text-foreground',
+                        )}
+                      >
+                        {f.label}
+                        {count > 0 && (
+                          <span className={cn(
+                            'ml-1 rounded-full px-1 py-0.5 text-[10px] font-bold',
+                            taskFilter === f.id
+                              ? 'bg-primary/20 text-primary'
+                              : 'bg-muted text-muted-foreground',
+                          )}>
+                            {count}
+                          </span>
+                        )}
+                      </button>
+                    )
+                  })}
                 </div>
               </CardHeader>
               <CardContent className="px-0">

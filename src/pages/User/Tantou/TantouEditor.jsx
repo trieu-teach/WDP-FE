@@ -250,7 +250,7 @@ export default function TantouEditor() {
 
     await Promise.all(
       pages.map(async (page) => {
-        const existing = await teReviewsService.getPageAnnotations(
+        const existing = await teReviewsService.getAnnotations(
           chapter.chapterId,
           page._id,
         );

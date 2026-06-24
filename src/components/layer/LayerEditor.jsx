@@ -162,6 +162,17 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
       toast.error('Chưa có trang để thêm layer. Hãy chọn 1 trang trước.')
       return
     }
+    // Auto-chuyển task: pending → in_progress khi upload layer đầu tiên
+    if (layers.length === 0 && task?.status === 'pending') {
+      try {
+        const { tasksService } = await import('@/api/tasks.service.js')
+        await tasksService.start(task.id)
+        onSubmitted?.({ ...task, status: 'in_progress' })
+        toast.success('Đã bắt đầu làm.')
+      } catch {
+        // Không block upload vì lỗi start không ảnh hưởng layer
+      }
+    }
     const nextIdx = layers.length
     await addLayer({ file, index: nextIdx })
   }
@@ -554,12 +565,12 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
                       ? 'border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 hover:border-emerald-500/50'
                       : 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-violet-500/20 hover:from-violet-500 hover:to-indigo-500',
                   )}
-                  disabled={submittingAll || finalizing || pages.length === 0}
+                  disabled={submittingAll || finalizing || pages.length === 0 || task?.status === 'submitted'}
                   onClick={() => handleSubmitChapter({ chapterTaskId: chapter?._task?.id, chapterId: chapter?.chapterId })}
                 >
                   {submittingAll ? (
                     <><Loader2 className="size-3.5 animate-spin" /> Đang gửi {pages.length} trang…</>
-                  ) : submittedPages[activePageId] ? (
+                  ) : task?.status === 'submitted' || submittedPages[activePageId] ? (
                     <><Eye className="size-3.5" /> Đã gửi</>
                   ) : (
                     <><Send className="size-3.5" /> Gửi Mangaka</>

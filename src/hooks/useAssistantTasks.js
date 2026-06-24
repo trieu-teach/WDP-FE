@@ -22,9 +22,11 @@ export function useAssistantTasks({ chapterId, pageId } = {}) {
           throw err
         }),
       ])
-      const list = Array.isArray(assignmentsRes?.items)
-        ? assignmentsRes.items
-        : (Array.isArray(assignmentsRes) ? assignmentsRes : [])
+      const list = Array.isArray(assignmentsRes?.data)
+        ? assignmentsRes.data
+        : Array.isArray(assignmentsRes?.items)
+          ? assignmentsRes.items
+          : Array.isArray(assignmentsRes) ? assignmentsRes : []
       setAllTasks(list.map(apiTaskToUi))
       setStatsError(Boolean(statsRes?.__serverError))
       setStats(statsRes?.__serverError ? null : (statsRes ?? null))

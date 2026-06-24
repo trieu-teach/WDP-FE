@@ -70,18 +70,6 @@ export function useMangakaTasks(chapterRows) {
   }, [chapterIdKey, refresh])
 
   /**
-   * Approve: submit thẳng sang TE qua submission endpoint.
-   * Không phụ thuộc vào task nữa.
-   */
-  const approveChapterTasks = useCallback(async (reviews) => {
-    const list = Array.isArray(reviews) ? reviews : [reviews].filter(Boolean)
-    await Promise.all(
-      list.map((r) => submissionsService.approveChapter(r?.submission?.id ?? r?.chapter?.id)),
-    )
-    await refresh()
-  }, [refresh])
-
-  /**
    * Request revision: gửi note tổng hợp xuống submission endpoint.
    */
   const requestRevision = useCallback(async (reviews, note = '') => {
@@ -106,7 +94,6 @@ export function useMangakaTasks(chapterRows) {
     submissions,
     loading,
     refresh,
-    approveChapterTasks,
     requestRevision,
     acknowledgeTask,
   }

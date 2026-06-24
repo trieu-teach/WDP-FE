@@ -35,7 +35,7 @@ export function useAssistantAssignments() {
     setError(null)
     try {
       const res = await tasksService.getMyAssignments({ limit: 100 })
-      const rawItems = res?.items
+      const rawItems = res?.data ?? res?.items ?? []
       const list = Array.isArray(rawItems) ? rawItems : []
       // seriesName nằm ở response root (cùng cấp data), không phải trong từng task
       const seriesNameRoot = res?.seriesName ?? null
