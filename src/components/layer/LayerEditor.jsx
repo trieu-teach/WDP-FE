@@ -126,7 +126,31 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
   const [pageNotes, setPageNotes] = useState([])
   const [notesLoading, setNotesLoading] = useState(false)
 
+  // Build notes for the active page from revision_annotations (per-page structured notes from Mangaka)
+  const chapterPageAnnotations = useMemo(() => {
+    const raw = chapter?.revision_annotations
+    if (!raw || typeof raw !== 'object') return []
+    // Hỗ trợ nhiều format key: page_0, page_1 hoặc 0, 1 (số nguyên)
+    const keyIndex = String(pageIdx)
+    const arr = raw[`page_${keyIndex}`] ?? raw[keyIndex] ?? null
+    if (!Array.isArray(arr)) return []
+    return arr.map((n, i) => ({
+      id: `ra-${pageIdx}-${i}`,
+      clientKey: `ra-${pageIdx}-${i}`,
+      text: n.text ?? '',
+      x: n.x ?? 0,
+      y: n.y ?? 0,
+      w: n.w ?? 0,
+      h: n.h ?? 0,
+      taskType: n.taskType ?? 'other',
+      status: 'open',
+      assignee: n.assignee ?? '',
+      layerIndex: n.layerIndex ?? null,
+    }))
+  }, [chapter?.revision_annotations, pageIdx])
+
   async function loadNotes() {
+    // Ưu tiên 1: notes từ task.noteIds (BE populate vào task object)
     if (taskNotes.length > 0) {
       setPageNotes(taskNotes.map(n => ({
         ...n,
@@ -141,6 +165,12 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
       })))
       return
     }
+    // Ưu tiên 2: notes từ revision_annotations (per-page structured notes từ Mangaka)
+    if (chapterPageAnnotations.length > 0) {
+      setPageNotes(chapterPageAnnotations)
+      return
+    }
+    // Fallback 3: gọi API lấy notes theo pageId
     if (!activePageId) return
     setNotesLoading(true)
     try {
@@ -151,7 +181,7 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
     }
   }
 
-  useEffect(() => { void loadNotes() }, [activePageId, taskNotes.length])
+  useEffect(() => { void loadNotes() }, [activePageId, taskNotes.length, chapterPageAnnotations.length])
 
   const layerNoteInfo = useMemo(() => buildLayerNote(layers, pageNotes), [layers, pageNotes])
 
@@ -361,22 +391,20 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
             </Button>
           )}
 
-          {taskNotes.length > 0 && (
-            <Button
-              size="sm"
-              variant={showNoteOverlay ? 'secondary' : 'ghost'}
-              className={cn(
-                'h-8 gap-1.5 px-2.5 text-xs font-medium',
-                showNoteOverlay
-                  ? 'border border-amber-500/40 bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
-                  : 'text-white/50 hover:bg-white/10 hover:text-white/80',
-              )}
-              onClick={() => setShowNoteOverlay(v => !v)}
-            >
-              <span className="inline-block size-2 rounded-sm bg-amber-500" />
-              Note
-            </Button>
-          )}
+          <Button
+            size="sm"
+            variant={showNoteOverlay ? 'secondary' : 'ghost'}
+            className={cn(
+              'h-8 gap-1.5 px-2.5 text-xs font-medium',
+              showNoteOverlay
+                ? 'border border-amber-500/40 bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
+                : 'text-white/50 hover:bg-white/10 hover:text-white/80',
+            )}
+            onClick={() => setShowNoteOverlay(v => !v)}
+          >
+            {showNoteOverlay ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+            {showNoteOverlay ? 'Ẩn Note' : 'Hiện Note'}
+          </Button>
 
           <div className="mx-1 h-6 w-px bg-white/10" />
 
@@ -506,7 +534,7 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
                 baseImage={showOriginal ? baseImage : null}
                 className="absolute inset-0 h-full w-full"
                 region={task?.region ?? null}
-                notes={taskNotes}
+                notes={pageNotes}
                 showRegion={showRegionOverlay}
                 showNotes={showNoteOverlay}
               />
@@ -634,7 +662,7 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
             )}
 
             {/* Layer stack — scrollable */}
-            <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="self-start w-full">
               <LayerStackPanel
                 layers={layers}
                 versions={versions}

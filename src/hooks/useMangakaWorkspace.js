@@ -145,16 +145,16 @@ export function useMangakaWorkspace(user) {
   }, [])
 
   const createSeries = useCallback(async (form) => {
-    const payload = uiSeriesFormToApi(form)
-    const created = await seriesService.create(payload)
+    const { payload, coverFile } = uiSeriesFormToApi(form)
+    const created = await seriesService.create(payload, coverFile)
     const ui = apiSeriesToUi(created, seriesList.length)
     setSeriesList(prev => [ui, ...prev])
     return ui
   }, [seriesList.length])
 
   const updateSeries = useCallback(async (existing, form) => {
-    const payload = uiSeriesFormToApi(form)
-    const updated = await seriesService.update(existing.id, payload)
+    const { payload, coverFile } = uiSeriesFormToApi(form)
+    const updated = await seriesService.update(existing.id, payload, coverFile)
     const ui = apiSeriesToUi({ ...existing, ...updated, _id: existing.id }, 0)
     const merged = applySeriesFormUpdate(existing, form)
     const next = { ...merged, ...ui, id: existing.id }

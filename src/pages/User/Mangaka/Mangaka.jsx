@@ -69,7 +69,7 @@ import {
 } from "@/utils/ebDebutStorage.js";
 import { resolveAnnotatorChapter } from "@/utils/mangakaWorkspaceReader.js";
 import { useMangakaWorkspace } from "@/hooks/useMangakaWorkspace.js";
-import { getApiErrorMessage } from "@/api/http.js";
+import { getApiErrorMessage, resolveMediaUrl } from "@/api/http.js";
 import { tasksService } from "@/api/tasks.service.js";
 import { chaptersService } from "@/api/chapters.service.js";
 import { submissionsService } from "@/api/submissions.service.js";
@@ -241,12 +241,14 @@ function SeriesCard({
 
       <Link
         to={toSeries}
-        className="flex aspect-[16/7] items-center justify-center text-3xl font-extrabold tracking-tight text-white transition-transform group-hover:scale-[1.02]"
+        className="flex aspect-[16/7] items-center justify-center overflow-hidden text-3xl font-extrabold tracking-tight text-white transition-transform group-hover:scale-[1.02]"
         style={{
-          background: `linear-gradient(135deg, ${series.color}, ${series.color}88)`,
+          background: series.coverImage
+            ? `url(${resolveMediaUrl(series.coverImage)}) center / cover no-repeat`
+            : `linear-gradient(135deg, ${series.color}, ${series.color}88)`,
         }}
       >
-        <span className="drop-shadow-lg">{initials}</span>
+        {!series.coverImage && <span className="drop-shadow-lg">{initials}</span>}
       </Link>
 
       <CardContent className="space-y-3 p-4">
@@ -765,7 +767,7 @@ export default function Mangaka() {
     pages,
     assistantId,
   }) {
-    console.log('[SEND-ASSISTANT] start', { chapterId: chapter?.id, pagesCount: pages?.length, assistantId })
+    console.debug('[SEND-ASSISTANT] start', { chapterId: chapter?.id, pagesCount: pages?.length, assistantId })
     if (!chapter?.id) return
     if (!pages?.length) {
       toast.error('Chapter chưa có trang nào — upload ảnh trước.')
@@ -823,7 +825,7 @@ export default function Mangaka() {
       }
 
       // Bước 2 — gửi cả chapter (BE tạo Task cho pages từ PageNotes đã lưu ở bước upload)
-      console.log('[SEND-ASSISTANT] calling PATCH /chapters/:id { action: submit }')
+      console.debug('[SEND-ASSISTANT] calling PATCH /chapters/:id { action: submit }')
       await chaptersService.update(chapter.id, {
         action: 'submit',
         revision_notes: revisionNotes,

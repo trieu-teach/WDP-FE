@@ -39,7 +39,9 @@ export function useAssistantAssignments() {
       const list = Array.isArray(rawItems) ? rawItems : []
       // seriesName nằm ở response root (cùng cấp data), không phải trong từng task
       const seriesNameRoot = res?.seriesName ?? null
-      console.debug('[useAssistantAssignments] raw items:', list, 'seriesNameRoot=', seriesNameRoot)
+      if (list.length > 0) {
+        console.debug('[useAssistantAssignments] raw first item:', list[0], 'res keys:', Object.keys(res ?? {}))
+      }
       const tasks = list.map(apiTaskToUi)
       console.debug('[useAssistantAssignments] mapped tasks:', tasks.map(t => ({ id: t.id, chapterId: t.chapterId, pageId: t.pageId, status: t.status })))
 
@@ -66,12 +68,11 @@ export function useAssistantAssignments() {
         seen.add(task.chapterId)
 
         const chapter = chapterMap[task.chapterId] ?? null
+        if (chapter) {
+          console.debug('[useAssistantAssignments] chapter for', task.chapterId, ':', chapter, 'keys=', Object.keys(chapter))
+        }
 
-        results.push({
-          id: task.chapterId,
-          chapterId: task.chapterId,
-          taskId: task.id,
-          seriesTitle:
+        const seriesTitle =
             seriesNameRoot ??
             task.seriesName ??
             chapter?.seriesName ??
@@ -81,7 +82,16 @@ export function useAssistantAssignments() {
             chapter?.data?.series?.name ??
             chapter?.data?.title ??
             chapter?.title ??
-            '(Không tìm thấy series)',
+            null
+        if (!seriesTitle && chapter) {
+          console.warn('[useAssistantAssignments] seriesTitle missing for chapterId=', task.chapterId, 'chapter=', chapter, 'chapterKeys=', Object.keys(chapter ?? {}), 'dataKeys=', Object.keys(chapter?.data ?? {}))
+        }
+
+        results.push({
+          id: task.chapterId,
+          chapterId: task.chapterId,
+          taskId: task.id,
+          seriesTitle: seriesTitle ?? '(Không tìm thấy series)',
           seriesId:
             chapter?.series_id?._id ??
             chapter?.series_id ??
@@ -173,6 +183,9 @@ export function useAssistantAssignments() {
       chapter_number: chapter?.chapter_number ?? chapter?.data?.chapter_number ?? 0,
       title: chapter?.title ?? chapter?.data?.title ?? '',
       status: chapter?.status ?? 'pending_assistant',
+      // Mangaka gửi annotations (vị trí + nội dung note) đi kèm chapter
+      revision_annotations: chapter?.revision_annotations ?? chapter?.data?.revision_annotations ?? null,
+      revision_notes: chapter?.revision_notes ?? chapter?.data?.revision_notes ?? null,
     }
 
     if (pages.length > 0) {

@@ -7,7 +7,6 @@ import { apiTaskToUi } from '@/utils/apiMappers.js'
 export function useAssistantTasks({ chapterId, pageId } = {}) {
   const [allTasks, setAllTasks] = useState([])
   const [stats, setStats] = useState(null)
-  const [statsError, setStatsError] = useState(false)
   const [loading, setLoading] = useState(true)
 
   const refresh = useCallback(async () => {
@@ -15,12 +14,7 @@ export function useAssistantTasks({ chapterId, pageId } = {}) {
     try {
       const [assignmentsRes, statsRes] = await Promise.all([
         tasksService.getMyAssignments({ limit: 100 }),
-        tasksService.getStats().catch(err => {
-          // /tasks/stats đang lỗi 500 ở BE (ObjectId constructor bug) — suppress toast,
-          // đánh flag statsError để UI có thể hiện "tạm không khả dụng".
-          if (err?.isServerError) return { __serverError: true }
-          throw err
-        }),
+        tasksService.getStats().catch(() => null),
       ])
       const list = Array.isArray(assignmentsRes?.data)
         ? assignmentsRes.data
@@ -28,12 +22,9 @@ export function useAssistantTasks({ chapterId, pageId } = {}) {
           ? assignmentsRes.items
           : Array.isArray(assignmentsRes) ? assignmentsRes : []
       setAllTasks(list.map(apiTaskToUi))
-      setStatsError(Boolean(statsRes?.__serverError))
-      setStats(statsRes?.__serverError ? null : (statsRes ?? null))
+      setStats(statsRes?.data ?? statsRes ?? null)
     } catch (err) {
-      if (!err?.isServerError) {
-        toast.error(getApiErrorMessage(err, 'Không tải được danh sách task.'))
-      }
+      toast.error(getApiErrorMessage(err, 'Không tải được danh sách task.'))
     } finally {
       setLoading(false)
     }
@@ -86,7 +77,6 @@ export function useAssistantTasks({ chapterId, pageId } = {}) {
     chapterTasks,
     pageTasks,
     stats,
-    statsError,
     loading,
     refresh,
     startTask,

@@ -38,7 +38,17 @@ export const seriesService = {
     return http.post('/series', payload).then(unwrap)
   },
 
-  update(id, payload) {
+  update(id, payload, coverFile) {
+    if (coverFile) {
+      const fd = new FormData()
+      Object.entries(payload).forEach(([k, v]) => {
+        if (v != null && v !== '') fd.append(k, v)
+      })
+      fd.append('cover', coverFile)
+      return http.patch(`/series/${id}`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      }).then(unwrap)
+    }
     return http.patch(`/series/${id}`, payload).then(unwrap)
   },
 

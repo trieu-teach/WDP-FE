@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
@@ -114,6 +114,7 @@ export default function Assistant() {
   const [selectedChapterPages, setSelectedChapterPages] = useState([])
   const [selectedChapterDetail, setSelectedChapterDetail] = useState(null)
   const [taskFilter, setTaskFilter] = useState('all')
+  const [currentPage, setCurrentPage] = useState(1)
   const [hireBusyId, setHireBusyId] = useState(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
 
@@ -200,6 +201,20 @@ export default function Assistant() {
     }
     return list.filter(a => a._task?.status === taskFilter)
   }, [assignments, chapterTaskMap, taskFilter])
+
+  const ITEMS_PER_PAGE = 6
+
+  const paginatedChapters = useMemo(() => {
+    const start = (currentPage - 1) * ITEMS_PER_PAGE
+    return filteredChapters.slice(start, start + ITEMS_PER_PAGE)
+  }, [filteredChapters, currentPage])
+
+  const totalPages = Math.max(1, Math.ceil(filteredChapters.length / ITEMS_PER_PAGE))
+
+  const handleFilterChange = useCallback((f) => {
+    setTaskFilter(f)
+    setCurrentPage(1)
+  }, [])
 
   const listForCount = useMemo(() => {
     return (assignments ?? []).map(a => ({
@@ -356,7 +371,7 @@ export default function Assistant() {
                     </p>
                   </div>
                   <div className="flex shrink-0 gap-2">
-                    {req.status === 'pending_meet' && (
+                    {isPendingRequest(req.status) && (
                       <>
                         <Button
                           size="sm"
@@ -393,9 +408,6 @@ export default function Assistant() {
                           Chốt hợp tác
                         </Button>
                       </>
-                    )}
-                    {isPendingRequest(req.status) && (
-                      <Badge variant="secondary" className="text-xs">Đang xử lý</Badge>
                     )}
                   </div>
                 </div>
@@ -445,11 +457,11 @@ export default function Assistant() {
         ) : null}
 
         {/* Main workspace: 2-column grid */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[300px_1fr]">
+        <div className="grid h-screen grid-cols-1 gap-6 lg:grid-cols-[300px_1fr]">
           {/* Left: chapter list */}
-          <aside className="space-y-4">
-            <Card className="border-sky-200 dark:border-sky-500/20">
-              <CardHeader className="pb-3">
+          <aside className="h-screen overflow-y-auto space-y-4 py-1 pr-1">
+            <Card className="flex flex-col border-sky-200 dark:border-sky-500/20">
+              <CardHeader className="shrink-0 pb-3">
                 <CardTitle className="text-base">Chapter được giao</CardTitle>
                 <CardDescription>Chọn chapter để xử lý</CardDescription>
                 <div className="-mb-1 mt-1 flex flex-wrap gap-1 pt-2">
@@ -468,7 +480,7 @@ export default function Assistant() {
                       <button
                         key={f.id}
                         type="button"
-                        onClick={() => setTaskFilter(f.id)}
+                        onClick={() => handleFilterChange(f.id)}
                         className={cn(
                           'rounded-full border px-2 py-0.5 text-[11px] transition-colors',
                           taskFilter === f.id
@@ -492,15 +504,16 @@ export default function Assistant() {
                   })}
                 </div>
               </CardHeader>
-              <CardContent className="px-0">
-                {filteredChapters.length === 0 ? (
+              <CardContent className="flex flex-col flex-1 min-h-0 px-0">
+                {paginatedChapters.length === 0 ? (
                   <div className="p-6 text-center text-xs text-muted-foreground">
                     Không có chapter nào.
                   </div>
                 ) : (
-                  <ScrollArea className="max-h-[calc(100vh-280px)]">
+                  <>
+                  <ScrollArea className="flex-1">
                     <ul className="space-y-1 p-3 pt-0">
-                      {filteredChapters.map(ch => {
+                      {paginatedChapters.map(ch => {
                         const badge =
                           STATUS_BADGE[ch._task?.status] ??
                           STATUS_BADGE[ch.status] ??
@@ -527,12 +540,14 @@ export default function Assistant() {
                               </span>
                               <div className="min-w-0 flex-1">
                                 <p className="truncate text-sm font-semibold">
-                                  {ch.seriesTitle}
+                                  {ch.seriesTitle?.trim() || `Chương ${ch.chapterNum || ''}`.trim()}
                                 </p>
                                 <p className="truncate text-xs text-muted-foreground">
-                                  Ch.{ch.chapterNum}{ch.title ? ` · ${ch.title}` : ''}
+                                  {ch.title ? ch.title : `${pageCount} trang`}
                                 </p>
-                                <p className="text-xs text-muted-foreground">{pageCount} trang</p>
+                                {ch.title ? (
+                                  <p className="text-xs text-muted-foreground">{pageCount} trang</p>
+                                ) : null}
                                 <Badge className={cn('mt-1', badge.className)} variant="secondary">
                                   {badge.label}
                                 </Badge>
@@ -543,6 +558,28 @@ export default function Assistant() {
                       })}
                     </ul>
                   </ScrollArea>
+                  {totalPages > 1 && (
+                    <div className="flex items-center justify-center gap-3 border-t px-3 py-2 text-xs">
+                      <button
+                        disabled={currentPage === 1}
+                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                        className="rounded border px-2 py-0.5 transition-colors disabled:cursor-not-allowed disabled:opacity-30 hover:bg-muted"
+                      >
+                        ← Trước
+                      </button>
+                      <span className="text-muted-foreground">
+                        {currentPage} / {totalPages}
+                      </span>
+                      <button
+                        disabled={currentPage === totalPages}
+                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                        className="rounded border px-2 py-0.5 transition-colors disabled:cursor-not-allowed disabled:opacity-30 hover:bg-muted"
+                      >
+                        Sau →
+                      </button>
+                    </div>
+                  )}
+                  </>
                 )}
               </CardContent>
             </Card>
@@ -637,7 +674,7 @@ export default function Assistant() {
           </aside>
 
           {/* Right: editor */}
-          <div className="flex min-h-0 flex-col">
+          <div className="flex h-full min-h-0 flex-col overflow-hidden">
             {selectedWithTask ? (
               <div className="group/editor relative flex h-full min-h-0 flex-col">
                 <LayerEditor

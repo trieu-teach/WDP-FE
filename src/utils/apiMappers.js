@@ -37,10 +37,13 @@ export function apiSeriesToUi(raw, index = 0) {
   const s = raw && typeof raw === 'object' ? raw : {}
   const id = s._id ?? s.id
   const title = String(s.name ?? s.title ?? '').trim() || `Series ${index + 1}`
-  const genreStr = String(s.genre ?? '').trim()
-  const genres = genreStr
-    ? genreStr.split(/[,;|]/).map(g => g.trim()).filter(Boolean)
-    : (Array.isArray(s.genres) ? s.genres : [])
+  // BE trả genre là array; fallback để parse từ string (legacy)
+  const genreRaw = s.genre
+  const genres = Array.isArray(genreRaw)
+    ? genreRaw
+    : genreRaw
+      ? String(genreRaw).split(/[,;|]/).map(g => g.trim()).filter(Boolean)
+      : (Array.isArray(s.genres) ? s.genres : [])
 
   // author_id can be a populated object {_id, username, full_name} or a raw ObjectId string
   const authorObj = s.author_id
@@ -75,21 +78,27 @@ export function apiSeriesToUi(raw, index = 0) {
     metadataComplete: Boolean(String(s.synopsis ?? s.description ?? '').trim()),
     category: String(s.category ?? '').trim(),
     tags: Array.isArray(s.tags) ? s.tags : [],
-    age_rating: s.age_rating ?? 'All ages',
+    age_rating: s.age_rating ?? s.ageRating ?? 'All ages',
   })
 }
 
+/**
+ * Tách payload gửi BE và cover file (binary) riêng.
+ * BE nhận `cover` là multipart field.
+ */
 export function uiSeriesFormToApi(form) {
-  return {
+  const genres = Array.isArray(form.genre) ? form.genre : []
+  const payload = {
     name: String(form.name ?? '').trim(),
     description: String(form.description ?? '').trim(),
-    genre: String(form.genre ?? '').trim(),
+    genre: genres,
     target_audience: String(form.target_audience ?? '').trim(),
     synopsis: String(form.description ?? '').trim(),
-    category: String(form.category ?? '').trim(),
     tags: Array.isArray(form.tags) ? form.tags : [],
     age_rating: String(form.age_rating ?? 'All ages').trim(),
   }
+  const coverFile = form.cover && typeof form.cover === 'object' ? form.cover : null
+  return { payload, coverFile }
 }
 
 export function apiChapterToRow(chapter, seriesTitle) {

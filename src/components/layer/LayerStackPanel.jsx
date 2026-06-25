@@ -14,7 +14,6 @@ import {
   X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import { BLEND_MODES } from '@/utils/layersMappers.js'
 
@@ -370,7 +369,7 @@ export default function LayerStackPanel({
   }
 
   return (
-    <div className={cn('flex h-full flex-col gap-3', className)}>
+    <div className={cn('flex flex-col gap-3', className)}>
       {/* Header */}
       <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 p-2.5">
         <div className="flex items-center gap-2">
@@ -397,7 +396,7 @@ export default function LayerStackPanel({
       </div>
 
       {/* Layer list */}
-      <ScrollArea className="flex-1 pr-1">
+      <div className="max-h-[420px] overflow-y-auto pr-1">
         <div className="space-y-2 pb-2">
           {loading ? (
             <div className="rounded-xl border border-white/10 bg-white/5 py-10 text-center">
@@ -459,7 +458,7 @@ export default function LayerStackPanel({
             })
           )}
         </div>
-      </ScrollArea>
+      </div>
 
       {/* Finalize footer */}
       <div className="rounded-xl border border-white/10 bg-white/5 p-3">

@@ -57,7 +57,13 @@ export const chaptersService = {
   },
 
   getById(id) {
-    return http.get(`/chapters/${id}`).then(unwrap)
+    return http.get(`/chapters/${id}`).then(res => {
+      const unwrapped = unwrap(res)
+      if (res?.seriesName !== undefined) {
+        return { ...unwrapped, seriesName: res.seriesName }
+      }
+      return unwrapped
+    })
   },
 
   update(id, payload) {

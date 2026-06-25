@@ -16,7 +16,7 @@ import Footer from '@/components/User/Footer/Footer.jsx'
 import { getSession, logout } from '@/lib/auth.js'
 import { seriesService } from '@/api/series.service.js'
 import { chaptersService } from '@/api/chapters.service.js'
-import { getApiErrorMessage } from '@/api/http.js'
+import { getApiErrorMessage, resolveMediaUrl } from '@/api/http.js'
 import {
   apiChapterToAnnotator,
   apiChapterToRow,
@@ -37,8 +37,6 @@ import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
 import {
   formatSeriesCardLine,
-  formatSeriesCatalogLine,
-  formatSeriesRating,
   slugifySeriesTitle,
 } from '@/utils/seriesModel.js'
 import { LABEL_EDITOR_BOARD } from '@/constants/roleTerminology.js'
@@ -381,16 +379,25 @@ export default function SeriesUploadDetail() {
               <CardTitle className="text-base">Hồ sơ series</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
+              {series.coverImage ? (
+                <div className="overflow-hidden rounded-md">
+                  <img
+                    src={resolveMediaUrl(series.coverImage)}
+                    alt=""
+                    className="aspect-[3/4] w-full object-cover"
+                  />
+                </div>
+              ) : null}
               <p className="text-muted-foreground">{series.synopsis || 'Chưa có tóm tắt.'}</p>
               <Separator />
               <dl className="space-y-2">
                 <div className="flex justify-between gap-2">
-                  <dt className="text-muted-foreground">Định dạng</dt>
-                  <dd>{formatSeriesCatalogLine(series)}</dd>
+                  <dt className="text-muted-foreground">Thể loại</dt>
+                  <dd className="text-right">{series.genres?.join(', ') || '—'}</dd>
                 </div>
                 <div className="flex justify-between gap-2">
-                  <dt className="text-muted-foreground">Phân loại</dt>
-                  <dd>{formatSeriesRating(series)}</dd>
+                  <dt className="text-muted-foreground">Đối tượng</dt>
+                  <dd>{series.demographic || '—'}</dd>
                 </div>
                 <div className="flex justify-between gap-2">
                   <dt className="text-muted-foreground">Chapter</dt>
