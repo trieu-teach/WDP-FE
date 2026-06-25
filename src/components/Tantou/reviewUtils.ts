@@ -69,16 +69,27 @@ export function normalizePageNotes(raw: unknown): PageNote[] {
 
 export function createReviewDraft(submission: TantouSubmission | null): ReviewDraft {
   return {
-    storyTitle: submission?.seriesTitle ?? "",
-    authorName:
-      submission?.seriesMeta?.authorName ?? submission?.mangakaName ?? "",
-    synopsis: submission?.seriesMeta?.synopsis ?? "",
-    genres: Array.isArray(submission?.seriesMeta?.genres)
+    chapter_id: submission?.chapterId ?? submission?.id ?? "",
+    chapter_number: String(submission?.chapterNum ?? ""),
+    chapter_title: String(submission?.chapterTitle ?? ""),
+    series_id: String(submission?.seriesId ?? ""),
+    series_name: submission?.seriesTitle ?? "",
+    series_genre: Array.isArray(submission?.seriesMeta?.genres)
       ? [...submission.seriesMeta.genres]
       : [],
+    series_tags: Array.isArray(submission?.seriesMeta?.tags)
+      ? [...submission.seriesMeta.tags]
+      : [],
+    series_synopsis: submission?.seriesMeta?.synopsis ?? "",
+    series_cover_image_url: submission?.seriesMeta?.coverImageUrl ?? "",
+    series_author_id: String(submission?.seriesMeta?.authorId ?? ""),
+    series_author_name:
+      submission?.seriesMeta?.authorName ?? submission?.mangakaName ?? "",
     reviewText:
       submission?.reviewText ?? submission?.editorialComment ?? "",
-    reviewStatus: submission?.reviewStatus ?? "draft",
+    reviewStatus: submission?.reviewStatus === "draft"
+      ? "publish"
+      : (submission?.reviewStatus ?? "publish"),
     ratings: migrateRatings(submission?.reviewRatings),
     editorialNotes: normalizePageNotes(submission?.editorialNotes),
   };

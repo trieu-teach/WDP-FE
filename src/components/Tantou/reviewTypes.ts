@@ -20,6 +20,7 @@ export type PageNote = {
 
 export type TantouSubmission = {
   id: string;
+  seriesId?: string | null;
   seriesTitle: string;
   chapterId?: string;
   chapterNum: string;
@@ -47,19 +48,30 @@ export type TantouSubmission = {
   editorialComment?: string;
   reviewStatus?: ReviewStatus;
   reviewRatings?: Partial<ReviewRatings> & Record<string, number>;
+  chapterTitle?: string;
   seriesMeta?: {
     genres?: string[];
+    tags?: string[];
     formatLabel?: string;
     authorName?: string;
+    authorId?: string;
     synopsis?: string;
+    coverImageUrl?: string;
   };
 };
 
 export type ReviewDraft = {
-  storyTitle: string;
-  authorName: string;
-  synopsis: string;
-  genres: string[];
+  chapter_id: string;
+  chapter_number: string;
+  chapter_title: string;
+  series_id: string;
+  series_name: string;
+  series_genre: string[];
+  series_tags: string[];
+  series_synopsis: string;
+  series_cover_image_url: string;
+  series_author_id: string;
+  series_author_name: string;
   reviewText: string;
   reviewStatus: ReviewStatus;
   ratings: ReviewRatings;

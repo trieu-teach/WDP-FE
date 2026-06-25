@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Calendar, FileText, Sparkles } from "lucide-react";
+import { Calendar, FileText, History, Sparkles } from "lucide-react";
 import Header from "@/components/User/Header/Header.jsx";
 import Footer from "@/components/User/Footer/Footer.jsx";
 import { WorkspaceHero } from "@/components/layout/WorkspaceHero.jsx";
@@ -16,10 +16,19 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { getSession, logout } from "@/lib/auth.js";
 import { submissionsService } from "@/api/submissions.service.js";
+import { seriesService } from "@/api/series.service.js";
 import { teReviewsService } from "@/api/teReviews.service.js";
 import { getApiErrorMessage, resolveMediaUrl } from "@/api/http.js";
+import { apiSeriesToUi } from "@/utils/apiMappers.js";
 import {
   LABEL_EDITOR_BOARD,
   LABEL_TANTOU_EDITOR,
@@ -30,6 +39,8 @@ import {
   applyScheduleForEbApprovedSeries,
   isSeriesEbApproved,
   listPublishSchedules,
+  listTantouReviewHistory,
+  pushTantouReviewHistory,
   suggestPublishCadence,
 } from "@/utils/tantouWorkspaceStorage.js";
 import TantouPageReview from "./TantouPageReview.jsx";
@@ -55,6 +66,25 @@ function statusLabel(status) {
     approved_publish: "Đã duyệt phát hành",
   };
   return map[status] ?? status;
+}
+
+function reviewStatusLabel(status) {
+  const map = {
+    draft: "Nháp",
+    reject: "Yêu cầu chỉnh",
+    publish: "Đã duyệt",
+  };
+  return map[status] ?? status;
+}
+
+function formatReviewedAt(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("vi-VN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
 }
 
 function SubmissionCard({ sub, onReview, onQuickApprove, showQuickApprove }) {
@@ -108,6 +138,7 @@ export default function TantouEditor() {
   const [saving, setSaving] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [tick, setTick] = useState(0);
 
   const refresh = useCallback(() => setTick((n) => n + 1), []);
@@ -119,32 +150,15 @@ export default function TantouEditor() {
       const mapped = await Promise.all(
         (Array.isArray(queue) ? queue : []).map(async (item) => {
           const chapterId = String(item?._id ?? "");
-          const seriesTitle = item?.series_id?.name ?? "Series";
-          const submittedBy = item?.submitted_by ?? {};
           let preview = null;
           try {
             preview = await teReviewsService.getChapterPages(chapterId, 1);
           } catch {
             preview = null;
           }
-          const previewPage = preview?.page ?? null;
-          return {
-            id: chapterId,
-            chapterId,
-            seriesId: item?.series_id?._id ? String(item.series_id._id) : null,
-            seriesTitle,
-            chapterNum: String(item?.chapter_number ?? ""),
-            pageIndex: 0,
-            pageLabel: previewPage?.page_number ? `Trang ${previewPage.page_number}` : "Trang 1",
-            mangakaImageUrl: resolveMediaUrl(
-              previewPage?.result_image_url ?? previewPage?.original_image_url ?? null,
-            ),
-            mangakaName: submittedBy.full_name ?? submittedBy.username ?? "Mangaka",
-            pipeline: "debut",
-            status: "pending",
-            sentAt: item?.updatedAt ?? item?.createdAt ?? null,
-            pagesMeta: Array.isArray(preview?.pages) ? preview.pages : [],
-          };
+          return enrichTeQueueItemWithSeriesDetail(
+            mapTeQueueItem(item, preview),
+          );
         }),
       );
       setSubmissions(mapped);
@@ -162,6 +176,7 @@ export default function TantouEditor() {
 
   const schedules = useMemo(() => listPublishSchedules(), [tick]);
   const ebApproved = useMemo(() => readEbDebutApproved(), [tick]);
+  const reviewHistory = useMemo(() => listTantouReviewHistory(), [tick, historyOpen]);
 
   const selected = useMemo(
     () => submissions.find((s) => s.id === selectedId) ?? null,
@@ -234,14 +249,99 @@ export default function TantouEditor() {
     };
   }
 
-  function mapNoteTypeToErrorType(taskType) {
-    const value = String(taskType ?? "").toLowerCase();
-    if (value.includes("dialog")) return "dialogue";
-    if (value.includes("script")) return "script";
-    if (value.includes("art")) return "art";
-    if (value.includes("content")) return "content";
-    return "other";
+function mapNoteTypeToErrorType(taskType) {
+  const value = String(taskType ?? "").toLowerCase();
+  if (value.includes("dialog")) return "dialogue";
+  if (value.includes("script")) return "script";
+  if (value.includes("art")) return "art";
+  if (value.includes("content")) return "content";
+  return "other";
+}
+
+function parseSeriesGenres(series) {
+  const genreRaw = series?.genre ?? series?.genres;
+  if (Array.isArray(genreRaw)) return genreRaw.filter(Boolean);
+  if (genreRaw) {
+    return String(genreRaw)
+      .split(/[,;|]/)
+      .map((g) => g.trim())
+      .filter(Boolean);
   }
+  return [];
+}
+
+function mapTeQueueItem(item, preview) {
+  const chapterId = String(item?._id ?? "");
+  const series = item?.series_id && typeof item.series_id === "object"
+    ? item.series_id
+    : {};
+  const seriesId = series?._id ? String(series._id) : null;
+  const seriesTitle = series?.name ?? "Series";
+  const authorObj = series?.author_id;
+  const authorId =
+    authorObj && typeof authorObj === "object" ? authorObj._id : authorObj;
+  const submittedBy = item?.submitted_by ?? {};
+  const previewPage = preview?.page ?? null;
+  const mangakaName = submittedBy.full_name ?? submittedBy.username ?? "Mangaka";
+
+  return {
+    id: chapterId,
+    chapterId,
+    seriesId,
+    seriesTitle,
+    chapterNum: String(item?.chapter_number ?? ""),
+    chapterTitle: String(item?.title ?? ""),
+    pageIndex: 0,
+    pageLabel: previewPage?.page_number
+      ? `Trang ${previewPage.page_number}`
+      : "Trang 1",
+    mangakaImageUrl: resolveMediaUrl(
+      previewPage?.result_image_url ?? previewPage?.original_image_url ?? null,
+    ),
+    mangakaName,
+    pipeline: "debut",
+    status: "pending",
+    sentAt: item?.updatedAt ?? item?.createdAt ?? null,
+    pagesMeta: Array.isArray(preview?.pages) ? preview.pages : [],
+    seriesMeta: {
+      genres: parseSeriesGenres(series),
+      tags: Array.isArray(series?.tags) ? series.tags : [],
+      synopsis: String(series?.synopsis ?? series?.description ?? "").trim(),
+      coverImageUrl: resolveMediaUrl(series?.cover_image_url ?? null),
+      authorId: authorId ? String(authorId) : "",
+      authorName:
+        authorObj && typeof authorObj === "object"
+          ? (authorObj.full_name ?? authorObj.username ?? "")
+          : mangakaName,
+    },
+  };
+}
+
+async function enrichTeQueueItemWithSeriesDetail(mapped) {
+  if (!mapped?.seriesId) return mapped;
+
+  try {
+    const raw = await seriesService.getById(mapped.seriesId);
+    const series = apiSeriesToUi(raw);
+    return {
+      ...mapped,
+      seriesTitle: series.title || mapped.seriesTitle,
+      seriesMeta: {
+        ...mapped.seriesMeta,
+        genres: series.genres?.length ? series.genres : mapped.seriesMeta.genres,
+        tags: series.tags?.length ? series.tags : mapped.seriesMeta.tags,
+        synopsis: series.synopsis || mapped.seriesMeta.synopsis,
+        coverImageUrl: series.coverImage || mapped.seriesMeta.coverImageUrl,
+        authorId: series.authorId
+          ? String(series.authorId)
+          : mapped.seriesMeta.authorId,
+        authorName: series.authorName || mapped.seriesMeta.authorName,
+      },
+    };
+  } catch {
+    return mapped;
+  }
+}
 
   async function syncChapterAnnotations(chapter) {
     if (!chapter?.chapterId) return;
@@ -298,42 +398,45 @@ export default function TantouEditor() {
   async function handleSaveReview(reviewData, options = {}) {
     if (!selected) return;
 
-    const advanceNext = options.advanceNext === true;
-    const nextStatus = reviewData.reviewStatus ?? "draft";
+    const nextStatus =
+      options.submitAction ?? reviewData.reviewStatus ?? "publish";
     const nextText = String(reviewData.reviewText ?? "").trim();
     const nextAverage = Number(reviewData.averageScore ?? 0);
-    const nextTitle =
-      String(reviewData.storyTitle ?? selected.seriesTitle).trim() ||
+    const nextChapterId = String(
+      reviewData.chapter_id ?? selected.chapterId ?? selected.id ?? "",
+    ).trim();
+    const nextChapterNumber = String(
+      reviewData.chapter_number ?? selected.chapterNum ?? "",
+    ).trim();
+    const nextChapterTitle = String(reviewData.chapter_title ?? selected.chapterTitle ?? "").trim();
+    const nextSeriesId = String(
+      reviewData.series_id ?? selected.seriesId ?? "",
+    ).trim();
+    const nextSeriesName =
+      String(reviewData.series_name ?? selected.seriesTitle).trim() ||
       selected.seriesTitle;
-    const nextAuthor =
-      String(reviewData.authorName ?? selected.mangakaName).trim() ||
-      selected.mangakaName;
-    const nextGenres = Array.isArray(reviewData.genres)
-      ? reviewData.genres
+    const nextSeriesGenre = Array.isArray(reviewData.series_genre)
+      ? reviewData.series_genre
       : [];
-    const nextSynopsis = String(reviewData.synopsis ?? "").trim();
+    const nextSeriesTags = Array.isArray(reviewData.series_tags)
+      ? reviewData.series_tags
+      : [];
+    const nextSeriesSynopsis = String(reviewData.series_synopsis ?? "").trim();
+    const nextSeriesCover = String(reviewData.series_cover_image_url ?? "").trim();
+    const nextSeriesAuthorId = String(
+      reviewData.series_author_id ?? selected.seriesMeta?.authorId ?? "",
+    ).trim();
+    const nextSeriesAuthorName = String(
+      reviewData.series_author_name ??
+        selected.seriesMeta?.authorName ??
+        selected.mangakaName ??
+        "",
+    ).trim();
     const editorialNotesByPage = reviewData.editorialNotesByPage ?? {};
 
     if (nextStatus === "reject" && !nextText) {
       toast.error("Nhập lý do trước khi gửi Mangaka chỉnh.");
       return;
-    }
-
-    const pool = submissions.filter((s) => s.status === "pending");
-    const currentIndex = pool.findIndex((s) => s.id === selected.id);
-    const nextInQueue =
-      currentIndex >= 0 && currentIndex < pool.length - 1
-        ? pool[currentIndex + 1]
-        : pool.find((s) => s.id !== selected.id) ?? null;
-
-    function maybeAdvance() {
-      if (advanceNext && nextInQueue) {
-        setSelectedId(nextInQueue.id);
-        toast.success(`Đã lưu · chuyển sang Ch. ${nextInQueue.chapterNum}`);
-        refresh();
-        return true;
-      }
-      return false;
     }
 
     if (!selected.seriesId) {
@@ -349,10 +452,17 @@ export default function TantouEditor() {
         quick_notes: nextText,
         revision_feedback: nextStatus === "reject" ? nextText : "",
         metadata: {
-          title: nextTitle,
-          author: nextAuthor,
-          genres: nextGenres,
-          synopsis: nextSynopsis,
+          chapter_id: nextChapterId,
+          chapter_number: nextChapterNumber,
+          chapter_title: nextChapterTitle,
+          series_id: nextSeriesId,
+          series_name: nextSeriesName,
+          series_genre: nextSeriesGenre,
+          series_tags: nextSeriesTags,
+          series_synopsis: nextSeriesSynopsis,
+          series_cover_image_url: nextSeriesCover,
+          series_author_id: nextSeriesAuthorId,
+          series_author_name: nextSeriesAuthorName,
           average_score: nextAverage,
         },
       };
@@ -366,19 +476,28 @@ export default function TantouEditor() {
           payload,
         );
         const route = result?.auto_route;
-        if (route === "EB") {
+        if (nextStatus === "reject") {
+          toast.success("Đã gửi về Mangaka.");
+        } else if (route === "EB") {
           toast.success("Đã chuyển series sang Editor Board.");
         } else {
-          toast.success("Đã gửi review về Mangaka.");
+          toast.success("Đã duyệt và chuyển bước phát hành.");
         }
-      } else {
-        await teReviewsService.saveSeriesReview(selected.seriesId, payload);
-        toast.success("Đã lưu bản nháp review.");
       }
 
-      if (!maybeAdvance()) {
-        setReviewOpen(false);
-      }
+      pushTantouReviewHistory({
+        id: `${nextChapterId}-${Date.now()}`,
+        chapterId: nextChapterId,
+        chapterNumber: nextChapterNumber,
+        seriesName: nextSeriesName,
+        authorName: nextSeriesAuthorName,
+        status: nextStatus,
+        averageScore: nextAverage,
+        feedback: nextText,
+        reviewedAt: new Date().toISOString(),
+      });
+
+      setReviewOpen(false);
       refresh();
     } catch (err) {
       toast.error(getApiErrorMessage(err, "Không lưu được review."));
@@ -457,8 +576,14 @@ export default function TantouEditor() {
             </CardContent>
           </Card>
 
-          <SidebarFlow />
+          <SidebarFlow onOpenHistory={() => setHistoryOpen(true)} />
         </section>
+
+        <TantouReviewHistoryDialog
+          open={historyOpen}
+          onOpenChange={setHistoryOpen}
+          items={reviewHistory}
+        />
 
         <section className="space-y-4">
           <Card>
@@ -563,7 +688,7 @@ export default function TantouEditor() {
   );
 }
 
-function SidebarFlow() {
+function SidebarFlow({ onOpenHistory }) {
   return (
     <Card className="h-fit">
       <CardHeader>
@@ -582,7 +707,64 @@ function SidebarFlow() {
         <Button variant="link" className="h-auto p-0" asChild>
           <Link to={PATH_EDITOR_BOARD}>Mở {LABEL_EDITOR_BOARD} →</Link>
         </Button>
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full"
+          onClick={onOpenHistory}
+        >
+          <History className="size-4" />
+          Lịch sử duyệt
+        </Button>
       </CardContent>
     </Card>
+  );
+}
+
+function TantouReviewHistoryDialog({ open, onOpenChange, items }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[85vh] overflow-hidden sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Lịch sử duyệt</DialogTitle>
+          <DialogDescription>
+            Các lần bạn lưu hoặc gửi nhận xét gần đây.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-1">
+          {items.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              Chưa có lịch sử duyệt.
+            </p>
+          ) : (
+            items.map((item) => (
+              <Card key={item.id} className="border-border/70">
+                <CardContent className="space-y-2 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-medium">{item.seriesName}</p>
+                    <Badge variant="secondary">
+                      {reviewStatusLabel(item.status)}
+                    </Badge>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Ch. {item.chapterNumber}
+                    {item.authorName ? ` · ${item.authorName}` : ""}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {formatReviewedAt(item.reviewedAt)}
+                    {item.averageScore != null
+                      ? ` · Điểm TB ${Number(item.averageScore).toFixed(1)}`
+                      : ""}
+                  </p>
+                  {item.feedback ? (
+                    <p className="line-clamp-2 text-sm">{item.feedback}</p>
+                  ) : null}
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
