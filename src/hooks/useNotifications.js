@@ -2,13 +2,16 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { notificationsService } from '@/api/notifications.service.js'
 import { getApiErrorMessage } from '@/api/http.js'
+import { resolveEntityId } from '@/utils/notificationTarget.js'
 
 const POLL_INTERVAL_MS = 45_000
 
 function normalize(raw) {
   if (!raw) return null
   const relatedType = raw.related_entity_type ?? raw.relatedEntityType ?? null
-  const relatedId = raw.related_entity_id ?? raw.relatedEntityId ?? null
+  const relatedId = resolveEntityId(raw.related_entity_id ?? raw.relatedEntityId)
+  const dataBag = typeof raw.data === 'object' && raw.data ? raw.data : {}
+  const metaBag = typeof raw.meta === 'object' && raw.meta ? raw.meta : {}
   return {
     id: String(raw._id ?? raw.id ?? raw.notificationId ?? ''),
     title: raw.title ?? raw.subject ?? 'Thông báo',
@@ -19,7 +22,7 @@ function normalize(raw) {
     link: raw.link ?? raw.url ?? raw.actionUrl ?? null,
     relatedEntityType: relatedType,
     relatedEntityId: relatedId,
-    meta: raw.meta ?? null,
+    meta: { ...dataBag, ...metaBag },
     raw,
   }
 }

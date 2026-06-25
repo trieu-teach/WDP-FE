@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ImageIcon } from "lucide-react";
 import { resolveMediaUrl } from "@/api/http.js";
+import { chaptersService } from "@/api/chapters.service.js";
+import {
+  isTePageRecord,
+  resolveTePageId,
+  resolveTePageImageUrl,
+  tePageHasImage,
+  teReviewsService,
+} from "@/api/teReviews.service.js";
+import { apiPageToUi } from "@/utils/apiMappers.js";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,8 +38,59 @@ import {
   getMangakaNotesForStoryPage,
   groupSubmissionsByChapter,
   isSameChapter,
+  mapApiAnnotationsToNotesByPage,
+  mapApiAnnotationsToPageNotes,
   resolveStoryPagesForChapter,
 } from "./reviewUtils";
+
+type PageDetail = {
+  pageId: string;
+  imageUrl?: string;
+  pageNumber: number;
+};
+
+function buildPageDetail(
+  page: NonNullable<TantouSubmission["pagesMeta"]>[number],
+  index: number,
+): PageDetail {
+  return {
+    pageId: resolveTePageId(page),
+    pageNumber: Number(page.page_number ?? index + 1),
+    imageUrl: resolveTePageImageUrl(page) ?? undefined,
+  };
+}
+
+function extractChapterPagesList(
+  raw: unknown,
+): NonNullable<TantouSubmission["pagesMeta"]> {
+  if (Array.isArray(raw)) return raw;
+  if (raw && typeof raw === "object") {
+    const obj = raw as { pages?: unknown[]; data?: unknown[] };
+    if (Array.isArray(obj.pages)) return obj.pages;
+    if (Array.isArray(obj.data)) return obj.data;
+  }
+  return [];
+}
+
+async function fetchChapterPagesFromChaptersApi(chapterId: string) {
+  const pagesRaw = await chaptersService.getPages(chapterId);
+  const pages = extractChapterPagesList(pagesRaw);
+  return pages.map((page, index) => {
+    const ui = apiPageToUi(page, index);
+    return {
+      ...page,
+      _id: page._id ?? page.id ?? ui.id,
+      id: page.id ?? (page._id != null ? String(page._id) : ui.id),
+      page_number: page.page_number ?? ui.pageNumber,
+      url: page.url ?? ui.url,
+      image_url: page.image_url,
+      imageUrl: page.imageUrl,
+      original_image_url: page.original_image_url,
+      result_image_url: page.result_image_url,
+      final_image_url: page.final_image_url,
+    };
+  });
+}
 
 type TantouChapterReviewDashboardProps = {
   submission: TantouSubmission;
@@ -93,22 +153,209 @@ export function TantouChapterReviewDashboard({
       return initial;
     },
   );
+  const [chapterPagesMeta, setChapterPagesMeta] = useState(
+    () => submission.pagesMeta ?? [],
+  );
+  const [pageDetailsByIndex, setPageDetailsByIndex] = useState<
+    Record<number, PageDetail>
+  >({});
+  const [loadingPage, setLoadingPage] = useState(false);
   const readerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setDraft(createReviewDraft(submission));
     setViewingChapterId(submission.id);
     setViewingPageIndex(submission.pageIndex ?? 0);
-    const initial: Record<number, PageNote[]> = {};
-    if (submission.editorialNotesByPage) {
-      Object.entries(submission.editorialNotesByPage).forEach(([k, v]) => {
-        initial[Number(k)] = v;
-      });
-    } else if (submission.editorialNotes?.length) {
-      initial[submission.pageIndex ?? 0] = submission.editorialNotes;
-    }
-    setNotesByPage(initial);
+    setChapterPagesMeta(submission.pagesMeta ?? []);
+    setPageDetailsByIndex({});
+    setNotesByPage({});
   }, [submission.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const chapterId = submission.chapterId ?? submission.id;
+    if (!chapterId) return;
+
+    function applyLoadedPages(
+      pages: NonNullable<TantouSubmission["pagesMeta"]>,
+      rootAnnotations: unknown[] = [],
+    ) {
+      setChapterPagesMeta(pages);
+      const details: Record<number, PageDetail> = {};
+      const initialNotes: Record<number, PageNote[]> = {};
+
+      pages.forEach((page, index) => {
+        details[index] = buildPageDetail(page, index);
+        if (Array.isArray(page.annotations) && page.annotations.length) {
+          initialNotes[index] = mapApiAnnotationsToPageNotes(page.annotations);
+        }
+      });
+
+      if (rootAnnotations.length) {
+        Object.assign(
+          initialNotes,
+          mapApiAnnotationsToNotesByPage(rootAnnotations, pages),
+        );
+      }
+
+      setPageDetailsByIndex(details);
+      if (Object.keys(initialNotes).length) {
+        setNotesByPage((current) => ({ ...current, ...initialNotes }));
+      }
+    }
+
+    async function loadAllChapterPages() {
+      setLoadingPage(true);
+      try {
+        const res = await teReviewsService.getAllChapterPages(chapterId);
+        if (cancelled) return;
+
+        let pages = res.pages ?? [];
+        if (!pages.length && isTePageRecord(res.page)) {
+          pages = [res.page];
+        }
+
+        if (!pages.length) {
+          pages = await fetchChapterPagesFromChaptersApi(chapterId);
+        }
+
+        if (!pages.length || cancelled) return;
+
+        applyLoadedPages(pages, Array.isArray(res.annotations) ? res.annotations : []);
+      } catch {
+        try {
+          const pages = await fetchChapterPagesFromChaptersApi(chapterId);
+          if (!cancelled && pages.length) {
+            applyLoadedPages(pages);
+          }
+        } catch {
+          // giữ state hiện tại
+        }
+      } finally {
+        if (!cancelled) setLoadingPage(false);
+      }
+    }
+
+    void loadAllChapterPages();
+    return () => {
+      cancelled = true;
+    };
+  }, [submission.id, submission.chapterId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const chapterId = submission.chapterId ?? submission.id;
+    if (!chapterId) return;
+
+    const pageMeta = chapterPagesMeta[viewingPageIndex];
+    const cachedImage = pageDetailsByIndex[viewingPageIndex]?.imageUrl;
+    const cachedNotes = notesByPage[viewingPageIndex];
+    const needsImage = !cachedImage && !tePageHasImage(pageMeta);
+    const needsNotes = cachedNotes === undefined;
+    if (!needsImage && !needsNotes) return;
+
+    async function loadCurrentPageDetail() {
+      try {
+        const res = await teReviewsService.getChapterPage(
+          chapterId,
+          viewingPageIndex + 1,
+        );
+        if (cancelled) return;
+
+        if (needsImage && isTePageRecord(res.page)) {
+          const detail = buildPageDetail(res.page, viewingPageIndex);
+          setPageDetailsByIndex((current) => ({
+            ...current,
+            [viewingPageIndex]: {
+              ...current[viewingPageIndex],
+              ...detail,
+              imageUrl: detail.imageUrl ?? current[viewingPageIndex]?.imageUrl,
+            },
+          }));
+          setChapterPagesMeta((current) => {
+            const next = [...current];
+            next[viewingPageIndex] = {
+              ...(next[viewingPageIndex] ?? {}),
+              ...res.page,
+            };
+            return next;
+          });
+        }
+
+        if (needsNotes) {
+          const pageNotes = mapApiAnnotationsToPageNotes(
+            res.annotations
+            ?? (isTePageRecord(res.page) && Array.isArray(res.page.annotations)
+              ? res.page.annotations
+              : [])
+            ?? [],
+          );
+          setNotesByPage((current) => ({
+            ...current,
+            [viewingPageIndex]: pageNotes,
+          }));
+        }
+      } catch {
+        if (cancelled) return;
+
+        if (needsImage) {
+          try {
+            const pages = await fetchChapterPagesFromChaptersApi(chapterId);
+            if (cancelled) return;
+            const page = pages[viewingPageIndex] ?? pages[0];
+            if (page) {
+              const detail = buildPageDetail(page, viewingPageIndex);
+              setPageDetailsByIndex((current) => ({
+                ...current,
+                [viewingPageIndex]: {
+                  ...current[viewingPageIndex],
+                  ...detail,
+                },
+              }));
+            }
+          } catch {
+            // giữ state hiện tại
+          }
+        }
+
+        if (needsNotes) {
+          try {
+            const pageId = resolveTePageId(chapterPagesMeta[viewingPageIndex]);
+            const annotations = await teReviewsService.getAnnotations(
+              chapterId,
+              pageId || undefined,
+            );
+            if (cancelled) return;
+            setNotesByPage((current) => ({
+              ...current,
+              [viewingPageIndex]: mapApiAnnotationsToPageNotes(
+                Array.isArray(annotations) ? annotations : [],
+              ),
+            }));
+          } catch {
+            if (!cancelled) {
+              setNotesByPage((current) => ({
+                ...current,
+                [viewingPageIndex]: current[viewingPageIndex] ?? [],
+              }));
+            }
+          }
+        }
+      }
+    }
+
+    void loadCurrentPageDetail();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    submission.id,
+    submission.chapterId,
+    viewingPageIndex,
+    chapterPagesMeta,
+    pageDetailsByIndex,
+    notesByPage,
+  ]);
 
   const chapterRows: ChapterRow[] = useMemo(() => {
     return groupSubmissionsByChapter(
@@ -125,15 +372,54 @@ export function TantouChapterReviewDashboard({
 
   const viewingSubmission = useMemo(() => {
     if (!viewingChapterId) return null;
-    return (
-      relatedSubmissions.find((s) => s.id === viewingChapterId) ?? submission
-    );
-  }, [viewingChapterId, relatedSubmissions, submission]);
+    const base =
+      relatedSubmissions.find((s) => s.id === viewingChapterId) ?? submission;
+    if (base.id !== submission.id) return base;
+    return {
+      ...base,
+      pagesMeta: chapterPagesMeta.length ? chapterPagesMeta : base.pagesMeta,
+    };
+  }, [viewingChapterId, relatedSubmissions, submission, chapterPagesMeta]);
 
   const storyPages = useMemo(() => {
     if (!viewingSubmission) return [];
+
+    const summary = chapterPagesMeta.length
+      ? chapterPagesMeta
+      : (viewingSubmission.pagesMeta ?? []);
+
+    if (summary.length) {
+      return summary.map((page, index) => ({
+        pageIndex: index,
+        pageLabel: page.page_number
+          ? `Trang ${page.page_number}`
+          : `Trang ${index + 1}`,
+        imageUrl:
+          pageDetailsByIndex[index]?.imageUrl ??
+          resolveTePageImageUrl(page) ??
+          undefined,
+      }));
+    }
+
+    const detail = pageDetailsByIndex[viewingPageIndex];
+    if (detail?.imageUrl) {
+      return [
+        {
+          pageIndex: viewingPageIndex,
+          pageLabel: `Trang ${detail.pageNumber}`,
+          imageUrl: detail.imageUrl,
+        },
+      ];
+    }
+
     return resolveStoryPagesForChapter(viewingSubmission, relatedSubmissions);
-  }, [relatedSubmissions, viewingSubmission]);
+  }, [
+    chapterPagesMeta,
+    pageDetailsByIndex,
+    relatedSubmissions,
+    viewingPageIndex,
+    viewingSubmission,
+  ]);
 
   const currentStoryPage = storyPages[viewingPageIndex] ?? storyPages[0];
   const canEditNotes =
@@ -171,6 +457,9 @@ export function TantouChapterReviewDashboard({
       editorialNotes:
         notesByPage[primaryPageIndex] ?? draft.editorialNotes ?? [],
       editorialNotesByPage: notesByPage,
+      pagesMeta: chapterPagesMeta.length
+        ? chapterPagesMeta
+        : submission.pagesMeta,
     };
   }
 
@@ -307,7 +596,7 @@ export function TantouChapterReviewDashboard({
                   viewingPageIndex,
                 )}
                 editorialNotes={notesByPage[viewingPageIndex] ?? []}
-                readOnly={!canEditNotes}
+                readOnly={!canEditNotes || loadingPage}
                 onEditorialNotesChange={
                   canEditNotes ? handleEditorialNotesChange : undefined
                 }

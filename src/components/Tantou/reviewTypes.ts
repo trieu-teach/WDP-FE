@@ -49,6 +49,23 @@ export type TantouSubmission = {
   reviewStatus?: ReviewStatus;
   reviewRatings?: Partial<ReviewRatings> & Record<string, number>;
   chapterTitle?: string;
+  pagesMeta?: Array<{
+    _id?: string;
+    id?: string;
+    page_number?: number;
+    pageIndex?: number;
+    annotation_count?: number;
+    result_image_url?: string;
+    original_image_url?: string;
+    final_image_url?: string;
+    image_url?: string;
+    url?: string;
+    imageUrl?: string;
+    width?: number;
+    height?: number;
+    status?: string;
+    annotations?: unknown[];
+  }>;
   seriesMeta?: {
     genres?: string[];
     tags?: string[];
@@ -82,6 +99,7 @@ export type ReviewSavePayload = ReviewDraft & {
   averageScore: number;
   coverImageUrl?: string;
   editorialNotesByPage?: Record<number, PageNote[]>;
+  pagesMeta?: TantouSubmission["pagesMeta"];
 };
 
 export type StoryPage = {

@@ -62,6 +62,7 @@ import {
   PATH_EDITOR_BOARD,
   PATH_TANTOU_EDITOR,
 } from "@/constants/roleTerminology.js";
+import { getMangakaTeRevisionPath } from "@/utils/notificationTarget.js";
 import {
   readEbDebutApproved,
   removeEbDebutApproval,
@@ -1745,7 +1746,9 @@ export default function Mangaka() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {tantouRevisions.slice(0, 3).map((s) => (
+                  {tantouRevisions.slice(0, 3).map((s) => {
+                    const revisionPath = getMangakaTeRevisionPath(s.chapterId ?? s.id)
+                    return (
                     <div key={s.id} className="rounded-lg border bg-card p-3">
                       <p className="text-sm font-semibold">{s.seriesTitle}</p>
                       <p className="text-xs text-muted-foreground">
@@ -1756,15 +1759,18 @@ export default function Mangaka() {
                           {s.editorialComment}
                         </p>
                       ) : null}
+                      {revisionPath ? (
                       <Link
-                        to={PATH_TANTOU_EDITOR}
+                        to={revisionPath}
                         className="mt-2 inline-flex items-center text-xs font-medium text-primary hover:underline"
                       >
                         Xem chi tiết
                         <ChevronRight className="size-3" />
                       </Link>
+                      ) : null}
                     </div>
-                  ))}
+                    )
+                  })}
                 </CardContent>
               </Card>
             ) : null}

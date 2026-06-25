@@ -57,6 +57,7 @@ type TantouPageAnnotatorProps = {
   editorialNotes: PageNote[];
   onEditorialNotesChange?: (notes: PageNote[]) => void;
   readOnly?: boolean;
+  viewerMode?: "tantou" | "mangaka";
   onClose?: () => void;
 };
 
@@ -75,6 +76,7 @@ export const TantouPageAnnotator = forwardRef<
     editorialNotes,
     onEditorialNotesChange,
     readOnly = false,
+    viewerMode = "tantou",
     onClose,
   },
   ref,
@@ -96,6 +98,8 @@ export const TantouPageAnnotator = forwardRef<
   );
 
   const pageUrl = pageImageUrl ?? submission.mangakaImageUrl;
+  const tantouLegendLabel =
+    viewerMode === "mangaka" ? "Tantou (TE)" : "Tantou (bạn)";
   const activePageLabel =
     pageLabel ?? storyPages[currentPageIndex]?.pageLabel ?? submission.pageLabel;
   const pageCount = storyPages.length;
@@ -579,8 +583,14 @@ export const TantouPageAnnotator = forwardRef<
 
             {editorialNotes.length === 0 ? (
               <p className="text-xs text-muted-foreground">
-                Chọn <strong>Tạo ô</strong>, kéo vùng trên trang, rồi ghi nhận
-                xét chỉnh sửa.
+                {readOnly
+                  ? "TE chưa để lại ô nhận xét trên trang này."
+                  : (
+                    <>
+                      Chọn <strong>Tạo ô</strong>, kéo vùng trên trang, rồi ghi nhận
+                      xét chỉnh sửa.
+                    </>
+                  )}
               </p>
             ) : (
               <ul className="te-tantou-pick-list">
@@ -605,51 +615,69 @@ export const TantouPageAnnotator = forwardRef<
                           "Chưa có nhận xét"}
                       </span>
                     </button>
-                    <button
-                      type="button"
-                      className="te-tantou-pick__delete"
-                      onClick={() => deleteNote(n.id)}
-                      aria-label={`Xóa ô ${idx + 1}`}
-                    >
-                      ×
-                    </button>
+                    {!readOnly ? (
+                      <button
+                        type="button"
+                        className="te-tantou-pick__delete"
+                        onClick={() => deleteNote(n.id)}
+                        aria-label={`Xóa ô ${idx + 1}`}
+                      >
+                        ×
+                      </button>
+                    ) : null}
                   </li>
                 ))}
               </ul>
             )}
 
             {selectedNote ? (
-              <div className="te-selected-note-editor mt-3">
-                <Label className="te-selected-note-editor__label">
-                  Loại nhận xét
-                  <Select
-                    value={selectedNote.taskType}
-                    onValueChange={(v) =>
-                      updateNoteField(selectedNote.id, "taskType", v)
+              readOnly ? (
+                <div className="te-selected-note-editor mt-3 space-y-2 rounded-lg border border-border/60 bg-muted/20 p-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Loại nhận xét
+                  </p>
+                  <p className="text-sm font-medium">
+                    {tantouReviewNoteLabel(selectedNote.taskType)}
+                  </p>
+                  {selectedNote.text?.trim() ? (
+                    <p className="text-sm leading-relaxed text-foreground">
+                      {selectedNote.text}
+                    </p>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="te-selected-note-editor mt-3">
+                  <Label className="te-selected-note-editor__label">
+                    Loại nhận xét
+                    <Select
+                      value={selectedNote.taskType}
+                      onValueChange={(v) =>
+                        updateNoteField(selectedNote.id, "taskType", v)
+                      }
+                    >
+                      <SelectTrigger className="h-8">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {TANTOU_REVIEW_NOTE_TYPES.map((t) => (
+                          <SelectItem key={t.value} value={t.value}>
+                            {t.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Label>
+                  <Textarea
+                    value={selectedNote.text}
+                    onChange={(e) =>
+                      updateNoteField(selectedNote.id, "text", e.target.value)
                     }
-                  >
-                    <SelectTrigger className="h-8">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {TANTOU_REVIEW_NOTE_TYPES.map((t) => (
-                        <SelectItem key={t.value} value={t.value}>
-                          {t.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Label>
-                <Textarea
-                  value={selectedNote.text}
-                  onChange={(e) =>
-                    updateNoteField(selectedNote.id, "text", e.target.value)
-                  }
-                  placeholder="Mô tả chi tiết vùng cần chỉnh (VD: font thoại quá nhỏ, cần chỉnh khung 3)..."
-                  rows={4}
-                  className="text-sm"
-                />
-              </div>
+                    placeholder="Mô tả chi tiết vùng cần chỉnh (VD: font thoại quá nhỏ, cần chỉnh khung 3)..."
+                    rows={4}
+                    className="text-sm"
+                  />
+                </div>
+              )
             ) : null}
           </section>
         </div>
@@ -693,7 +721,7 @@ export const TantouPageAnnotator = forwardRef<
         <p className="te-editor__legend mt-2 text-xs text-muted-foreground">
           <span className="te-legend te-legend--mangaka">■ Mangaka</span>
           <span className="te-editor__legend-sep">·</span>
-          <span className="te-legend te-legend--tantou">■ Tantou (bạn)</span>
+          <span className="te-legend te-legend--tantou">■ {tantouLegendLabel}</span>
           <span className="te-editor__legend-sep">·</span>
           <span className="te-editor__count">
             {editorialNotes.length} ô nhận xét

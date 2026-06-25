@@ -24,9 +24,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { getSession, logout } from "@/lib/auth.js";
-import { submissionsService } from "@/api/submissions.service.js";
 import { seriesService } from "@/api/series.service.js";
-import { teReviewsService } from "@/api/teReviews.service.js";
+import {
+  buildTeAnnotationCreatePayload,
+  resolveTePageImageUrl,
+  teReviewsService,
+} from "@/api/teReviews.service.js";
 import { getApiErrorMessage, resolveMediaUrl } from "@/api/http.js";
 import { apiSeriesToUi } from "@/utils/apiMappers.js";
 import {
@@ -146,13 +149,13 @@ export default function TantouEditor() {
   const loadQueue = useCallback(async () => {
     setLoading(true);
     try {
-      const queue = await submissionsService.getTeQueue();
+      const queue = await teReviewsService.getPending();
       const mapped = await Promise.all(
         (Array.isArray(queue) ? queue : []).map(async (item) => {
           const chapterId = String(item?._id ?? "");
           let preview = null;
           try {
-            preview = await teReviewsService.getChapterPages(chapterId, 1);
+            preview = await teReviewsService.getAllChapterPages(chapterId);
           } catch {
             preview = null;
           }
@@ -239,25 +242,6 @@ export default function TantouEditor() {
     refresh();
   }
 
-  function buildSeriesReviewScores(reviewData) {
-    const ratings = reviewData?.ratings ?? {};
-    return {
-      pacing_content: Math.round(Number(ratings.pacingContent ?? 0)),
-      visual_art_writing: Math.round(Number(ratings.visualArt ?? 0)),
-      layout_storyboard: Math.round(Number(ratings.layoutStoryboard ?? 0)),
-      localization_technical: Math.round(Number(ratings.localizationTech ?? 0)),
-    };
-  }
-
-function mapNoteTypeToErrorType(taskType) {
-  const value = String(taskType ?? "").toLowerCase();
-  if (value.includes("dialog")) return "dialogue";
-  if (value.includes("script")) return "script";
-  if (value.includes("art")) return "art";
-  if (value.includes("content")) return "content";
-  return "other";
-}
-
 function parseSeriesGenres(series) {
   const genreRaw = series?.genre ?? series?.genres;
   if (Array.isArray(genreRaw)) return genreRaw.filter(Boolean);
@@ -268,6 +252,14 @@ function parseSeriesGenres(series) {
       .filter(Boolean);
   }
   return [];
+}
+
+function mapTeChapterStatus(status) {
+  const value = String(status ?? "").toLowerCase();
+  if (value.includes("eb") || value === "pending_eb") return "forwarded_eb";
+  if (value.includes("revision") || value.includes("reject")) return "revision";
+  if (value.includes("publish") || value.includes("approved")) return "approved_publish";
+  return "pending";
 }
 
 function mapTeQueueItem(item, preview) {
@@ -281,7 +273,7 @@ function mapTeQueueItem(item, preview) {
   const authorId =
     authorObj && typeof authorObj === "object" ? authorObj._id : authorObj;
   const submittedBy = item?.submitted_by ?? {};
-  const previewPage = preview?.page ?? null;
+  const previewPage = preview?.page ?? preview?.pages?.[0] ?? null;
   const mangakaName = submittedBy.full_name ?? submittedBy.username ?? "Mangaka";
 
   return {
@@ -295,12 +287,10 @@ function mapTeQueueItem(item, preview) {
     pageLabel: previewPage?.page_number
       ? `Trang ${previewPage.page_number}`
       : "Trang 1",
-    mangakaImageUrl: resolveMediaUrl(
-      previewPage?.result_image_url ?? previewPage?.original_image_url ?? null,
-    ),
+    mangakaImageUrl: resolveTePageImageUrl(previewPage),
     mangakaName,
     pipeline: "debut",
-    status: "pending",
+    status: mapTeChapterStatus(item?.status),
     sentAt: item?.updatedAt ?? item?.createdAt ?? null,
     pagesMeta: Array.isArray(preview?.pages) ? preview.pages : [],
     seriesMeta: {
@@ -345,28 +335,25 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
 
   async function syncChapterAnnotations(chapter) {
     if (!chapter?.chapterId) return;
-    const pages = Array.isArray(chapter.pagesMeta) ? chapter.pagesMeta : [];
-    if (!pages.length) return;
 
+    const existing = await teReviewsService.getAnnotations(chapter.chapterId);
+    const list = Array.isArray(existing) ? existing : [];
     await Promise.all(
-      pages.map(async (page) => {
-        const existing = await teReviewsService.getAnnotations(
-          chapter.chapterId,
-          page._id,
-        );
-        await Promise.all(
-          (Array.isArray(existing) ? existing : []).map((annotation) =>
-            teReviewsService.deleteAnnotation(chapter.chapterId, annotation._id),
-          ),
-        );
-      }),
+      list.map((annotation) =>
+        teReviewsService.deleteAnnotation(chapter.chapterId, annotation._id),
+      ),
     );
   }
 
-  async function createChapterAnnotations(chapter, editorialNotesByPage) {
+  async function createChapterAnnotations(chapter, editorialNotesByPage, pagesMetaOverride) {
     if (!chapter?.chapterId) return;
-    const pages = Array.isArray(chapter.pagesMeta) ? chapter.pagesMeta : [];
-    if (!pages.length) return;
+    const pages = Array.isArray(pagesMetaOverride)
+      ? pagesMetaOverride
+      : (Array.isArray(chapter.pagesMeta) ? chapter.pagesMeta : []);
+    if (!pages.length) {
+      toast.error("Thiếu danh sách page để lưu annotation.");
+      return;
+    }
 
     const notesMap = editorialNotesByPage ?? {};
     const createJobs = [];
@@ -374,18 +361,10 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
     pages.forEach((page, pageIndex) => {
       const notes = Array.isArray(notesMap[pageIndex]) ? notesMap[pageIndex] : [];
       notes.forEach((note) => {
+        const payload = buildTeAnnotationCreatePayload(note, page);
+        if (!payload) return;
         createJobs.push(
-          teReviewsService.createAnnotation(chapter.chapterId, {
-            page_id: page._id,
-            region: {
-              x: Number(note.x ?? 0),
-              y: Number(note.y ?? 0),
-              width: Number(note.w ?? 0),
-              height: Number(note.h ?? 0),
-            },
-            content: String(note.text ?? "").trim() || "No detail",
-            error_type: mapNoteTypeToErrorType(note.taskType),
-          }),
+          teReviewsService.createAnnotation(chapter.chapterId, payload),
         );
       });
     });
@@ -408,24 +387,9 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
     const nextChapterNumber = String(
       reviewData.chapter_number ?? selected.chapterNum ?? "",
     ).trim();
-    const nextChapterTitle = String(reviewData.chapter_title ?? selected.chapterTitle ?? "").trim();
-    const nextSeriesId = String(
-      reviewData.series_id ?? selected.seriesId ?? "",
-    ).trim();
     const nextSeriesName =
       String(reviewData.series_name ?? selected.seriesTitle).trim() ||
       selected.seriesTitle;
-    const nextSeriesGenre = Array.isArray(reviewData.series_genre)
-      ? reviewData.series_genre
-      : [];
-    const nextSeriesTags = Array.isArray(reviewData.series_tags)
-      ? reviewData.series_tags
-      : [];
-    const nextSeriesSynopsis = String(reviewData.series_synopsis ?? "").trim();
-    const nextSeriesCover = String(reviewData.series_cover_image_url ?? "").trim();
-    const nextSeriesAuthorId = String(
-      reviewData.series_author_id ?? selected.seriesMeta?.authorId ?? "",
-    ).trim();
     const nextSeriesAuthorName = String(
       reviewData.series_author_name ??
         selected.seriesMeta?.authorName ??
@@ -433,55 +397,43 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
         "",
     ).trim();
     const editorialNotesByPage = reviewData.editorialNotesByPage ?? {};
+    const pagesMeta =
+      reviewData.pagesMeta ??
+      selected.pagesMeta ??
+      [];
 
     if (nextStatus === "reject" && !nextText) {
       toast.error("Nhập lý do trước khi gửi Mangaka chỉnh.");
       return;
     }
 
-    if (!selected.seriesId) {
-      toast.error("Thiếu series_id để gửi review.");
+    if (!nextChapterId) {
+      toast.error("Thiếu chapter_id để gửi review.");
       return;
     }
 
     setSaving(true);
     try {
-      const payload = {
-        scores: buildSeriesReviewScores(reviewData),
-        feedback: nextText,
-        quick_notes: nextText,
-        revision_feedback: nextStatus === "reject" ? nextText : "",
-        metadata: {
-          chapter_id: nextChapterId,
-          chapter_number: nextChapterNumber,
-          chapter_title: nextChapterTitle,
-          series_id: nextSeriesId,
-          series_name: nextSeriesName,
-          series_genre: nextSeriesGenre,
-          series_tags: nextSeriesTags,
-          series_synopsis: nextSeriesSynopsis,
-          series_cover_image_url: nextSeriesCover,
-          series_author_id: nextSeriesAuthorId,
-          series_author_name: nextSeriesAuthorName,
-          average_score: nextAverage,
-        },
-      };
-
       await syncChapterAnnotations(selected);
-      await createChapterAnnotations(selected, editorialNotesByPage);
+      await createChapterAnnotations(
+        selected,
+        editorialNotesByPage,
+        pagesMeta,
+      );
 
       if (nextStatus === "publish" || nextStatus === "reject") {
-        const result = await teReviewsService.submitSeriesReview(
-          selected.seriesId,
-          payload,
-        );
-        const route = result?.auto_route;
         if (nextStatus === "reject") {
+          await teReviewsService.teAction(nextChapterId, {
+            action: "reject",
+            notes: [nextText],
+          });
           toast.success("Đã gửi về Mangaka.");
-        } else if (route === "EB") {
-          toast.success("Đã chuyển series sang Editor Board.");
         } else {
-          toast.success("Đã duyệt và chuyển bước phát hành.");
+          await teReviewsService.teAction(nextChapterId, {
+            action: "approve",
+            ...(nextText ? { notes: [nextText] } : {}),
+          });
+          toast.success(`Đã chuyển sang ${LABEL_EDITOR_BOARD}.`);
         }
       }
 

@@ -1,3 +1,4 @@
+import { resolveTePageImageUrl } from "@/api/teReviews.service.js";
 import {
   readMangakaWorkspace,
   resolveAnnotatorChapter,
@@ -65,6 +66,100 @@ export function normalizePageNotes(raw: unknown): PageNote[] {
       text: String((n as PageNote).text ?? ""),
       taskType: String((n as PageNote).taskType ?? "other"),
     }));
+}
+
+export function mapApiAnnotationsToPageNotes(annotations: unknown[]): PageNote[] {
+  if (!Array.isArray(annotations)) return [];
+  return annotations.map((raw, idx) => {
+    const ann = raw as Record<string, unknown>;
+    const region = ann.region as Record<string, number> | undefined;
+    return {
+      id: String(ann._id ?? `api-${idx}`),
+      x: Number(ann.x ?? region?.x ?? 0),
+      y: Number(ann.y ?? region?.y ?? 0),
+      w: Number(ann.w ?? region?.width ?? 0),
+      h: Number(ann.h ?? region?.height ?? 0),
+      text: String(ann.content ?? ""),
+      taskType: String(ann.error_type ?? ann.annotation_type ?? "other"),
+    };
+  });
+}
+
+export function mapApiAnnotationsToNotesByPage(
+  annotations: unknown[],
+  pagesMeta: Array<{ _id?: string; id?: string; page_number?: number; width?: number; height?: number }> = [],
+): Record<number, PageNote[]> {
+  const byPage: Record<number, PageNote[]> = {};
+  if (!Array.isArray(annotations)) return byPage;
+
+  annotations.forEach((raw, idx) => {
+    const ann = raw as Record<string, unknown>;
+    const pageId = ann.page_id;
+    const pageIdx = pagesMeta.findIndex(
+      (p) => {
+        const id = p._id ?? (p as { id?: string }).id;
+        return id && String(id) === String(pageId);
+      },
+    );
+    const index = pageIdx >= 0 ? pageIdx : 0;
+    const page = pagesMeta[index];
+    const [note] = mapApiAnnotationsToPageNotes([
+      normalizeRevisionAnnotationRecord(ann, page),
+    ]);
+    if (!note) return;
+    note.id = String(ann._id ?? `api-${idx}`);
+    if (!byPage[index]) byPage[index] = [];
+    byPage[index].push(note);
+  });
+
+  return byPage;
+}
+
+/** TE reject copy: region có thể là % hoặc pixel — chuẩn hóa về % cho canvas. */
+function normalizeRevisionAnnotationRecord(
+  ann: Record<string, unknown>,
+  page?: { width?: number; height?: number },
+) {
+  const region = ann.region as Record<string, number> | undefined;
+  const pageWidth = Number(page?.width ?? 728) || 728;
+  const pageHeight = Number(page?.height ?? 1030) || 1030;
+
+  let x = Number(ann.x ?? region?.x ?? 0);
+  let y = Number(ann.y ?? region?.y ?? 0);
+  let w = Number(ann.w ?? region?.width ?? 0);
+  let h = Number(ann.h ?? region?.height ?? 0);
+
+  const looksLikePixels =
+    x > 100 || y > 100 || w > 100 || h > 100 || x + w > pageWidth;
+
+  if (looksLikePixels) {
+    x = (x / pageWidth) * 100;
+    y = (y / pageHeight) * 100;
+    w = (w / pageWidth) * 100;
+    h = (h / pageHeight) * 100;
+  }
+
+  return {
+    ...ann,
+    x,
+    y,
+    w,
+    h,
+    region: {
+      x,
+      y,
+      width: w,
+      height: h,
+    },
+  };
+}
+
+/** Map chapter.revision_annotations (sau TE reject) sang notes theo page index. */
+export function mapChapterRevisionAnnotationsToNotesByPage(
+  annotations: unknown[],
+  pagesMeta: Array<{ _id?: string; id?: string; page_number?: number; width?: number; height?: number }> = [],
+): Record<number, PageNote[]> {
+  return mapApiAnnotationsToNotesByPage(annotations, pagesMeta);
 }
 
 export function createReviewDraft(submission: TantouSubmission | null): ReviewDraft {
@@ -243,6 +338,17 @@ export function resolveStoryPagesForChapter(
   submission: TantouSubmission,
   relatedSubmissions: TantouSubmission[],
 ): StoryPage[] {
+  const pagesMeta = submission?.pagesMeta;
+  if (Array.isArray(pagesMeta) && pagesMeta.length) {
+    return pagesMeta.map((page, index) => ({
+      pageIndex: index,
+      pageLabel: page.page_number
+        ? `Trang ${page.page_number}`
+        : `Trang ${index + 1}`,
+      imageUrl: resolveTePageImageUrl(page) ?? undefined,
+    }));
+  }
+
   const fromWorkspace = resolveStoryPagesForSubmission(submission);
   if (fromWorkspace.length) return fromWorkspace;
   const pageSubs = getChapterPageSubmissions(relatedSubmissions, submission);

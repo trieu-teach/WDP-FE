@@ -71,6 +71,7 @@ export function NotificationBell({ className }) {
   }
 
   return (
+    <>
     <DropdownMenu onOpenChange={(open) => { if (open) void refresh() }}>
       <DropdownMenuTrigger asChild>
         <Button
@@ -220,12 +221,13 @@ export function NotificationBell({ className }) {
           </div>
         ) : null}
       </DropdownMenuContent>
-      <NotificationDetailDialog
-        notification={openDetail}
-        open={Boolean(openDetail)}
-        onOpenChange={(o) => { if (!o) setOpenDetail(null) }}
-      />
     </DropdownMenu>
+    <NotificationDetailDialog
+      notification={openDetail}
+      open={Boolean(openDetail)}
+      onOpenChange={(o) => { if (!o) setOpenDetail(null) }}
+    />
+    </>
   )
 }
 
