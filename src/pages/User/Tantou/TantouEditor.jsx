@@ -448,7 +448,7 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
       if (nextStatus === "publish" || nextStatus === "reject") {
         if (nextStatus === "reject") {
           await teReviewsService.teAction(nextChapterId, {
-            action: "request_revision",
+            action: "reject",
             notes: [nextText],
           });
           toast.success("Đã gửi về Mangaka.");

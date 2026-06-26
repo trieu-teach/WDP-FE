@@ -265,14 +265,14 @@ export const teReviewsService = {
 
   /**
    * POST /te-reviews/chapter/:chapterId/te-action
-   * action: forward_eb | request_revision | approve | ...
+   * action: approve (gửi EB) | reject (yêu cầu Mangaka sửa)
    */
   teAction(chapterId, { action, notes } = {}) {
     const mappedAction =
-      action === 'forward_eb'
-        ? 'forward_eb'
+      action === 'approve' || action === 'forward_eb' || action === 'publish'
+        ? 'approve'
         : action === 'reject' || action === 'request_revision'
-          ? 'request_revision'
+          ? 'reject'
           : action
     const body = { action: mappedAction }
     if (Array.isArray(notes) && notes.length) {
