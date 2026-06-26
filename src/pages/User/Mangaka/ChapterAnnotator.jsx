@@ -362,7 +362,16 @@ export default function ChapterAnnotator({
       }
 
       if (workspaceApi?.uploadChapterPages) {
-        newPages = await workspaceApi.uploadChapterPages(targetId, filesToAdd)
+        const uploadedPages = await workspaceApi.uploadChapterPages(targetId, filesToAdd)
+        newPages = Array.isArray(uploadedPages) ? uploadedPages : []
+        // Deduplicate theo id để chắc chắn không có page trùng (BE có thể trả về list đầy đủ)
+        const seen = new Set()
+        newPages = newPages.filter(p => {
+          const k = p?.id ?? p?._id
+          if (!k || seen.has(k)) return false
+          seen.add(k)
+          return true
+        })
         setNotes(prev => {
           const next = { ...prev }
           const startIdx = target.pages.length
@@ -372,9 +381,6 @@ export default function ChapterAnnotator({
           }
           return next
         })
-        setChapters(prev => prev.map(ch =>
-          ch.id !== targetId ? ch : { ...ch, pages: [...ch.pages, ...newPages] },
-        ))
       } else {
         for (let i = 0; i < filesToAdd.length; i++) {
           const url = await fileToStorableDataUrl(filesToAdd[i])

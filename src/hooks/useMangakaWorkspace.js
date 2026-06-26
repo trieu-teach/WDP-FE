@@ -255,23 +255,47 @@ export function useMangakaWorkspace(user) {
 
   const uploadChapterPages = useCallback(async (chapterId, files, pageNotes = []) => {
     const uploaded = await chaptersService.uploadPages(chapterId, files, pageNotes)
-    const pageList = (Array.isArray(uploaded) ? uploaded : [uploaded])
-      .filter(Boolean)
-      .map(p => (Array.isArray(p) ? p[0] : p))
-    const uiPages = pageList.map(apiPageToUi)
-    setAnnotatorChapters(prev => prev.map(ch => {
-      if (ch.id !== chapterId) return ch
-      return { ...ch, pages: [...ch.pages, ...uiPages] }
-    }))
+    // BE có thể trả:
+    //  - flat array of pages
+    //  - nested array (mỗi element là array 1 page)
+    //  - { data: [...] } envelope
+    let rawList = []
+    if (Array.isArray(uploaded)) {
+      rawList = uploaded
+    } else if (uploaded && typeof uploaded === 'object') {
+      const inner = uploaded.data ?? uploaded.pages ?? uploaded
+      rawList = Array.isArray(inner) ? inner : (inner ? [inner] : [])
+    }
+    // Flatten trường hợp BE trả nested array, đồng thời unwrap { data: page }
+    const flat = rawList.flatMap(p => {
+      if (Array.isArray(p)) return p
+      return [p?.data ?? p]
+    }).filter(Boolean)
+    const uiPages = flat.map(apiPageToUi)
+    // Deduplicate theo id — phòng BE trả về list đầy đủ (kể cả page cũ)
+    const seen = new Set()
+    const deduped = uiPages.filter(p => {
+      const k = p?.id ?? p?._id
+      if (!k || seen.has(k)) return false
+      seen.add(k)
+      return true
+    })
+    setAnnotatorChapters(prev => {
+      const target = prev.find(ch => ch.id === chapterId)
+      const existingIds = new Set((target?.pages ?? []).map(p => p?.id ?? p?._id))
+      const additions = deduped.filter(p => {
+        const k = p?.id ?? p?._id
+        return k && !existingIds.has(k)
+      })
+      if (!additions.length) return prev
+      return prev.map(ch => (
+        ch.id !== chapterId ? ch : { ...ch, pages: [...ch.pages, ...additions] }
+      ))
+    })
     chapterPagesFetchRef.current.add(chapterId)
     chapterPagesInflightRef.current.delete(chapterId)
     chapterUploadTimeRef.current.set(chapterId, Date.now())
-    return uiPages
-    setChapterRows(prev => prev.map(r => {
-      if (r.id !== chapterId) return r
-      return { ...r, pages: (r.pages ?? 0) + pageList.length, date: new Date().toLocaleDateString('vi-VN') }
-    }))
-    return pageList
+    return deduped
   }, [])
 
   const deleteChapterPage = useCallback(async (chapterId, pageId) => {

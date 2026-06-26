@@ -38,9 +38,8 @@ const MAX_ZOOM = 5
 function loadImage(src) {
   return new Promise((resolve, reject) => {
     const img = new Image()
-    img.crossOrigin = 'anonymous'
     img.onload = () => resolve(img)
-    img.onerror = reject
+    img.onerror = () => reject(new Error(`[LayerCanvas] image load failed: ${src}`))
     img.src = src
   })
 }
@@ -87,16 +86,21 @@ export default function LayerCanvas({
         const next = { ...cur }
         results.forEach((r, i) => {
           if (r.status === 'fulfilled') next[newOnes[i]] = r.value
+          else console.warn(r.reason?.message ?? '[LayerCanvas] image load rejected', newOnes[i])
         })
         return next
       })
       setImgLoading(false)
     })
     return () => { cancelled = true }
-  }, [sorted, imgCache, baseImage])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sorted, baseImage])
 
   // Render canvas
   useEffect(() => {
+    if (import.meta.env.DEV) {
+      console.debug('[LayerCanvas.effect]', { mode, showRegion, showNotes, notesLen: notes.length, region, baseImage: !!baseImage })
+    }
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
@@ -107,13 +111,27 @@ export default function LayerCanvas({
       ctx.fillRect(0, 0, canvas.width, canvas.height)
     }
 
+    let cancelled = false
     const drawList = sorted.filter((l) => l.visible)
 
     async function draw() {
       try {
         // Vẽ ảnh gốc làm nền
         if (baseImage) {
-          const baseImg = imgCache[baseImage]
+          let baseImg = imgCache[baseImage]
+          // Fallback: nếu cache chưa có (effect preload chưa chạy xong), load ngay trong draw.
+          // Tránh trường hợp mở chapter → canvas trống → phải đợi state đổi mới hiện ảnh gốc.
+          if (!baseImg) {
+            try {
+              baseImg = await loadImage(baseImage)
+              if (cancelled) return
+              setImgCache((cur) => ({ ...cur, [baseImage]: baseImg }))
+            } catch {
+              // load fail → bỏ qua, sẽ retry ở effect sau
+              if (cancelled) return
+            }
+          }
+          if (cancelled) return
           if (baseImg) {
             ctx.drawImage(baseImg, 0, 0, canvas.width, canvas.height)
           }
@@ -174,6 +192,20 @@ export default function LayerCanvas({
               ctx.setLineDash([8, 4])
               ctx.strokeRect(nx, ny, nw, nh)
               ctx.setLineDash([])
+
+              // Badge "Mangaka" cho note từ chapterAnnotations (read-only) — đặt ở góc trên-phải vùng note
+              if (note.source === 'chapterAnnotations') {
+                ctx.font = 'bold 10px sans-serif'
+                const badgeText = 'Mangaka'
+                const bw = ctx.measureText(badgeText).width + 10
+                const bh = 16
+                const bx = nx + nw - bw - 4
+                const by = ny + 4
+                ctx.fillStyle = 'rgba(245, 158, 11, 0.95)'
+                ctx.fillRect(bx, by, bw, bh)
+                ctx.fillStyle = '#ffffff'
+                ctx.fillText(badgeText, bx + 5, by + 11)
+              }
 
               // Text bên trong vùng khoanh với word-wrap
               const labelText = (note.text && note.text.trim().length > 0) ? note.text.trim() : 'Ghi chú'
@@ -257,6 +289,7 @@ export default function LayerCanvas({
       }
     }
     draw()
+    return () => { cancelled = true }
   }, [sorted, imgCache, mode, region, notes, showRegion, showNotes, baseImage])
 
   // Zoom with wheel — phải gắn qua DOM với passive: false để preventDefault hoạt động

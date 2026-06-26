@@ -62,7 +62,29 @@ function parseRevisionNotes(revisionNotes, revisionAnnotations, pageCount) {
 
   // Ưu tiên structured annotations
   if (Array.isArray(revisionAnnotations) && revisionAnnotations.length > 0) {
-    return revisionAnnotations
+    // Shape mới từ BE: [{ _id, page_id, region: {x, y, width, height}, content, error_type }]
+    // → convert sang UI shape mà LayerEditor đọc được (x, y, w, h, text, taskType)
+    const mapped = revisionAnnotations.map((n, idx) => {
+      const region = n.region ?? {}
+      const w = Number(region.width ?? n.w ?? n.width ?? 0)
+      const h = Number(region.height ?? n.h ?? n.height ?? 0)
+      const x = Number(region.x ?? n.x ?? 0)
+      const y = Number(region.y ?? n.y ?? 0)
+      return {
+        id: n._id ?? n.id ?? `ra-${idx}`,
+        pageId: n.page_id ?? n.pageId ?? null,
+        taskType: n.error_type ?? n.taskType ?? 'paint',
+        text: n.content ?? n.text ?? '',
+        x,
+        y,
+        w,
+        h,
+        status: n.status ?? 'open',
+        // pageIndex sẽ được resolve sau bằng cách match page_id với pages
+        pageIndex: 0,
+      }
+    })
+    return mapped
   }
 
   // Nếu revision_annotations là object {page_0: [...], page_1: [...]} → flat ra
@@ -291,6 +313,15 @@ export function useAssistantAssignments() {
       pages.length,
     )
 
+    // Resolve pageIndex cho từng note dựa trên pageId ↔ pages[i].id
+    const resolvedNotes = revisionNotesParsed.map(n => {
+      if (n.pageId) {
+        const idx = pages.findIndex(p => p?.id === n.pageId)
+        if (idx >= 0) return { ...n, pageIndex: idx }
+      }
+      return n
+    })
+
     // Chuẩn hóa chapter object
     const safeChapter = {
       _id: chapter?._id ?? chapter?.id ?? chapterId,
@@ -305,7 +336,7 @@ export function useAssistantAssignments() {
       revision_notes_parsed: revisionNotesParsed,
     }
 
-    return { chapter: safeChapter, pages, taskNotes, revisionNotesParsed }
+    return { chapter: safeChapter, pages, taskNotes, revisionNotesParsed: resolvedNotes }
   }, [])
 
   const loadPageDetail = useCallback(async (pageId, taskNotes = null) => {

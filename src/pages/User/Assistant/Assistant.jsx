@@ -149,11 +149,15 @@ export default function Assistant() {
     const firstAssignment = assignments[0]
     if (!assignments.some(a => a.chapterId === selectedChapterId)) {
       setSelectedChapterId(firstAssignment?.chapterId ?? null)
+      // Set pages initial từ assignment (nếu BE populate sẵn) để hiển thị ngay
+      if (firstAssignment?.pages?.length) {
+        setSelectedChapterPages(firstAssignment.pages)
+      }
       // Load pages ngay để hiển thị ảnh thumbnail
       if (firstAssignment?.chapterId) {
         void loadChapterPages(firstAssignment.chapterId, firstAssignment._task)
           .then(({ pages, chapter, revisionNotesParsed }) => {
-            setSelectedChapterPages(pages)
+            setSelectedChapterPages(prev => pages?.length ? pages : prev)
             setSelectedChapterDetail({ ...chapter, revision_notes_parsed: revisionNotesParsed })
           })
           .catch(() => null)
@@ -180,12 +184,15 @@ export default function Assistant() {
     const key = String(selectedChapter.chapterId)
     const task = chapterTaskMap[key] ?? null
     const seriesTitle = selectedChapterDetail?.seriesTitle ?? selectedChapter.seriesTitle ?? ''
+    // Ưu tiên selectedChapterPages (từ loadChapterPages); fallback assignment.pages hoặc selectedChapter.pages
+    const pages = selectedChapterPages.length > 0
+      ? selectedChapterPages
+      : (selectedChapter.pages?.length > 0 ? selectedChapter.pages : [])
     return {
       ...selectedChapter,
       ...selectedChapterDetail,
       seriesTitle,
-      // Ưu tiên selectedChapterPages (từ loadChapterPages), không dùng selectedChapter.pages vì nó luôn []
-      pages: selectedChapterPages,
+      pages,
       _task: task,
     }
   }, [selectedChapter, chapterTaskMap, selectedChapterPages, selectedChapterDetail])
@@ -250,11 +257,17 @@ export default function Assistant() {
 
   async function handleSelectChapter(chapter) {
     setSelectedChapterId(chapter.chapterId)
-    setSelectedChapterPages([])
+    // Set pages từ assignment ngay (nếu có) để hiển thị ngay lập tức
+    setSelectedChapterPages(chapter.pages ?? [])
     setSelectedChapterDetail(null)
-    const result = await loadChapterPages(chapter.chapterId, chapter._task)
-    setSelectedChapterPages(result.pages)
-    setSelectedChapterDetail({ ...result.chapter, revision_notes_parsed: result.revisionNotesParsed })
+    try {
+      const result = await loadChapterPages(chapter.chapterId, chapter._task)
+      // Ưu tiên pages từ BE; nếu rỗng thì giữ nguyên từ assignment
+      setSelectedChapterPages(prev => result.pages?.length ? result.pages : prev)
+      setSelectedChapterDetail({ ...result.chapter, revision_notes_parsed: result.revisionNotesParsed })
+    } catch {
+      // Giữ pages đã có từ assignment
+    }
   }
 
   async function handleCooperationAction(req, action) {
@@ -680,13 +693,30 @@ export default function Assistant() {
           <div className="flex h-full min-h-0 flex-col overflow-hidden">
             {selectedWithTask ? (
               <div className="group/editor relative flex h-full min-h-0 flex-col">
-                <LayerEditor
-                  chapter={selectedWithTask}
-                  pages={selectedChapterPages}
-                  task={selectedWithTask._task}
-                  pageId={selectedWithTask._task?.pageId ?? null}
-                  onSubmitted={() => { void refreshTasks(); void refresh() }}
-                />
+                {(() => {
+                  const pagesCount = (selectedWithTask.pages ?? []).length
+                  const pagesWithUrl = (selectedWithTask.pages ?? []).filter(p => p?.url).length
+                  if (import.meta.env.DEV) {
+                    console.debug('[Assistant] selectedWithTask:', {
+                      chapterId: selectedWithTask.chapterId,
+                      pagesCount,
+                      pagesWithUrl,
+                      samplePage: selectedWithTask.pages?.[0],
+                      hasTask: !!selectedWithTask._task,
+                      taskStatus: selectedWithTask._task?.status,
+                      hasRevisionNotes: !!(selectedWithTask.revision_notes_parsed?.length || selectedWithTask.revision_annotations),
+                    })
+                  }
+                  return (
+                    <LayerEditor
+                      chapter={selectedWithTask}
+                      pages={selectedWithTask.pages ?? []}
+                      task={selectedWithTask._task}
+                      pageId={selectedWithTask._task?.pageId ?? null}
+                      onSubmitted={() => { void refreshTasks(); void refresh() }}
+                    />
+                  )
+                })()}
                 <Button
                   size="sm"
                   variant="secondary"

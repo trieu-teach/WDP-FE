@@ -155,6 +155,7 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
             status: n.status ?? 'open',
             assignee: n.assignee ?? '',
             layerIndex: n.layerIndex ?? null,
+            source: 'chapterAnnotations',
           })
         }
       }
@@ -178,6 +179,7 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
             status: 'open',
             assignee: '',
             layerIndex: null,
+            source: 'chapterAnnotations',
           })
         }
       }
@@ -211,12 +213,17 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
       results.push(...chapterPageAnnotations.map(n => ({ ...n, source: n.source ?? 'chapterAnnotations' })))
     }
 
-    // 3. Fallback: gọi API lấy notes theo pageId nếu chưa có gì
-    if (results.length === 0 && activePageId) {
+    // 3. Notes từ API /pages/:id/notes — luôn gọi để chắc chắn note có trong DB hiện lên
+    if (activePageId) {
       setNotesLoading(true)
       try {
         const res = await chaptersService.getPageNotes(activePageId).catch(() => [])
-        results.push(...(Array.isArray(res) ? res : []).map(n => ({ ...apiNoteToUi(n), source: 'api' })))
+        const raw = Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : [])
+        const mapped = raw.map(n => ({ ...apiNoteToUi(n), source: 'api' }))
+        if (import.meta.env.DEV) {
+          console.debug('[LayerEditor.loadNotes] /pages/:id/notes returned', mapped.length, 'notes for pageId', activePageId, mapped)
+        }
+        results.push(...mapped)
       } finally {
         setNotesLoading(false)
       }
@@ -276,6 +283,21 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
   // Ưu tiên: URL từ chapter pages (loadChapterPages đã gọi sẵn).
   // Fallback: originalImage từ usePageLayers (chỉ khi page chưa có URL — trường hợp BE không trả URL trong page).
   const baseImage = safePage?.url ?? originalImage ?? null
+
+  if (import.meta.env.DEV) {
+    console.debug('[LayerEditor]', {
+      pagesCount: pages.length,
+      pageIdx,
+      safeIdx,
+      hasSafePage: !!safePage,
+      safePageId: safePage?.id,
+      safePageUrl: safePage?.url,
+      originalImage,
+      baseImage,
+      layersCount: layers.length,
+      activePageId,
+    })
+  }
 
   async function handleAddLayer(file) {
     if (!activePageId) {
