@@ -100,7 +100,12 @@ const STATS = [
   { value: '98%', label: 'Hài lòng quy trình', icon: Star },
 ]
 
-const GENRES = ['Hành động', 'Huyền huyễn', 'Tình cảm', 'Sci-fi', 'Phiêu lưu', 'Kinh dị', 'Isekai', 'Hài hước', 'Học đường']
+const GENRES = [
+  'Hành Động', 'Phiêu Lưu', 'Hài Hước', 'Drama', 'Lãng Mạn', 'Kinh Dị',
+  'Thể Thao', 'Siêu Nhiên', 'Võ Thuật', 'Isekai', 'Huyền Bí', 'Trùng Sinh',
+  'Học Đường', 'Viễn Tưởng', 'Slice of Life', 'Harem', 'Ecchi', 'Manhwa',
+  'Manhua', 'Webtoons', 'Shounen', 'Shoujo', 'Ngôn Tình', 'Nữ Cường',
+]
 
 function rankingToFeaturedCard(item, index) {
   const r = apiRankingToUi(item, index)

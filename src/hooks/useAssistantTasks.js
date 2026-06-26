@@ -16,11 +16,13 @@ export function useAssistantTasks({ chapterId, pageId } = {}) {
         tasksService.getMyAssignments({ limit: 100 }),
         tasksService.getStats().catch(() => null),
       ])
-      const list = Array.isArray(assignmentsRes?.items)
-        ? assignmentsRes.items
-        : (Array.isArray(assignmentsRes) ? assignmentsRes : [])
+      const list = Array.isArray(assignmentsRes?.data)
+        ? assignmentsRes.data
+        : Array.isArray(assignmentsRes?.items)
+          ? assignmentsRes.items
+          : Array.isArray(assignmentsRes) ? assignmentsRes : []
       setAllTasks(list.map(apiTaskToUi))
-      setStats(statsRes ?? null)
+      setStats(statsRes?.data ?? statsRes ?? null)
     } catch (err) {
       toast.error(getApiErrorMessage(err, 'Không tải được danh sách task.'))
     } finally {
@@ -57,19 +59,16 @@ export function useAssistantTasks({ chapterId, pageId } = {}) {
   }, [])
 
   /**
-   * Flow mới (1 task = 1 chapter): Assistant nộp nhiều ảnh kết quả cho 1 task.
+   * Flow mới (1 task = 1 chapter): Assistant nộp nhiều ảnh kết quả cho 1 chapter.
    * Số lượng ảnh = số trang của chapter.
+   * @param {string} chapterId
+   * @param {File[]} resultFiles
    */
-  const submitChapterTask = useCallback(async (taskId, resultFiles) => {
+  const submitChapterTask = useCallback(async (chapterId, resultFiles) => {
     const list = Array.isArray(resultFiles) ? resultFiles : [resultFiles]
-    let updated
-    if (list.length > 1) {
-      updated = await tasksService.submitChapter(taskId, list)
-    } else {
-      updated = await tasksService.submit(taskId, list[0])
-    }
+    const updated = await tasksService.submitChapter(chapterId, list)
     const ui = apiTaskToUi(updated)
-    setAllTasks(prev => prev.map(t => (t.id === taskId ? ui : t)))
+    setAllTasks(prev => prev.map(t => (t.chapterId === chapterId ? ui : t)))
     return ui
   }, [])
 

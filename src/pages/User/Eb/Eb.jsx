@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
-import { CheckCircle2, Gavel, Star } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Gavel, Star } from "lucide-react";
 import Header from "@/components/User/Header/Header.jsx";
 import Footer from "@/components/User/Footer/Footer.jsx";
 import { WorkspaceHero } from "@/components/layout/WorkspaceHero.jsx";
@@ -25,21 +25,34 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { getSession, logout } from "@/lib/auth.js";
-import {
-  approveEbDebutSeries,
-  readEbDebutApproved,
-  readEbDebutPending,
-} from "@/utils/ebDebutStorage.js";
+import { ebEvaluationsService } from "@/api/ebEvaluations.service.js";
+import { getApiErrorMessage } from "@/api/http.js";
 import { updateSeriesEbAssessmentInWorkspace } from "@/utils/mangakaWorkspaceReader.js";
-import { listTantouSubmissions } from "@/utils/tantouWorkspaceStorage.js";
 import { placeholderPageDataUrl } from "@/utils/placeholderPageDataUrl.js";
 import { LABEL_EDITOR_BOARD } from "@/constants/roleTerminology.js";
+import {
+  EB_SCORE_CRITERIA,
+  EB_SCORE_MAX,
+  EB_PUBLICATION_SCHEDULES,
+  buildEmptyEbComments,
+  buildEmptyEbScores,
+  buildMemberScoresPayload,
+  clampEbScore,
+  formatEbClassification,
+  formatEbScheduledPublishDate,
+  mapEbChapterDetailResponse,
+  mapEbChapterPendingItem,
+  normalizeEbEvaluateResponse,
+  normalizeMemberCommentsMap,
+  normalizeMemberScoreMap,
+  validateEbScore,
+  validateMemberScoresPayload,
+} from "@/utils/ebEvaluationMappers.js";
 import {
   EB_COUNCIL_MEMBERS,
   buildCouncilAggregate,
   readCouncilSeriesScores,
   saveCouncilMemberAssessment,
-  seedCouncilDemoScores,
 } from "@/utils/ebCouncilStorage.js";
 import "./Eb.css";
 
@@ -49,55 +62,27 @@ const NAV_LINKS = [
   { to: "/tantou", label: "Tantou Editor" },
 ];
 
-const COMMON_CRITERIA = [
-  {
-    key: "plotDialogue",
-    label: "Cốt truyện & Lời thoại",
-    hint: "Plot & Dialogue",
-  },
-  {
-    key: "artDesign",
-    label: "Nét vẽ & Tạo hình nhân vật",
-    hint: "Art Style & Character Design",
-  },
-  {
-    key: "panelingCamera",
-    label: "Phân khung & Góc máy",
-    hint: "Paneling & Camera Angles",
-  },
-  { key: "pacingHook", label: "Nhịp độ & Cao trào", hint: "Pacing & Hook" },
-];
-
-const TYPE_CRITERIA = {
-  color: { key: "coloring", label: "Đổ màu & Phối màu", hint: "Coloring" },
-  mono: {
-    key: "toneShading",
-    label: "Sử dụng Tone/Đánh bóng",
-    hint: "Screentone & Shading",
-  },
-};
-
-const SCORE_MAX = 5;
+const SCORE_FIELDS = EB_SCORE_CRITERIA;
+const SCORE_MAX = EB_SCORE_MAX;
 
 function clampScore(value) {
-  const parsed = Number.parseFloat(value);
-  if (Number.isNaN(parsed)) return 0;
-  return Math.min(SCORE_MAX, Math.max(0, parsed));
+  return clampEbScore(value);
 }
 
 function validateScore(value) {
-  const raw = String(value ?? "").trim();
-  if (!raw) return "Vui lòng nhập điểm.";
-  const parsed = Number.parseFloat(raw);
-  if (Number.isNaN(parsed)) return "Điểm phải là số.";
-  if (parsed < 0 || parsed > SCORE_MAX) {
-    return `Điểm phải trong khoảng 0 - ${SCORE_MAX}.`;
-  }
-  const stepped = Math.round(parsed * 2) / 2;
-  if (Math.abs(stepped - parsed) > 0.001) {
-    return "Điểm chỉ nhận bước 0.5 (ví dụ: 3.5, 4.0, 4.5).";
-  }
-  return "";
+  return validateEbScore(value);
+}
+
+function buildInitialNotes() {
+  return buildEmptyEbComments();
+}
+
+function buildInitialScores() {
+  return buildEmptyEbScores();
+}
+
+function buildEmptyScoreErrors() {
+  return Object.fromEntries(SCORE_FIELDS.map((field) => [field.key, ""]));
 }
 
 function ScoreStars({ value }) {
@@ -155,33 +140,6 @@ function getClassification(average) {
     label: "XUẤT SẮC",
     note: "Series chất lượng cao, phù hợp đẩy nổi bật/banner.",
     className: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  };
-}
-
-function buildScoreFields(scoreType) {
-  const typeField = TYPE_CRITERIA[scoreType] ?? TYPE_CRITERIA.color;
-  return [...COMMON_CRITERIA, typeField];
-}
-
-function buildInitialNotes() {
-  return {
-    plotDialogue: "",
-    artDesign: "",
-    panelingCamera: "",
-    pacingHook: "",
-    coloring: "",
-    toneShading: "",
-  };
-}
-
-function buildInitialScores() {
-  return {
-    plotDialogue: "0",
-    artDesign: "0",
-    panelingCamera: "0",
-    pacingHook: "0",
-    coloring: "0",
-    toneShading: "0",
   };
 }
 
@@ -276,22 +234,92 @@ function CouncilScoresTable({
 
 export default function Eb() {
   const navigate = useNavigate();
+  const { chapterId: routeChapterId } = useParams();
   const user = getSession();
+  const isChapterDetail = Boolean(routeChapterId);
   const [councilTick, bumpCouncil] = useState(0);
-  const [selectedTitle, setSelectedTitle] = useState("");
+  const [pendingChapters, setPendingChapters] = useState([]);
+  const [apiLoading, setApiLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [selectedChapterId, setSelectedChapterId] = useState("");
+  const [scheduledPublishAt, setScheduledPublishAt] = useState("");
+  const [publicationSchedule, setPublicationSchedule] = useState("");
   const [activeMemberId, setActiveMemberId] = useState(EB_COUNCIL_MEMBERS[0].id);
-  const [scoreType, setScoreType] = useState("color");
   const [scores, setScores] = useState(buildInitialScores);
   const [criterionNotes, setCriterionNotes] = useState(buildInitialNotes);
-  const [scoreErrors, setScoreErrors] = useState({
-    plotDialogue: "",
-    artDesign: "",
-    panelingCamera: "",
-    pacingHook: "",
-    coloring: "",
-    toneShading: "",
-  });
+  const [overallComment, setOverallComment] = useState("");
+  const [memberNotes, setMemberNotes] = useState("");
+  const [evaluationNotes, setEvaluationNotes] = useState("");
+  const [lastEvaluation, setLastEvaluation] = useState(null);
+  const [scoreErrors, setScoreErrors] = useState(buildEmptyScoreErrors);
+  const [pinnedChapter, setPinnedChapter] = useState(null);
   const refresh = useCallback(() => bumpCouncil((n) => n + 1), []);
+
+  const loadPending = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setApiLoading(true);
+    try {
+      const { items } = await ebEvaluationsService.getChapterPending({
+        page: 1,
+        limit: 50,
+      });
+      const list = (Array.isArray(items) ? items : [])
+        .map(mapEbChapterPendingItem)
+        .filter(Boolean);
+      setPendingChapters(list);
+    } catch (err) {
+      if (!silent) {
+        toast.error(getApiErrorMessage(err, "Không tải được hàng chờ EB."));
+        setPendingChapters([]);
+      }
+    } finally {
+      if (!silent) setApiLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadPending();
+  }, [loadPending, councilTick]);
+
+  const loadChapterDetail = useCallback(async (chapterId) => {
+    if (!chapterId) return null
+    try {
+      const data = await ebEvaluationsService.getChapterDetail(chapterId)
+      const mapped = mapEbChapterDetailResponse(data)
+      if (mapped) {
+        setPinnedChapter(mapped)
+        const latestEval = mapped.evaluationHistory?.at(-1)
+        const normalized = normalizeEbEvaluateResponse({
+          evaluation: latestEval,
+          council_average: mapped.councilAverage,
+          classification: mapped.classification,
+          classification_text: mapped.classificationText,
+        })
+        if (normalized.councilAverage != null) {
+          setLastEvaluation({
+            ...(normalized.evaluation ?? {}),
+            council_average: normalized.councilAverage,
+            classification: normalized.classification,
+            classification_text: normalized.classificationText,
+          })
+        }
+        return mapped
+      }
+    } catch {
+      // fallback: dùng item từ pending list
+    }
+    return null
+  }, []);
+
+  useEffect(() => {
+    if (routeChapterId) {
+      setSelectedChapterId(routeChapterId);
+    }
+  }, [routeChapterId]);
+
+  useEffect(() => {
+    if (!routeChapterId) return
+    void loadChapterDetail(routeChapterId)
+  }, [routeChapterId, loadChapterDetail]);
 
   useEffect(() => {
     function onSync() {
@@ -314,40 +342,55 @@ export default function Eb() {
     navigate("/login");
   }
 
-  const approved = readEbDebutApproved();
-  const pending = readEbDebutPending().filter(
-    (p) => p?.title && !approved[p.title],
-  );
-  const approvedList = Object.keys(approved).filter((k) => approved[k]);
-  const scoreFields = useMemo(() => buildScoreFields(scoreType), [scoreType]);
-  const activeTitle = pending.some((item) => item.title === selectedTitle)
-    ? selectedTitle
-    : (pending[0]?.title ?? "");
+  const activeChapter = useMemo(() => {
+    const targetId = routeChapterId || selectedChapterId;
+    if (targetId) {
+      const fromPending = pendingChapters.find(
+        (c) => c.id === targetId || String(c.raw?._id) === targetId,
+      );
+      if (fromPending) return fromPending;
+      if (
+        pinnedChapter
+        && (pinnedChapter.id === targetId
+          || String(pinnedChapter.raw?._id) === targetId)
+      ) {
+        return pinnedChapter;
+      }
+      return null;
+    }
+    return pendingChapters[0] ?? null;
+  }, [pendingChapters, selectedChapterId, routeChapterId, pinnedChapter]);
 
   useEffect(() => {
-    if (!activeTitle) return;
-    if (!readCouncilSeriesScores(activeTitle)) {
-      seedCouncilDemoScores(activeTitle, scoreType);
-      refresh();
+    const targetId = routeChapterId || selectedChapterId;
+    if (!targetId) return;
+    const fromPending = pendingChapters.find(
+      (c) => c.id === targetId || String(c.raw?._id) === targetId,
+    );
+    if (fromPending) {
+      setPinnedChapter(fromPending);
     }
-  }, [activeTitle, scoreType, refresh]);
+  }, [pendingChapters, routeChapterId, selectedChapterId]);
+
+  const councilKey = activeChapter?.id ?? "";
+  const activeTitle = activeChapter?.seriesName ?? "";
+  const scoreFields = SCORE_FIELDS;
 
   const councilRecord = useMemo(
-    () => (activeTitle ? readCouncilSeriesScores(activeTitle) : null),
-    [activeTitle, councilTick],
+    () => (councilKey ? readCouncilSeriesScores(councilKey) : null),
+    [councilKey, councilTick],
   );
 
   useEffect(() => {
-    if (!activeTitle) return;
-    const record = readCouncilSeriesScores(activeTitle);
-    if (record?.scoreType) setScoreType(record.scoreType);
-
+    if (!councilKey) return;
+    const record = readCouncilSeriesScores(councilKey);
     const memberEntry = record?.members?.[activeMemberId];
     if (memberEntry?.scores) {
+      const normalizedScores = normalizeMemberScoreMap(memberEntry.scores);
       setScores((current) => ({
         ...current,
         ...Object.fromEntries(
-          Object.entries(memberEntry.scores).map(([key, value]) => [
+          Object.entries(normalizedScores).map(([key, value]) => [
             key,
             Number(value).toFixed(1),
           ]),
@@ -355,38 +398,26 @@ export default function Eb() {
       }));
       setCriterionNotes((current) => ({
         ...current,
-        ...(memberEntry.criterionNotes ?? {}),
+        ...normalizeMemberCommentsMap(memberEntry.criterionNotes),
       }));
-      setScoreErrors({
-        plotDialogue: "",
-        artDesign: "",
-        panelingCamera: "",
-        pacingHook: "",
-        coloring: "",
-        toneShading: "",
-      });
+      setOverallComment(memberEntry.overallComment ?? "");
+      setMemberNotes(memberEntry.notes ?? "");
+      setScoreErrors(buildEmptyScoreErrors());
       return;
     }
 
     setScores(buildInitialScores());
     setCriterionNotes(buildInitialNotes());
-    setScoreErrors({
-      plotDialogue: "",
-      artDesign: "",
-      panelingCamera: "",
-      pacingHook: "",
-      coloring: "",
-      toneShading: "",
-    });
-  }, [activeTitle, activeMemberId, councilTick]);
-  const activeTantouSubmission =
-    listTantouSubmissions().find(
-      (submission) => submission.seriesTitle === activeTitle,
-    ) ?? null;
+    setOverallComment("");
+    setMemberNotes("");
+    setScoreErrors(buildEmptyScoreErrors());
+  }, [councilKey, activeMemberId, councilTick]);
   const activeSeriesImage =
-    activeTantouSubmission?.mangakaImageUrl ||
+    activeChapter?.previewImageUrl ||
     placeholderPageDataUrl(
-      activeTitle ? `${activeTitle} · Tantou` : "Chưa chọn series",
+      activeChapter
+        ? `${activeChapter.seriesName} · Ch.${activeChapter.chapterNumber}`
+        : "Chưa chọn chapter",
     );
   const average = useMemo(() => {
     const total = scoreFields.reduce(
@@ -418,14 +449,148 @@ export default function Eb() {
     setCriterionNotes((current) => ({ ...current, [key]: value }));
   }
 
-  function handleApprove(title) {
-    approveEbDebutSeries(title);
-    toast.success(`Đã chấp nhận "${title}".`);
-    refresh();
+  function openChapterEvaluate(chapterId) {
+    if (!chapterId) return;
+    setSelectedChapterId(chapterId);
+    void loadChapterDetail(chapterId);
+    navigate(`/eb/chapter/${encodeURIComponent(chapterId)}`);
+  }
+
+  function buildMemberScoresDraft() {
+    return buildMemberScoresPayload({
+      councilRecord,
+      activeMemberId,
+      draft: {
+        scores,
+        criterionNotes,
+        overallComment,
+        notes: memberNotes,
+        enteredBy: user?.name ?? "Đại diện EB",
+      },
+    });
+  }
+
+  function validateCurrentMemberForm() {
+    const nextErrors = Object.fromEntries(
+      scoreFields.map((field) => [field.key, validateScore(scores[field.key])]),
+    );
+    setScoreErrors((current) => ({ ...current, ...nextErrors }));
+    return !Object.values(nextErrors).some(Boolean);
+  }
+
+  async function handleSubmitScores() {
+    if (!activeChapter?.id) {
+      toast.error("Chưa có chapter trong hàng chờ để chấm điểm.");
+      return;
+    }
+    if (!validateCurrentMemberForm()) {
+      toast.error("Có tiêu chí chưa hợp lệ. Vui lòng kiểm tra lại điểm thành viên đang nhập.");
+      return;
+    }
+
+    const memberScores = buildMemberScoresDraft();
+    const payloadError = validateMemberScoresPayload(memberScores);
+    if (payloadError) {
+      toast.error(payloadError);
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await ebEvaluationsService.evaluateChapter(activeChapter.id, {
+        member_scores: memberScores,
+        ...(evaluationNotes.trim() ? { notes: evaluationNotes.trim() } : {}),
+      });
+      const normalized = normalizeEbEvaluateResponse(res);
+      const evaluation = {
+        ...(normalized.evaluation ?? {}),
+        council_average: normalized.councilAverage,
+        classification: normalized.classification,
+        classification_text: normalized.classificationText,
+      };
+      setLastEvaluation(evaluation);
+      setPinnedChapter((current) => {
+        const base =
+          current?.id === activeChapter.id ? current : activeChapter;
+        return {
+          ...base,
+          councilAverage: normalized.councilAverage ?? base?.councilAverage ?? null,
+          classification: normalized.classification ?? base?.classification ?? null,
+          classificationText:
+            normalized.classificationText || base?.classificationText || "",
+        };
+      });
+      if (activeChapter?.id) {
+        setSelectedChapterId(activeChapter.id);
+      }
+      const classificationLabel = formatEbClassification(evaluation);
+      const councilAvg = normalized.councilAverage;
+      toast.success(
+        normalized.message
+        || `Đã gửi điểm Hội đồng${classificationLabel ? ` · ${classificationLabel}` : ""}${councilAvg != null ? ` · DTB ${Number(councilAvg).toFixed(1)}` : ""}.`,
+      );
+      void loadPending({ silent: true });
+      refresh();
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không gửi được điểm đánh giá."));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleConfirmPublish() {
+    if (!activeChapter?.id) {
+      toast.error("Chưa có chapter trong hàng chờ để xác nhận publish.");
+      return;
+    }
+    const schedule = publicationSchedule.trim();
+    const scheduled_publish_at = formatEbScheduledPublishDate(scheduledPublishAt);
+    if (!schedule && !scheduled_publish_at) {
+      toast.error("Chọn lịch phát hành (weekly/monthly) hoặc ngày publish cụ thể.");
+      return;
+    }
+    const hasScores =
+      lastEvaluation?.council_average != null
+      || activeChapter?.councilAverage != null;
+    if (!hasScores) {
+      toast.error("Gửi điểm Hội đồng trước khi xác nhận publish.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await ebEvaluationsService.confirmPublish(activeChapter.id, {
+        ...(schedule ? { publication_schedule: schedule } : {}),
+        ...(scheduled_publish_at ? { scheduled_publish_at } : {}),
+      });
+      const seriesName = res?.series?.name ?? activeChapter?.seriesName ?? "Series";
+      toast.success(
+        res?.message
+        || `Series "${seriesName}" đã publish${scheduled_publish_at ? ` ngày ${scheduled_publish_at}` : ""}${res?.council_average != null ? ` · DTB ${Number(res.council_average).toFixed(1)}` : ""}.`,
+      );
+      setSelectedChapterId("");
+      setScheduledPublishAt("");
+      setPublicationSchedule("");
+      setEvaluationNotes("");
+      setLastEvaluation(null);
+      await loadPending();
+      refresh();
+      if (isChapterDetail) {
+        navigate("/eb");
+      }
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không xác nhận được lịch publish."));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function handleApproveChapter() {
+    void handleConfirmPublish();
   }
 
   function handleSaveAssessment() {
-    if (!activeTitle) {
+    if (!activeChapter?.id) {
       toast.error("Chưa có chapter trong hàng chờ để chấm điểm.");
       return;
     }
@@ -451,18 +616,19 @@ export default function Eb() {
       .filter((criterion) => criterion.note.trim())
       .map((criterion) => `${criterion.label}: ${criterion.note.trim()}`);
 
-    saveCouncilMemberAssessment(activeTitle, activeMemberId, {
-      scoreType,
+    saveCouncilMemberAssessment(councilKey, activeMemberId, {
       scores: Object.fromEntries(
         criterionDetails.map((criterion) => [criterion.key, criterion.score]),
       ),
       criterionNotes: { ...criterionNotes },
+      overallComment,
+      notes: memberNotes,
       average: Number(average.toFixed(1)),
       assessedAt: new Date().toISOString(),
       enteredBy: user?.name ?? "Đại diện EB",
     });
 
-    const updatedRecord = readCouncilSeriesScores(activeTitle);
+    const updatedRecord = readCouncilSeriesScores(councilKey);
     const keys = scoreFields.map((field) => field.key);
     const aggregate = buildCouncilAggregate(updatedRecord, keys);
     const councilClass = getClassification(aggregate.councilAverage);
@@ -481,8 +647,7 @@ export default function Eb() {
 
     updateSeriesEbAssessmentInWorkspace(activeTitle, {
       seriesTitle: activeTitle,
-      chapterNum: activeTantouSubmission?.chapterNum ?? null,
-      scoreType,
+      chapterNum: activeChapter?.chapterNumber ?? null,
       average: aggregate.councilAverage,
       councilAverage: aggregate.councilAverage,
       memberAverage: Number(average.toFixed(1)),
@@ -517,14 +682,58 @@ export default function Eb() {
     <div className="ws-page--eb flex min-h-screen flex-col bg-background">
       <Header links={NAV_LINKS} onLogout={user ? handleLogout : undefined} />
 
-      <WorkspaceHero
-        label={`${LABEL_EDITOR_BOARD} · demo`}
-        title={`Xin chào${user?.name ? `, ${user.name}` : ""}`}
-        description="Một tài khoản đại diện nhập điểm từng thành viên — bảng tổng hợp hiển thị đầy đủ điểm Hội đồng."
-        className="ws-hero--eb"
-      />
+      {!isChapterDetail ? (
+        <WorkspaceHero
+          label={LABEL_EDITOR_BOARD}
+          title={`Xin chào${user?.name ? `, ${user.name}` : ""}`}
+          description="Chọn chapter trong hàng chờ để chấm điểm và phê duyệt xuất bản."
+          className="ws-hero--eb"
+        />
+      ) : null}
 
       <main className="page-container flex-1 space-y-8 py-8">
+        {isChapterDetail ? (
+          <>
+            <header className="flex flex-wrap items-center gap-3 border-b border-border/60 pb-4">
+              <Button type="button" variant="ghost" size="sm" asChild>
+                <Link to="/eb">
+                  <ArrowLeft className="size-4" />
+                  Quay lại hàng chờ
+                </Link>
+              </Button>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-medium uppercase tracking-widest text-primary">
+                  Chấm điểm chapter
+                </p>
+                <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
+                  {activeChapter
+                    ? `${activeChapter.seriesName} · Ch.${activeChapter.chapterNumber}`
+                    : "Chapter"}
+                </h1>
+                {activeChapter?.title ? (
+                  <p className="text-sm text-muted-foreground">{activeChapter.title}</p>
+                ) : null}
+              </div>
+            </header>
+
+            {apiLoading ? (
+              <Card>
+                <CardContent className="py-16 text-center text-muted-foreground">
+                  Đang tải thông tin chapter...
+                </CardContent>
+              </Card>
+            ) : !activeChapter ? (
+              <Card>
+                <CardContent className="flex flex-col items-center gap-4 py-16 text-center">
+                  <p className="text-muted-foreground">
+                    Không tìm thấy chapter trong hàng chờ EB.
+                  </p>
+                  <Button asChild variant="outline">
+                    <Link to="/eb">Về hàng chờ</Link>
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : (
         <section className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.9fr)]">
           <Card>
             <CardHeader className="space-y-2">
@@ -550,50 +759,43 @@ export default function Eb() {
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Series đang chấm</Label>
+                <div className="space-y-2 md:col-span-2">
+                  <Label>Chapter đang chấm</Label>
                   <Select
-                    value={activeTitle || undefined}
-                    onValueChange={setSelectedTitle}
-                    disabled={pending.length === 0}
+                    value={activeChapter?.id || undefined}
+                    onValueChange={(id) => openChapterEvaluate(id)}
+                    disabled={pendingChapters.length === 0 || apiLoading}
                   >
                     <SelectTrigger className="w-full">
                       <SelectValue
                         placeholder={
-                          pending.length
-                            ? "Chọn series trong hàng chờ"
-                            : "Chưa có series chờ EB duyệt"
+                          apiLoading
+                            ? "Đang tải hàng chờ..."
+                            : pendingChapters.length
+                              ? "Chọn chapter trong hàng chờ"
+                              : "Chưa có chapter chờ EB duyệt"
                         }
                       />
                     </SelectTrigger>
                     <SelectContent>
-                      {pending.map((item) => (
-                        <SelectItem key={item.title} value={item.title}>
-                          {item.title}
+                      {pendingChapters.map((item) => (
+                        <SelectItem key={item.id} value={item.id}>
+                          {item.seriesName} · Ch.{item.chapterNumber}
+                          {item.title ? ` — ${item.title}` : ""}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                  {pending.length === 0 ? (
+                  {apiLoading ? (
                     <p className="text-xs text-muted-foreground">
-                      Hàng chờ lấy từ localStorage (demo). Mangaka gửi series debut qua
-                      Tantou → EB sẽ thấy ở đây. Chưa nối API{" "}
-                      <code className="text-[10px]">/submissions/eb</code>.
+                      Đang tải từ <code className="text-[10px]">GET /eb-evaluations/pending</code>...
+                    </p>
+                  ) : pendingChapters.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      TE cần bấm Approve series trước — chapters sẽ chuyển sang{" "}
+                      <code className="text-[10px]">pending_EB</code>.
                     </p>
                   ) : null}
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Loại truyện</Label>
-                  <Select value={scoreType} onValueChange={setScoreType}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Chọn loại truyện" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="color">Truyện màu</SelectItem>
-                      <SelectItem value="mono">Truyện không màu</SelectItem>
-                    </SelectContent>
-                  </Select>
                 </div>
               </div>
 
@@ -706,6 +908,29 @@ export default function Eb() {
                 ))}
               </div>
 
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="eb-overall-comment">Nhận xét tổng thể</Label>
+                  <Textarea
+                    id="eb-overall-comment"
+                    value={overallComment}
+                    onChange={(event) => setOverallComment(event.target.value)}
+                    placeholder="Nhận xét chung của thành viên này..."
+                    className="min-h-24"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="eb-member-notes">Ghi chú thêm</Label>
+                  <Textarea
+                    id="eb-member-notes"
+                    value={memberNotes}
+                    onChange={(event) => setMemberNotes(event.target.value)}
+                    placeholder="Ghi chú bổ sung (optional)..."
+                    className="min-h-24"
+                  />
+                </div>
+              </div>
+
               <div className="rounded-xl border bg-muted/30 p-4">
                 <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   DTB Hội đồng (tổng hợp)
@@ -762,18 +987,102 @@ export default function Eb() {
                 </div>
 
                 <Button className="mt-4 w-full" onClick={handleSaveAssessment}>
-                  Lưu điểm thành viên đang chọn
+                  Lưu nháp thành viên đang chọn
                 </Button>
+
+                <div className="mt-4 space-y-2">
+                  <Label htmlFor="eb-evaluation-notes">Ghi chú đánh giá (optional)</Label>
+                  <Textarea
+                    id="eb-evaluation-notes"
+                    value={evaluationNotes}
+                    onChange={(event) => setEvaluationNotes(event.target.value)}
+                    placeholder="Ghi chú gửi kèm khi chấm điểm series..."
+                    className="min-h-20"
+                  />
+                </div>
+
+                <Button
+                  className="mt-2 w-full"
+                  variant="secondary"
+                  disabled={submitting || !activeChapter?.id}
+                  onClick={() => void handleSubmitScores()}
+                >
+                  Gửi điểm Hội đồng
+                </Button>
+
+                {lastEvaluation?.council_average != null ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Kết quả vừa gửi: DTB{" "}
+                    <strong className="text-foreground">
+                      {Number(lastEvaluation.council_average).toFixed(1)}
+                    </strong>
+                    {formatEbClassification(lastEvaluation)
+                      ? ` · ${formatEbClassification(lastEvaluation)}`
+                      : ""}
+                  </p>
+                ) : null}
+
+                <div className="mt-4 space-y-3 border-t pt-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="eb-publication-schedule">
+                      Lịch phát hành (weekly / monthly)
+                    </Label>
+                    <Select
+                      value={publicationSchedule || undefined}
+                      onValueChange={setPublicationSchedule}
+                    >
+                      <SelectTrigger id="eb-publication-schedule" className="w-full">
+                        <SelectValue placeholder="Chọn weekly hoặc monthly (tùy chọn)" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {EB_PUBLICATION_SCHEDULES.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="eb-scheduled-publish">
+                      Ngày publish cụ thể (YYYY-MM-DD)
+                    </Label>
+                    <Input
+                      id="eb-scheduled-publish"
+                      type="date"
+                      value={scheduledPublishAt}
+                      onChange={(event) => setScheduledPublishAt(event.target.value)}
+                    />
+                  </div>
+                  <Button
+                    className="w-full"
+                    disabled={
+                      submitting
+                      || !activeChapter?.id
+                      || (!publicationSchedule && !scheduledPublishAt)
+                    }
+                    onClick={handleApproveChapter}
+                  >
+                    <CheckCircle2 className="size-4" />
+                    Xác nhận publish series
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    Bước 1: <code className="text-[10px]">POST .../evaluate</code>{" "}
+                    — lưu điểm, không đổi status chapter/series · Bước 2:{" "}
+                    <code className="text-[10px]">POST .../confirm-publish</code>{" "}
+                    — cần DTB ≥ 2.5; gửi <code className="text-[10px]">publication_schedule</code>{" "}
+                    và/hoặc <code className="text-[10px]">scheduled_publish_at</code>.
+                  </p>
+                </div>
               </div>
             </CardContent>
           </Card>
 
           <Card className="overflow-hidden">
             <CardHeader>
-              <CardTitle>Ảnh series từ Tantou</CardTitle>
+              <CardTitle>Preview chapter</CardTitle>
               <CardDescription>
-                Hình preview của series đang được chấm, lấy trực tiếp từ
-                submission Tantou.
+                Ảnh trang đầu từ chapter đang chờ EB duyệt.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -781,34 +1090,42 @@ export default function Eb() {
                 <img
                   src={activeSeriesImage}
                   alt={
-                    activeTitle
-                      ? `Ảnh series ${activeTitle}`
-                      : "Ảnh series đang chấm"
+                    activeChapter
+                      ? `${activeChapter.seriesName} Ch.${activeChapter.chapterNumber}`
+                      : "Ảnh chapter đang chấm"
                   }
                   className="h-[520px] w-full object-cover"
                 />
               </div>
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="secondary">Tantou gửi sang EB</Badge>
-                  {activeTantouSubmission?.chapterNum ? (
-                    <Badge variant="outline">
-                      Ch. {activeTantouSubmission.chapterNum}
-                    </Badge>
+                  <Badge variant="secondary">pending_EB</Badge>
+                  {activeChapter?.classification ? (
+                    <Badge variant="outline">{activeChapter.classification}</Badge>
+                  ) : null}
+                  {activeChapter?.chapterNumber != null ? (
+                    <Badge variant="outline">Ch. {activeChapter.chapterNumber}</Badge>
                   ) : null}
                 </div>
                 <p className="text-sm font-medium text-foreground">
-                  {activeTitle || "Chưa có series trong hàng chờ"}
+                  {activeChapter
+                    ? `${activeChapter.seriesName}${activeChapter.title ? ` — ${activeChapter.title}` : ""}`
+                    : "Chưa có chapter trong hàng chờ"}
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  {activeTantouSubmission?.pageLabel ??
-                    "Ảnh đang hiển thị là bản gửi từ Tantou hoặc ảnh thay thế nếu chưa có submission tương ứng."}
+                  {activeChapter?.classificationText ||
+                    activeChapter?.mangakaName ||
+                    "Chọn chapter từ hàng chờ để chấm điểm và đánh giá."}
                 </p>
               </div>
             </CardContent>
           </Card>
         </section>
+            )}
+          </>
+        ) : null}
 
+        {!isChapterDetail ? (
         <section className="space-y-4">
           <div>
             <h2 className="flex items-center gap-2 text-xl font-semibold">
@@ -833,38 +1150,60 @@ export default function Eb() {
             </p>
           </div>
 
-          {pending.length === 0 ? (
+          {apiLoading ? (
             <Card>
               <CardContent className="py-16 text-center text-muted-foreground">
-                Không có series lần đầu trong hàng chờ.
+                Đang tải hàng chờ EB...
+              </CardContent>
+            </Card>
+          ) : pendingChapters.length === 0 ? (
+            <Card>
+              <CardContent className="py-16 text-center text-muted-foreground">
+                Không có chapter nào đang chờ EB duyệt.
               </CardContent>
             </Card>
           ) : (
             <div className="grid gap-4">
-              {pending.map((p) => (
+              {pendingChapters.map((ch) => (
                 <Card
-                  key={p.id ?? p.title}
+                  key={ch.id}
                   className="transition-shadow hover:shadow-md"
                 >
                   <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-semibold">{p.title}</h3>
-                        <Badge variant="secondary">✦ Lần đầu</Badge>
+                    <div className="flex min-w-0 flex-1 gap-4">
+                      {ch.previewImageUrl ? (
+                        <img
+                          src={ch.previewImageUrl}
+                          alt=""
+                          className="size-16 shrink-0 rounded-lg border object-cover"
+                        />
+                      ) : null}
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="font-semibold">
+                            {ch.seriesName} · Ch.{ch.chapterNumber}
+                          </h3>
+                          <Badge variant="secondary">{ch.status}</Badge>
+                          {ch.classification ? (
+                            <Badge variant="outline">{ch.classification}</Badge>
+                          ) : null}
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          {[ch.title, ch.mangakaName, ch.classificationText]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </p>
+                        {ch.submittedAt ? (
+                          <p className="text-xs text-muted-foreground">
+                            Gửi:{" "}
+                            {new Date(ch.submittedAt).toLocaleString("vi-VN")}
+                          </p>
+                        ) : null}
                       </div>
-                      <p className="text-sm text-muted-foreground">
-                        {[
-                          p.genres?.slice(0, 2).join(" · "),
-                          p.formatLabel?.replace(/\s*\(.*\)$/, ""),
-                          p.authorName,
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </p>
                     </div>
-                    <Button onClick={() => handleApprove(p.title)}>
+                    <Button onClick={() => openChapterEvaluate(ch.id)}>
                       <CheckCircle2 className="size-4" />
-                      Chấp nhận
+                      Chấm điểm
                     </Button>
                   </CardContent>
                 </Card>
@@ -872,18 +1211,6 @@ export default function Eb() {
             </div>
           )}
         </section>
-
-        {approvedList.length > 0 ? (
-          <section className="space-y-4">
-            <h2 className="text-lg font-semibold">Đã chấp nhận</h2>
-            <div className="flex flex-wrap gap-2">
-              {approvedList.map((title) => (
-                <Badge key={title} variant="outline" className="px-3 py-1">
-                  {title}
-                </Badge>
-              ))}
-            </div>
-          </section>
         ) : null}
       </main>
 

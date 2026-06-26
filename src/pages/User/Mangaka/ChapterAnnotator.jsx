@@ -107,6 +107,9 @@ export default function ChapterAnnotator({
   const pages = activeChapter?.pages ?? []
   const pageKey = activeChapter ? `${activeChapterId}-${pageIndex}` : ''
   const currentPageId = pages[pageIndex]?.id ?? null
+  // Phòng thủ: chỉ gọi BE khi có ObjectId hợp lệ (24 ký tự hex).
+  // Nếu page chưa sync _id từ BE (id là placeholder "page-X" hoặc rỗng), bỏ qua.
+  const isValidObjectId = (id) => typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id)
   const pageNotes = notes[pageKey] ?? []
 
   useEffect(() => {
@@ -311,6 +314,9 @@ export default function ChapterAnnotator({
       return
     }
 
+    const seriesMeta = seriesOptions.find(s => s.title === trimmedSeries)
+    const assistantId = hiredAssistants.length === 1 ? String(hiredAssistants[0].assistantId) : null
+
     const fileList = Array.from(files).filter(
       f => f.type.startsWith('image/') || f.name.match(/\.(png|jpe?g|webp)$/i),
     )
@@ -328,6 +334,33 @@ export default function ChapterAnnotator({
         setUploadUi({ series: trimmedSeries, chapter: target.num, pct: 5 })
       }
 
+      // Chapter chưa sync server → gộp tạo + upload thành 1 request (BE yêu cầu multipart)
+      if (workspaceApi?.createChapterWithPages && seriesMeta?.id) {
+        const isLocalChapter = !/^[0-9a-f]{24}$/i.test(targetId)
+        if (isLocalChapter) {
+          try {
+            const ch = await workspaceApi.createChapterWithPages(
+              seriesMeta.id, trimmedSeries, target.num, assistantId, filesToAdd,
+            )
+            setChapters(prev => prev.map(c => (c.id !== targetId ? c : ch)))
+            setActiveChapterId(ch.id)
+            setPageIndex(0)
+            setUploadRejectMessage(null)
+            if (hasProgress) onUploadProgress(trimmedSeries, 100)
+            return
+          } catch (err) {
+            const status = err?.response?.status
+            if (status === 409) {
+              setUploadRejectMessage('Chapter đã tồn tại — đang đồng bộ dữ liệu.')
+              workspaceApi.refresh?.().catch(() => null)
+            } else {
+              setUploadRejectMessage('Không tạo được chapter — thử lại.')
+            }
+            return
+          }
+        }
+      }
+
       if (workspaceApi?.uploadChapterPages) {
         newPages = await workspaceApi.uploadChapterPages(targetId, filesToAdd)
         setNotes(prev => {
@@ -339,6 +372,9 @@ export default function ChapterAnnotator({
           }
           return next
         })
+        setChapters(prev => prev.map(ch =>
+          ch.id !== targetId ? ch : { ...ch, pages: [...ch.pages, ...newPages] },
+        ))
       } else {
         for (let i = 0; i < filesToAdd.length; i++) {
           const url = await fileToStorableDataUrl(filesToAdd[i])
@@ -369,7 +405,7 @@ export default function ChapterAnnotator({
     setUploadUi(null)
   }, [
     selectedSeriesTitle, activeChapterId, chapters, setChapters, setNotes,
-    onUploadProgress, workspaceApi,
+    onUploadProgress, workspaceApi, seriesOptions, hiredAssistants,
   ])
 
   function onFileChange(e) {
@@ -496,7 +532,8 @@ export default function ChapterAnnotator({
       [pageKey]: [...(prev[pageKey] ?? []), newNote],
     }))
     setSelectedNoteId(clientKey)
-    scheduleNoteSave(clientKey, '')
+    // Lưu ngay lên BE (kể cả khi text rỗng) để giữ toạ độ x,y,w,h cho Assistant
+    void persistNoteById(clientKey)
   }
 
   function updateNoteField(stableKey, field, value) {
@@ -532,10 +569,11 @@ export default function ChapterAnnotator({
 
   useEffect(() => {
     if (!workspaceApi?.loadPageNotes || !currentPageId || !pageKey) return
+    if (!isValidObjectId(currentPageId)) return
     if (loadedNoteKeysRef.current.has(pageKey)) return
     loadedNoteKeysRef.current.add(pageKey)
     void workspaceApi.loadPageNotes(currentPageId, pageKey)
-  }, [currentPageId, pageKey, workspaceApi?.loadPageNotes])
+  }, [currentPageId, pageKey, workspaceApi?.loadPageNotes, isValidObjectId])
 
   useEffect(() => {
     loadedNoteKeysRef.current.clear()
@@ -550,7 +588,7 @@ export default function ChapterAnnotator({
     setSelectedNoteId(null)
   }
 
-  const removeCurrentPage = useCallback(() => {
+  const removeCurrentPage = useCallback(async () => {
     if (!activeChapterId || !activeChapter) return
     const chId = activeChapterId
     const idx = pageIndex
@@ -559,6 +597,16 @@ export default function ChapterAnnotator({
 
     const removed = oldPages[idx]
     if (removed?.url?.startsWith('blob:')) URL.revokeObjectURL(removed.url)
+
+    const serverPage = removed?.id && !String(removed.id).startsWith('note-')
+      ? removed
+      : null
+
+    if (serverPage && workspaceApi?.deleteChapterPage) {
+      try {
+        await workspaceApi.deleteChapterPage(chId, serverPage.id)
+      } catch { /* local fallback: renumber anyway */ }
+    }
 
     const newPages = oldPages.filter((_, i) => i !== idx)
     const chapterRemoved = newPages.length === 0
@@ -594,7 +642,7 @@ export default function ChapterAnnotator({
       const max = newPages.length - 1
       return pi > max ? max : pi
     })
-  }, [activeChapter, activeChapterId, pageIndex, chapters, setChapters, setNotes, setActiveChapterId, setPageIndex])
+  }, [activeChapter, activeChapterId, pageIndex, chapters, setChapters, setNotes, setActiveChapterId, setPageIndex, workspaceApi])
 
   const draftRect = drawStart && drawCurrent ? {
     x: Math.min(drawStart.x, drawCurrent.x),
@@ -685,16 +733,16 @@ export default function ChapterAnnotator({
           const badge = notes[`${activeChapterId}-${i}`]?.length ?? 0
           return (
             <button
-              key={pg.id}
+              key={`${activeChapterId}-${pg.pageNumber ?? i}-${pg.id ?? i}`}
               type="button"
               onClick={() => { setPageIndex(i); setSelectedNoteId(null) }}
-              title={pg.name}
+              title={`${pg.name} | url=${pg.url ?? 'none'}`}
               className={cn(
                 'relative shrink-0 overflow-hidden rounded-md border-2 transition-colors',
                 i === pageIndex ? 'border-primary' : 'border-transparent hover:border-muted-foreground/30',
               )}
             >
-              <span className="manga-page manga-page--thumb-strip block">
+              <span className="manga-page manga-page--thumb-strip block h-10 w-6">
                 {pg.url ? (
                   <img src={pg.url} alt={pg.name} className="manga-page__media" />
                 ) : (
@@ -793,20 +841,22 @@ export default function ChapterAnnotator({
     )
   }
 
-  function NotesPanel({ inFullscreen = false }) {
-    return (
-      <Card className={cn('flex flex-col', inFullscreen && 'h-full overflow-hidden')}>
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between gap-2">
-            <CardTitle className="text-base">Ô ghi chú — Trang {pageIndex + 1}</CardTitle>
-            {selectedNoteId ? (
-              <Button size="xs" variant="ghost" className="text-destructive" onClick={() => deleteNote(selectedNoteId)}>
-                Gỡ ô đang chọn
-              </Button>
-            ) : null}
-          </div>
-        </CardHeader>
-        <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
+  function NotesPanel({ inFullscreen = false, embedded = false }) {
+    const panelContent = (
+      <>
+        {!embedded && (
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="text-base">Ô ghi chú — Trang {pageIndex + 1}</CardTitle>
+              {selectedNoteId ? (
+                <Button size="xs" variant="ghost" className="text-destructive" onClick={() => deleteNote(selectedNoteId)}>
+                  Gỡ ô đang chọn
+                </Button>
+              ) : null}
+            </div>
+          </CardHeader>
+        )}
+        <div className={cn('flex flex-col gap-3', embedded ? 'flex-1 min-h-0' : '')}>
           {hiredAssistants.length === 0 ? (
             <Alert className="border-violet-200 bg-violet-50/50 dark:border-violet-500/30 dark:bg-violet-500/5">
               <AlertDescription className="text-xs">
@@ -840,7 +890,7 @@ export default function ChapterAnnotator({
             <div
               className={cn(
                 'min-h-0 overflow-y-auto overscroll-contain pr-1',
-                inFullscreen ? 'flex-1' : 'max-h-[480px]',
+                inFullscreen ? 'flex-1' : 'max-h-[calc(100vh-480px)]',
               )}
             >
               <ul className="space-y-3">
@@ -898,12 +948,28 @@ export default function ChapterAnnotator({
               </ul>
             </div>
           )}
+        </div>
+      </>
+    )
+
+    if (embedded) {
+      return (
+        <div className="flex min-h-0 flex-1 flex-col rounded-lg border bg-card p-4">
+          {panelContent}
+        </div>
+      )
+    }
+
+    return (
+      <Card className={cn('flex flex-col', inFullscreen && 'h-full overflow-hidden')}>
+        <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
+          {panelContent}
         </CardContent>
       </Card>
     )
   }
 
-  function SendActionsBar({ compact = false }) {
+  function SendActionsBar({ compact = false, embedded = false }) {
     const handleAssistant = () => {
       if (!activeChapter || !onSendToAssistant) return
       onSendToAssistant({
@@ -924,6 +990,61 @@ export default function ChapterAnnotator({
       })
     }
 
+    const innerContent = (
+      <div className={cn('space-y-2', compact ? 'p-3' : 'p-4')}>
+        <div className="min-w-0">
+          <p className={cn('text-sm font-semibold', compact && 'text-white')}>
+            Gửi cả chapter {activeChapter ? `Ch. ${activeChapter.num}` : ''} cho Assistant
+          </p>
+          <p className={cn('text-xs', compact ? 'text-zinc-300' : 'text-muted-foreground')}>
+            {pages.length} trang · {totalNotes} ô ghi chú · 1 task = cả chapter
+            {totalNotes > 0 ? ' · các ghi chú sẽ gộp vào mô tả' : ''}
+          </p>
+        </div>
+        {hiredAssistants.length > 0 && sendAssistantId ? (
+          <p className="text-xs text-muted-foreground">
+            Assistant: <strong>{hiredAssistants.find(a => String(a.assistantId) === String(sendAssistantId))?.label ?? sendAssistantId}</strong>
+          </p>
+        ) : hiredAssistants.length === 0 ? (
+          <p className={cn('text-xs', compact ? 'text-zinc-400' : 'text-muted-foreground')}>
+            Thuê Assistant ở tab <strong>Thuê Assistant</strong> trước khi gửi chapter.
+          </p>
+        ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          {onSendToTantou ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!activeChapter || pages.length === 0 || !sendAssistantId}
+              title={`Gửi bản thảo sang ${LABEL_TANTOU_EDITOR}`}
+              onClick={handleTantou}
+              className={cn(compact && 'border-white/20 bg-transparent text-white hover:bg-white/10')}
+            >
+              Gửi {LABEL_TANTOU_EDITOR}
+            </Button>
+          ) : null}
+          <Button
+            size="sm"
+            disabled={!activeChapter || pages.length === 0 || !sendAssistantId}
+            onClick={handleAssistant}
+          >
+            <Send className="size-3.5" />
+            Gửi cả chapter
+          </Button>
+        </div>
+      </div>
+    )
+
+    if (embedded) {
+      return (
+        <div className={cn(
+          'rounded-lg border border-primary/20 bg-gradient-to-br from-primary/5 via-background to-background',
+        )}>
+          {innerContent}
+        </div>
+      )
+    }
+
     return (
       <Card
         className={cn(
@@ -931,48 +1052,7 @@ export default function ChapterAnnotator({
           compact && 'border-white/10 bg-zinc-900/80 text-white shadow-xl backdrop-blur',
         )}
       >
-        <CardContent className={cn('space-y-3', compact ? 'p-3' : 'p-4')}>
-          <div className="min-w-0">
-            <p className={cn('text-sm font-semibold', compact && 'text-white')}>
-              Gửi cả chapter {activeChapter ? `Ch. ${activeChapter.num}` : ''} cho Assistant
-            </p>
-            <p className={cn('text-xs', compact ? 'text-zinc-300' : 'text-muted-foreground')}>
-              {pages.length} trang · {totalNotes} ô ghi chú · 1 task = cả chapter
-              {totalNotes > 0 ? ' · các ghi chú sẽ gộp vào mô tả' : ''}
-            </p>
-          </div>
-          {hiredAssistants.length > 0 && sendAssistantId ? (
-            <p className="text-xs text-muted-foreground">
-              Assistant: <strong>{hiredAssistants.find(a => String(a.assistantId) === String(sendAssistantId))?.label ?? sendAssistantId}</strong>
-            </p>
-          ) : hiredAssistants.length === 0 ? (
-            <p className={cn('text-xs', compact ? 'text-zinc-400' : 'text-muted-foreground')}>
-              Thuê Assistant ở tab <strong>Thuê Assistant</strong> trước khi gửi chapter.
-            </p>
-          ) : null}
-          <div className="flex flex-wrap items-center gap-2">
-            {onSendToTantou ? (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!activeChapter || pages.length === 0 || !sendAssistantId}
-                title={`Gửi bản thảo sang ${LABEL_TANTOU_EDITOR}`}
-                onClick={handleTantou}
-                className={cn(compact && 'border-white/20 bg-transparent text-white hover:bg-white/10')}
-              >
-                Gửi {LABEL_TANTOU_EDITOR}
-              </Button>
-            ) : null}
-            <Button
-              size="sm"
-              disabled={!activeChapter || pages.length === 0 || !sendAssistantId}
-              onClick={handleAssistant}
-            >
-              <Send className="size-3.5" />
-              Gửi cả chapter
-            </Button>
-          </div>
-        </CardContent>
+        <CardContent>{innerContent}</CardContent>
       </Card>
     )
   }
@@ -1316,20 +1396,30 @@ export default function ChapterAnnotator({
               </div>
             </div>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+          <CardContent className="space-y-3">
+            <div className="flex items-center gap-3">
               <PageNav />
               <div className="min-w-0 flex-1 overflow-x-auto">
                 <PageThumbs />
               </div>
             </div>
-            <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
-              <div className="flex justify-center rounded-lg border bg-zinc-950 p-4">
+            <div
+              className="flex gap-3 overflow-hidden rounded-lg border bg-zinc-950 p-3"
+              style={{ maxHeight: 'calc(100vh - 300px)' }}
+            >
+              <div className="flex shrink-0 justify-center overflow-hidden">
                 <CanvasBoard refEl={boardRef} />
               </div>
-              <NotesPanel />
+              <div
+                className="min-w-0 flex flex-1 flex-col overflow-y-auto"
+                style={{ maxHeight: 'calc(100vh - 340px)' }}
+              >
+                <NotesPanel embedded />
+                <div className="mt-3 shrink-0">
+                  <SendActionsBar embedded />
+                </div>
+              </div>
             </div>
-            <SendActionsBar />
           </CardContent>
         </Card>
       ) : (
@@ -1372,7 +1462,7 @@ export default function ChapterAnnotator({
           <div className="flex shrink-0 gap-2 overflow-x-auto border-t border-white/10 bg-zinc-900 p-2">
             {pages.map((pg, i) => (
               <button
-                key={pg.id}
+                key={pg.id ?? i}
                 type="button"
                 onClick={() => { setPageIndex(i); setSelectedNoteId(null) }}
                 title={pg.name}

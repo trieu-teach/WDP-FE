@@ -118,6 +118,7 @@ window.onload = function() {
               "type": "string",
               "enum": [
                 "draft",
+                "review",
                 "pending_assistant",
                 "pending_TE",
                 "TE_revision",
@@ -639,6 +640,147 @@ window.onload = function() {
           }
         }
       },
+
+      "/te-reviews/chapter/{chapterId}/annotations": {
+        "get": {
+          "tags": ["TEReviews"],
+          "summary": "Get annotations for a chapter TE review",
+          "security": [{ "BearerAuth": [] }],
+          "parameters": [
+            { "in": "path", "name": "chapterId", "required": true, "schema": { "type": "string" }, "description": "Chapter ID" }
+          ],
+          "responses": {
+            "200": {
+              "description": "Annotations",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object",
+                    "properties": {
+                      "success": { "type": "boolean", "example": true },
+                      "data": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "_id": { "type": "string" },
+                            "page_id": { "type": "string" },
+                            "x": { "type": "number" },
+                            "y": { "type": "number" },
+                            "w": { "type": "number" },
+                            "h": { "type": "number" },
+                            "content": { "type": "string" },
+                            "annotation_type": { "type": "string" },
+                            "createdAt": { "type": "string", "format": "date-time" }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "post": {
+          "tags": ["TEReviews"],
+          "summary": "Create annotation for TE review",
+          "security": [{ "BearerAuth": [] }],
+          "parameters": [
+            { "in": "path", "name": "chapterId", "required": true, "schema": { "type": "string" }, "description": "Chapter ID" }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["page_id", "x", "y", "w", "h"],
+                  "properties": {
+                    "page_id": { "type": "string" },
+                    "x": { "type": "number" },
+                    "y": { "type": "number" },
+                    "w": { "type": "number" },
+                    "h": { "type": "number" },
+                    "content": { "type": "string" },
+                    "annotation_type": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": "Annotation created",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object",
+                    "properties": {
+                      "success": { "type": "boolean", "example": true },
+                      "data": {
+                        "type": "object",
+                        "properties": {
+                          "_id": { "type": "string" },
+                          "page_id": { "type": "string" },
+                          "x": { "type": "number" },
+                          "y": { "type": "number" },
+                          "w": { "type": "number" },
+                          "h": { "type": "number" },
+                          "content": { "type": "string" },
+                          "annotation_type": { "type": "string" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "400": { "description": "Missing required fields" }
+          }
+        }
+      },
+
+
+      "/te-reviews/chapter/{chapterId}/pages": {
+        "get": {
+          "tags": ["TEReviews"],
+          "summary": "Get pages of a chapter for TE review",
+          "security": [{ "BearerAuth": [] }],
+          "parameters": [
+            { "in": "path", "name": "chapterId", "required": true, "schema": { "type": "string" }, "description": "Chapter ID" }
+          ],
+          "responses": {
+            "200": {
+              "description": "Chapter pages",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object",
+                    "properties": {
+                      "success": { "type": "boolean", "example": true },
+                      "data": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "_id": { "type": "string" },
+                            "page_number": { "type": "integer" },
+                            "original_image_url": { "type": "string" },
+                            "result_image_url": { "type": "string", "nullable": true },
+                            "final_image_url": { "type": "string", "nullable": true }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+
       "/te-reviews/chapter/{chapterId}": {
         "get": {
           "tags": [
@@ -686,6 +828,76 @@ window.onload = function() {
           }
         }
       },
+
+      "/te-users": {
+        "get": {
+          "tags": ["Users"],
+          "summary": "Get list of TE users",
+          "security": [{ "BearerAuth": [] }],
+          "parameters": [
+            { "in": "query", "name": "roles", "required": false, "schema": { "type": "string" }, "description": "Comma-separated roles: editor,te" },
+            { "in": "query", "name": "select", "required": false, "schema": { "type": "string" }, "description": "Fields to select: _id,username,full_name,email" }
+          ],
+          "responses": {
+            "200": {
+              "description": "List of TE users",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object",
+                    "properties": {
+                      "success": { "type": "boolean", "example": true },
+                      "data": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "_id": { "type": "string" },
+                            "username": { "type": "string" },
+                            "full_name": { "type": "string" },
+                            "email": { "type": "string" }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+
+
+      "/te-reviews/chapter/{chapterId}/annotations/{annotationId}": {
+        "delete": {
+          "tags": ["TEReviews"],
+          "summary": "Delete an annotation",
+          "security": [{ "BearerAuth": [] }],
+          "parameters": [
+            { "in": "path", "name": "chapterId", "required": true, "schema": { "type": "string" }, "description": "Chapter ID" },
+            { "in": "path", "name": "annotationId", "required": true, "schema": { "type": "string" }, "description": "Annotation ID" }
+          ],
+          "responses": {
+            "200": {
+              "description": "Annotation deleted",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object",
+                    "properties": {
+                      "success": { "type": "boolean", "example": true },
+                      "message": { "type": "string", "example": "Annotation deleted" }
+                    }
+                  }
+                }
+              }
+            },
+            "404": { "description": "Annotation not found" }
+          }
+        }
+      },
+
       "/tasks": {
         "post": {
           "summary": "Tạo task mới (Mangaka giao việc cho Assistant)",
@@ -767,6 +979,60 @@ window.onload = function() {
           }
         }
       },
+
+      "/te-reviews/chapter/{chapterId}/te-action": {
+        "post": {
+          "tags": ["TEReviews"],
+          "summary": "TE submits review decision for a chapter",
+          "security": [{ "BearerAuth": [] }],
+          "parameters": [
+            { "in": "path", "name": "chapterId", "required": true, "schema": { "type": "string" }, "description": "Chapter ID" }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["action"],
+                  "properties": {
+                    "action": {
+                      "type": "string",
+                      "enum": ["forward_eb", "request_revision"],
+                      "description": "forward_eb: gửi EB duyệt, request_revision: yêu cầu Mangaka sửa"
+                    },
+                    "notes": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "description": "Danh sách ghi chú revision (khi action = request_revision)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": "TE action submitted",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object",
+                    "properties": {
+                      "success": { "type": "boolean", "example": true },
+                      "message": { "type": "string" },
+                      "data": { "$ref": "#/components/schemas/Chapter" }
+                    }
+                  }
+                }
+              }
+            },
+            "400": { "description": "Invalid action or chapter not in review status" },
+            "404": { "description": "Chapter not found" }
+          }
+        }
+      },
+
       "/tasks/my-assignments": {
         "get": {
           "summary": "Lấy danh sách công việc được giao (Assistant)",
@@ -1262,7 +1528,7 @@ window.onload = function() {
               }
             },
             "400": {
-              "description": "Chapter cannot be submitted in current status or unfinished tasks"
+              "description": "Chapter không ở trạng thái hợp lệ để gửi TE (draft, pending_assistant, review)"
             },
             "404": {
               "description": "Chapter not found or unauthorized"
@@ -1270,6 +1536,113 @@ window.onload = function() {
           }
         }
       },
+
+      
+      "/submissions/chapters/{chapterId}/assign-te": {
+        "post": {
+          "tags": ["Submissions"],
+          "summary": "Gán TE cụ thể cho chapter (Mangaka chọn TE trước khi submit)",
+          "security": [{ "BearerAuth": [] }],
+          "parameters": [
+            { "in": "path", "name": "chapterId", "required": true, "schema": { "type": "string" }, "description": "Chapter ID" }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["te_id"],
+                  "properties": {
+                    "te_id": {
+                      "type": "string",
+                      "nullable": true,
+                      "description": "ObjectId của TE user. Để null để gỡ TE."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": "TE đã được gán",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object",
+                    "properties": {
+                      "success": { "type": "boolean", "example": true },
+                      "message": { "type": "string" },
+                      "data": { "$ref": "#/components/schemas/Chapter" }
+                    }
+                  }
+                }
+              }
+            },
+            "404": { "description": "Chapter không tìm thấy hoặc không có quyền" }
+          }
+        },
+        "patch": {
+          "tags": ["Submissions"],
+          "summary": "Gỡ TE khỏi chapter (gán te_id = null)",
+          "security": [{ "BearerAuth": [] }],
+          "parameters": [
+            { "in": "path", "name": "chapterId", "required": true, "schema": { "type": "string" }, "description": "Chapter ID" }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["te_id"],
+                  "properties": {
+                    "te_id": {
+                      "type": "string",
+                      "example": "null",
+                      "description": "Đặt null để gỡ TE"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": { "description": "TE đã được gỡ" }
+          }
+        }
+      },
+"/submissions/chapters/{chapterId}/approve": {
+        "patch": {
+          "tags": ["Submissions"],
+          "summary": "Mangaka duyệt chapter sau khi tasks hoàn tất",
+          "security": [{ "BearerAuth": [] }],
+          "parameters": [
+            { "in": "path", "name": "chapterId", "required": true, "schema": { "type": "string" }, "description": "Chapter ID" }
+          ],
+          "responses": {
+            "200": {
+              "description": "Chapter đã được duyệt",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object",
+                    "properties": {
+                      "success": { "type": "boolean", "example": true },
+                      "message": { "type": "string", "example": "Chapter đã được duyệt" },
+                      "data": { "$ref": "#/components/schemas/Chapter" }
+                    }
+                  }
+                }
+              }
+            },
+            "400": { "description": "Chapter không ở trạng thái hợp lệ để duyệt" },
+            "404": { "description": "Chapter không tìm thấy hoặc không có quyền" }
+          }
+        }
+      },
+
       "/submissions/mangaka": {
         "get": {
           "summary": "Get all chapters submitted by mangaka",

@@ -71,6 +71,7 @@ export function NotificationBell({ className }) {
   }
 
   return (
+    <>
     <DropdownMenu onOpenChange={(open) => { if (open) void refresh() }}>
       <DropdownMenuTrigger asChild>
         <Button
@@ -133,14 +134,22 @@ export function NotificationBell({ className }) {
                 const typeKey = String(n.type ?? '').toLowerCase()
                 const typeMeta = TYPE_META[typeKey]
                 const dot = TONE_DOT[typeMeta?.tone ?? 'sky'] ?? TONE_DOT.sky
+                function handleKeyDown(e) {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    openItem(n)
+                  }
+                }
                 return (
                   <li key={n.id}>
-                    <button
-                      type="button"
+                    <div
+                      role="button"
+                      tabIndex={0}
                       onClick={() => openItem(n)}
+                      onKeyDown={handleKeyDown}
                       className={cn(
-                        'group relative flex w-full items-start gap-3 px-4 py-3 text-left transition-colors',
-                        'hover:bg-muted/40',
+                        'group relative flex w-full cursor-pointer items-start gap-3 px-4 py-3 text-left transition-colors',
+                        'hover:bg-muted/40 focus:bg-muted/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                         !n.isRead && 'bg-primary/[0.03]',
                       )}
                     >
@@ -196,7 +205,7 @@ export function NotificationBell({ className }) {
                       >
                         <Trash2 className="size-3.5" />
                       </button>
-                    </button>
+                    </div>
                   </li>
                 )
               })}
@@ -212,12 +221,13 @@ export function NotificationBell({ className }) {
           </div>
         ) : null}
       </DropdownMenuContent>
-      <NotificationDetailDialog
-        notification={openDetail}
-        open={Boolean(openDetail)}
-        onOpenChange={(o) => { if (!o) setOpenDetail(null) }}
-      />
     </DropdownMenu>
+    <NotificationDetailDialog
+      notification={openDetail}
+      open={Boolean(openDetail)}
+      onOpenChange={(o) => { if (!o) setOpenDetail(null) }}
+    />
+    </>
   )
 }
 

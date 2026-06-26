@@ -16,9 +16,22 @@ import { Badge } from '@/components/ui/badge'
 
 export default function Header({ onNavigate }) {
   const [notifs, setNotifs] = useState([])
+  const [profile, setProfile] = useState(null)
 
   useEffect(() => {
-    api.getNotifications?.().then(setNotifs).catch(() => setNotifs([]))
+    api.getNotifications({ limit: 10 }).then(setNotifs).catch(() => setNotifs([]))
+    api
+      .getProfile()
+      .then((data) => {
+        const p = data?.data ?? data ?? {}
+        const name = p.name || 'Admin'
+        setProfile({
+          name,
+          role: p.role || 'Admin',
+          initials: p.initials || name.slice(0, 2).toUpperCase(),
+        })
+      })
+      .catch(() => setProfile({ name: 'Admin', role: 'Admin', initials: 'AD' }))
   }, [])
 
   function handleLogout() {
@@ -26,6 +39,8 @@ export default function Header({ onNavigate }) {
     localStorage.removeItem('role')
     window.location.href = '/login'
   }
+
+  const display = profile ?? { name: 'Admin', role: 'Admin', initials: 'AD' }
 
   return (
     <header className="sticky top-0 z-40 flex h-16 items-center gap-3 border-b bg-card/80 px-6 backdrop-blur">
@@ -39,7 +54,7 @@ export default function Header({ onNavigate }) {
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon-sm" className="relative">
               <Bell className="size-4" />
-              {notifs.length > 0 ? (
+              {notifs.some((n) => !n.isRead) ? (
                 <span className="absolute right-1 top-1 size-2 rounded-full bg-primary ring-2 ring-card" />
               ) : null}
             </Button>
@@ -68,12 +83,12 @@ export default function Header({ onNavigate }) {
             <Button variant="ghost" className="h-10 gap-2 px-2">
               <Avatar className="size-7">
                 <AvatarFallback className="bg-gradient-to-br from-primary to-rose-500 text-xs font-bold text-primary-foreground">
-                  AD
+                  {display.initials}
                 </AvatarFallback>
               </Avatar>
               <div className="hidden text-left text-xs sm:block">
-                <div className="font-semibold">Admin</div>
-                <div className="text-muted-foreground">Super Admin</div>
+                <div className="font-semibold">{display.name}</div>
+                <div className="text-muted-foreground">{display.role}</div>
               </div>
               <ChevronDown className="size-3.5 text-muted-foreground" />
             </Button>
@@ -83,12 +98,12 @@ export default function Header({ onNavigate }) {
               <div className="flex items-center gap-2">
                 <Avatar className="size-9">
                   <AvatarFallback className="bg-gradient-to-br from-primary to-rose-500 text-xs font-bold text-primary-foreground">
-                    AD
+                    {display.initials}
                   </AvatarFallback>
                 </Avatar>
                 <div>
-                  <div className="text-sm font-semibold">Admin</div>
-                  <Badge variant="outline" className="mt-0.5 h-4 text-[10px]">Super Admin</Badge>
+                  <div className="text-sm font-semibold">{display.name}</div>
+                  <Badge variant="outline" className="mt-0.5 h-4 text-[10px]">{display.role}</Badge>
                 </div>
               </div>
             </DropdownMenuLabel>
@@ -97,9 +112,9 @@ export default function Header({ onNavigate }) {
               <User className="size-4" />
               Hồ sơ
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onNavigate?.('settings')}>
+            <DropdownMenuItem onClick={() => onNavigate?.('eb-representative')}>
               <Settings className="size-4" />
-              Cài đặt
+              Đại diện EB
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={handleLogout} className="text-destructive focus:text-destructive">

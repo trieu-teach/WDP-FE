@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft } from "lucide-react";
-import { SERIES_GENRES } from "@/utils/seriesModel.js";
+import { ArrowLeft, ImageIcon } from "lucide-react";
+import { resolveMediaUrl } from "@/api/http.js";
+import {
+  isTePageRecord,
+  resolveTePageId,
+  resolveTePageImageUrl,
+  tePageHasImage,
+  teReviewsService,
+} from "@/api/teReviews.service.js";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,16 +31,112 @@ import type {
   TantouSubmission,
 } from "./reviewTypes";
 import {
-  averageRatings,
-  clampRating,
   createReviewDraft,
-  findNextPendingSubmission,
   formatReleaseDate,
   getMangakaNotesForStoryPage,
   groupSubmissionsByChapter,
   isSameChapter,
+  mapApiAnnotationsToNotesByPage,
+  mapApiAnnotationsToPageNotes,
   resolveStoryPagesForChapter,
 } from "./reviewUtils";
+
+type PageDetail = {
+  pageId: string;
+  imageUrl?: string;
+  pageNumber: number;
+};
+
+function buildPageDetail(
+  page: NonNullable<TantouSubmission["pagesMeta"]>[number],
+  index: number,
+): PageDetail {
+  return {
+    pageId: resolveTePageId(page),
+    pageNumber: Number(page.page_number ?? index + 1),
+    imageUrl: resolveTePageImageUrl(page) ?? undefined,
+  };
+}
+
+type PageMeta = NonNullable<TantouSubmission["pagesMeta"]>[number];
+
+function teResponseToPages(res: {
+  page?: unknown;
+  pages?: unknown[];
+}): PageMeta[] {
+  let pages = (res.pages ?? []) as PageMeta[];
+  if (!pages.length && isTePageRecord(res.page)) {
+    pages = [res.page as PageMeta];
+  }
+  return pages;
+}
+
+function pickTePageWithImage(
+  res: { page?: unknown; pages?: unknown[] },
+  pageIndex: number,
+): PageMeta | null {
+  const pages = Array.isArray(res.pages) ? res.pages : [];
+  const candidates = [
+    res.page,
+    pages[pageIndex],
+    pages.find(
+      (p) =>
+        Number((p as { page_number?: number })?.page_number) === pageIndex + 1,
+    ),
+    pages[0],
+  ];
+  for (const candidate of candidates) {
+    if (isTePageRecord(candidate) && tePageHasImage(candidate)) {
+      return candidate as PageMeta;
+    }
+  }
+  for (const candidate of candidates) {
+    if (isTePageRecord(candidate)) return candidate as PageMeta;
+  }
+  return null;
+}
+
+/** Chỉ gọi ?page=N khi `all=true` trả page thiếu URL ảnh */
+async function hydrateMissingPageImages(chapterId: string, pages: PageMeta[]) {
+  const missingIndexes = pages
+    .map((page, index) => (tePageHasImage(page) ? -1 : index))
+    .filter((index) => index >= 0);
+
+  if (!missingIndexes.length) {
+    const details: Record<number, PageDetail> = {};
+    pages.forEach((page, index) => {
+      if (tePageHasImage(page)) details[index] = buildPageDetail(page, index);
+    });
+    return { details, enrichedPages: pages };
+  }
+
+  const details: Record<number, PageDetail> = {};
+  const enrichedPages = pages.map((page) => ({ ...page }));
+
+  pages.forEach((page, index) => {
+    if (tePageHasImage(page)) {
+      details[index] = buildPageDetail(page, index);
+    }
+  });
+
+  await Promise.all(
+    missingIndexes.map(async (index) => {
+      const page = pages[index];
+      try {
+        const res = await teReviewsService.getChapterPage(chapterId, index + 1);
+        const tePage = pickTePageWithImage(res, index);
+        if (tePage) {
+          enrichedPages[index] = { ...page, ...tePage };
+          details[index] = buildPageDetail(enrichedPages[index], index);
+        }
+      } catch {
+        // giữ page từ ?all=true
+      }
+    }),
+  );
+
+  return { details, enrichedPages };
+}
 
 type TantouChapterReviewDashboardProps = {
   submission: TantouSubmission;
@@ -42,37 +145,26 @@ type TantouChapterReviewDashboardProps = {
   onCancel: () => void;
   onSaveReview: (
     payload: ReviewSavePayload,
-    options?: { advanceNext?: boolean },
+    options?: { submitAction?: "reject" | "publish" },
   ) => void;
   onSelectChapter: (submissionId: string) => void;
 };
 
-function GenrePicker({
-  selectedGenres,
-  onToggle,
-}: {
-  selectedGenres: string[];
-  onToggle: (genre: string) => void;
-}) {
+function SelectedPills({ items }: { items: string[] }) {
+  if (!items.length) {
+    return (
+      <p className="min-h-9 rounded-md border border-dashed border-border/60 bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
+        Chưa chọn
+      </p>
+    );
+  }
   return (
-    <div className="flex flex-wrap gap-2">
-      {SERIES_GENRES.slice(0, 8).map((genre) => {
-        const active = selectedGenres.includes(genre);
-        return (
-          <button
-            key={genre}
-            type="button"
-            onClick={() => onToggle(genre)}
-            className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
-              active
-                ? "border-primary bg-primary text-primary-foreground"
-                : "border-border hover:bg-muted/50"
-            }`}
-          >
-            {genre}
-          </button>
-        );
-      })}
+    <div className="flex min-h-9 flex-wrap gap-1.5 rounded-md border border-border/60 bg-muted/10 px-3 py-2">
+      {items.map((item) => (
+        <Badge key={item} variant="secondary">
+          {item}
+        </Badge>
+      ))}
     </div>
   );
 }
@@ -107,27 +199,246 @@ export function TantouChapterReviewDashboard({
       return initial;
     },
   );
+  const [chapterPagesMeta, setChapterPagesMeta] = useState(
+    () => submission.pagesMeta ?? [],
+  );
+  const [pageDetailsByIndex, setPageDetailsByIndex] = useState<
+    Record<number, PageDetail>
+  >({});
+  const [loadingPage, setLoadingPage] = useState(false);
   const readerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setDraft(createReviewDraft(submission));
     setViewingChapterId(submission.id);
     setViewingPageIndex(submission.pageIndex ?? 0);
-    const initial: Record<number, PageNote[]> = {};
-    if (submission.editorialNotesByPage) {
-      Object.entries(submission.editorialNotesByPage).forEach(([k, v]) => {
-        initial[Number(k)] = v;
-      });
-    } else if (submission.editorialNotes?.length) {
-      initial[submission.pageIndex ?? 0] = submission.editorialNotes;
-    }
-    setNotesByPage(initial);
+    setChapterPagesMeta(submission.pagesMeta ?? []);
+    setPageDetailsByIndex({});
+    setNotesByPage({});
   }, [submission.id]);
 
-  const averageScore = useMemo(
-    () => averageRatings(draft.ratings),
-    [draft.ratings],
-  );
+  useEffect(() => {
+    let cancelled = false;
+    const chapterId = submission.chapterId ?? submission.id;
+    if (!chapterId) return;
+
+    function applyLoadedPages(
+      pages: NonNullable<TantouSubmission["pagesMeta"]>,
+      rootAnnotations: unknown[] = [],
+    ) {
+      setChapterPagesMeta(pages);
+      const details: Record<number, PageDetail> = {};
+      const initialNotes: Record<number, PageNote[]> = {};
+
+      pages.forEach((page, index) => {
+        details[index] = buildPageDetail(page, index);
+        if (Array.isArray(page.annotations) && page.annotations.length) {
+          initialNotes[index] = mapApiAnnotationsToPageNotes(page.annotations);
+        }
+      });
+
+      if (rootAnnotations.length) {
+        Object.assign(
+          initialNotes,
+          mapApiAnnotationsToNotesByPage(rootAnnotations, pages),
+        );
+      }
+
+      setPageDetailsByIndex(details);
+      if (Object.keys(initialNotes).length) {
+        setNotesByPage((current) => ({ ...current, ...initialNotes }));
+      }
+    }
+
+    async function loadAllChapterPages() {
+      setLoadingPage(true);
+      try {
+        const res = await teReviewsService.getAllChapterPages(chapterId);
+        if (cancelled) return;
+
+        const pages = teResponseToPages(res);
+        if (!pages.length || cancelled) return;
+
+        applyLoadedPages(pages, Array.isArray(res.annotations) ? res.annotations : []);
+
+        if (pages.some((page) => !tePageHasImage(page))) {
+          const hydrated = await hydrateMissingPageImages(chapterId, pages);
+          if (cancelled) return;
+          if (Object.keys(hydrated.details).length) {
+            setPageDetailsByIndex((current) => ({ ...current, ...hydrated.details }));
+          }
+          if (hydrated.enrichedPages.some(tePageHasImage)) {
+            setChapterPagesMeta(hydrated.enrichedPages);
+          }
+        }
+      } catch {
+        try {
+          const res = await teReviewsService.getChapterPage(chapterId, 1);
+          if (cancelled) return;
+          const pages = teResponseToPages(res);
+          if (!pages.length) return;
+
+          applyLoadedPages(pages, Array.isArray(res.annotations) ? res.annotations : []);
+          const hydrated = await hydrateMissingPageImages(chapterId, pages);
+          if (cancelled) return;
+          if (Object.keys(hydrated.details).length) {
+            setPageDetailsByIndex((current) => ({ ...current, ...hydrated.details }));
+          }
+          setChapterPagesMeta(hydrated.enrichedPages);
+        } catch {
+          // giữ state hiện tại
+        }
+      } finally {
+        if (!cancelled) setLoadingPage(false);
+      }
+    }
+
+    void loadAllChapterPages();
+    return () => {
+      cancelled = true;
+    };
+  }, [submission.id, submission.chapterId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const chapterId = submission.chapterId ?? submission.id;
+    if (!chapterId) return;
+
+    const pageMeta = chapterPagesMeta[viewingPageIndex];
+    const cachedImage = pageDetailsByIndex[viewingPageIndex]?.imageUrl;
+    const cachedNotes = notesByPage[viewingPageIndex];
+    const needsImage = !cachedImage && !tePageHasImage(pageMeta);
+    const needsNotes = cachedNotes === undefined;
+    if (!needsImage && !needsNotes) return;
+
+    async function loadCurrentPageDetail() {
+      try {
+        const res = await teReviewsService.getChapterPage(
+          chapterId,
+          viewingPageIndex + 1,
+        );
+        if (cancelled) return;
+
+        const tePage = pickTePageWithImage(res, viewingPageIndex);
+        let imageUrl = resolveTePageImageUrl(tePage ?? undefined) ?? undefined;
+        let mergedPage = tePage;
+
+        if (needsImage && !imageUrl && chapterPagesMeta.length) {
+          const hydrated = await hydrateMissingPageImages(
+            chapterId,
+            chapterPagesMeta,
+          );
+          const detail = hydrated.details[viewingPageIndex];
+          if (detail?.imageUrl) {
+            imageUrl = detail.imageUrl;
+            mergedPage = hydrated.enrichedPages[viewingPageIndex] ?? mergedPage;
+          }
+        }
+
+        if (needsImage && (imageUrl || mergedPage)) {
+          const detail = mergedPage
+            ? buildPageDetail(mergedPage, viewingPageIndex)
+            : pageDetailsByIndex[viewingPageIndex];
+          setPageDetailsByIndex((current) => ({
+            ...current,
+            [viewingPageIndex]: {
+              ...current[viewingPageIndex],
+              ...detail,
+              imageUrl:
+                imageUrl
+                ?? detail?.imageUrl
+                ?? current[viewingPageIndex]?.imageUrl,
+            },
+          }));
+          if (mergedPage) {
+            setChapterPagesMeta((current) => {
+              const next = [...current];
+              next[viewingPageIndex] = {
+                ...(next[viewingPageIndex] ?? {}),
+                ...mergedPage,
+              };
+              return next;
+            });
+          }
+        }
+
+        if (needsNotes) {
+          const pageNotes = mapApiAnnotationsToPageNotes(
+            res.annotations
+            ?? (isTePageRecord(res.page) && Array.isArray(res.page.annotations)
+              ? res.page.annotations
+              : [])
+            ?? [],
+          );
+          setNotesByPage((current) => ({
+            ...current,
+            [viewingPageIndex]: pageNotes,
+          }));
+        }
+      } catch {
+        if (cancelled) return;
+
+        if (needsImage) {
+          try {
+            const res = await teReviewsService.getChapterPage(
+              chapterId,
+              viewingPageIndex + 1,
+            );
+            if (cancelled) return;
+            const tePage = pickTePageWithImage(res, viewingPageIndex);
+            if (tePage) {
+              const detail = buildPageDetail(tePage, viewingPageIndex);
+              setPageDetailsByIndex((current) => ({
+                ...current,
+                [viewingPageIndex]: {
+                  ...current[viewingPageIndex],
+                  ...detail,
+                },
+              }));
+            }
+          } catch {
+            // giữ state hiện tại
+          }
+        }
+
+        if (needsNotes) {
+          try {
+            const pageId = resolveTePageId(chapterPagesMeta[viewingPageIndex]);
+            const annotations = await teReviewsService.getAnnotations(
+              chapterId,
+              pageId || undefined,
+            );
+            if (cancelled) return;
+            setNotesByPage((current) => ({
+              ...current,
+              [viewingPageIndex]: mapApiAnnotationsToPageNotes(
+                Array.isArray(annotations) ? annotations : [],
+              ),
+            }));
+          } catch {
+            if (!cancelled) {
+              setNotesByPage((current) => ({
+                ...current,
+                [viewingPageIndex]: current[viewingPageIndex] ?? [],
+              }));
+            }
+          }
+        }
+      }
+    }
+
+    void loadCurrentPageDetail();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    submission.id,
+    submission.chapterId,
+    viewingPageIndex,
+    chapterPagesMeta,
+    pageDetailsByIndex,
+    notesByPage,
+  ]);
 
   const chapterRows: ChapterRow[] = useMemo(() => {
     return groupSubmissionsByChapter(
@@ -144,15 +455,54 @@ export function TantouChapterReviewDashboard({
 
   const viewingSubmission = useMemo(() => {
     if (!viewingChapterId) return null;
-    return (
-      relatedSubmissions.find((s) => s.id === viewingChapterId) ?? submission
-    );
-  }, [viewingChapterId, relatedSubmissions, submission]);
+    const base =
+      relatedSubmissions.find((s) => s.id === viewingChapterId) ?? submission;
+    if (base.id !== submission.id) return base;
+    return {
+      ...base,
+      pagesMeta: chapterPagesMeta.length ? chapterPagesMeta : base.pagesMeta,
+    };
+  }, [viewingChapterId, relatedSubmissions, submission, chapterPagesMeta]);
 
   const storyPages = useMemo(() => {
     if (!viewingSubmission) return [];
+
+    const summary = chapterPagesMeta.length
+      ? chapterPagesMeta
+      : (viewingSubmission.pagesMeta ?? []);
+
+    if (summary.length) {
+      return summary.map((page, index) => ({
+        pageIndex: index,
+        pageLabel: page.page_number
+          ? `Trang ${page.page_number}`
+          : `Trang ${index + 1}`,
+        imageUrl:
+          pageDetailsByIndex[index]?.imageUrl ??
+          resolveTePageImageUrl(page) ??
+          undefined,
+      }));
+    }
+
+    const detail = pageDetailsByIndex[viewingPageIndex];
+    if (detail?.imageUrl) {
+      return [
+        {
+          pageIndex: viewingPageIndex,
+          pageLabel: `Trang ${detail.pageNumber}`,
+          imageUrl: detail.imageUrl,
+        },
+      ];
+    }
+
     return resolveStoryPagesForChapter(viewingSubmission, relatedSubmissions);
-  }, [relatedSubmissions, viewingSubmission]);
+  }, [
+    chapterPagesMeta,
+    pageDetailsByIndex,
+    relatedSubmissions,
+    viewingPageIndex,
+    viewingSubmission,
+  ]);
 
   const currentStoryPage = storyPages[viewingPageIndex] ?? storyPages[0];
   const canEditNotes =
@@ -166,16 +516,6 @@ export function TantouChapterReviewDashboard({
         : 0,
     );
   }, [viewingSubmission?.id, submission]);
-
-  const nextPending = useMemo(
-    () =>
-      findNextPendingSubmission(
-        allSubmissions.length ? allSubmissions : relatedSubmissions,
-        submission.id,
-        submission.seriesTitle,
-      ),
-    [allSubmissions, relatedSubmissions, submission.id, submission.seriesTitle],
-  );
 
   function handleOpenChapter(id: string) {
     setViewingChapterId(id);
@@ -195,11 +535,14 @@ export function TantouChapterReviewDashboard({
     const primaryPageIndex = submission.pageIndex ?? 0;
     return {
       ...draft,
-      averageScore,
-      coverImageUrl: submission.mangakaImageUrl,
+      averageScore: 0,
+      coverImageUrl: draft.series_cover_image_url || submission.mangakaImageUrl,
       editorialNotes:
         notesByPage[primaryPageIndex] ?? draft.editorialNotes ?? [],
       editorialNotesByPage: notesByPage,
+      pagesMeta: chapterPagesMeta.length
+        ? chapterPagesMeta
+        : submission.pagesMeta,
     };
   }
 
@@ -210,21 +553,9 @@ export function TantouChapterReviewDashboard({
     }
   }
 
-  function updateRating(key: keyof ReviewDraft["ratings"], value: number) {
-    setDraft((current) => ({
-      ...current,
-      ratings: { ...current.ratings, [key]: clampRating(value) },
-    }));
-  }
-
-  function toggleGenre(genre: string) {
-    setDraft((current) => ({
-      ...current,
-      genres: current.genres.includes(genre)
-        ? current.genres.filter((g) => g !== genre)
-        : [...current.genres, genre],
-    }));
-  }
+  const coverPreviewUrl = resolveMediaUrl(draft.series_cover_image_url);
+  const requiresEbSubmit =
+    submission.pipeline !== "recurring" && !submission.seriesMeta?.ebApproved;
 
   return (
     <div className="space-y-6 dark:text-zinc-100">
@@ -238,7 +569,7 @@ export function TantouChapterReviewDashboard({
             Tantou · Chapter Review
           </p>
           <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-            {draft.storyTitle || submission.seriesTitle}
+            {draft.series_name || submission.seriesTitle}
           </h1>
           <p className="text-sm text-muted-foreground">
             Ch. {submission.chapterNum} · {submission.pageLabel} ·{" "}
@@ -252,53 +583,76 @@ export function TantouChapterReviewDashboard({
         </Badge>
       </header>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(340px,420px)] xl:items-stretch xl:gap-8">
-        <div className="flex h-full flex-col gap-5">
+      <div className="space-y-6">
+        <div className="flex flex-col gap-5">
           <Card className="border-border/70 dark:bg-zinc-950/60">
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Series metadata</CardTitle>
+              <CardTitle className="text-base">Thông tin truyện</CardTitle>
               <CardDescription>
-                Chỉnh nhanh thông tin series khi duyệt debut.
+                Thông tin do Mangaka khai báo khi tạo series.
               </CardDescription>
             </CardHeader>
-            <CardContent className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="tantou-story-title">Story title</Label>
-                <Input
-                  id="tantou-story-title"
-                  value={draft.storyTitle}
-                  onChange={(e) =>
-                    setDraft((c) => ({ ...c, storyTitle: e.target.value }))
-                  }
-                />
+            <CardContent className="flex flex-col gap-6 md:flex-row md:items-start md:gap-8">
+              <div className="mx-auto w-full max-w-[200px] shrink-0 space-y-2 md:mx-0 md:w-[220px] lg:w-[240px]">
+                <Label className="text-sm font-medium">Ảnh bìa</Label>
+                <div className="aspect-[3/4] w-full overflow-hidden rounded-xl border border-border/70 bg-muted/30 shadow-sm">
+                  {coverPreviewUrl ? (
+                    <img
+                      src={coverPreviewUrl}
+                      alt=""
+                      className="size-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex size-full flex-col items-center justify-center gap-3 p-4 text-center text-muted-foreground">
+                      <ImageIcon className="size-10 opacity-35" />
+                      <span className="text-sm leading-snug">Chưa có ảnh bìa</span>
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="tantou-author">Author</Label>
-                <Input
-                  id="tantou-author"
-                  value={draft.authorName}
-                  onChange={(e) =>
-                    setDraft((c) => ({ ...c, authorName: e.target.value }))
-                  }
-                />
-              </div>
-              <div className="space-y-2 sm:col-span-2">
-                <Label>Genres</Label>
-                <GenrePicker
-                  selectedGenres={draft.genres}
-                  onToggle={toggleGenre}
-                />
-              </div>
-              <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="tantou-synopsis">Synopsis</Label>
-                <Textarea
-                  id="tantou-synopsis"
-                  value={draft.synopsis}
-                  onChange={(e) =>
-                    setDraft((c) => ({ ...c, synopsis: e.target.value }))
-                  }
-                  className="min-h-24 resize-y dark:bg-zinc-900/80"
-                />
+
+              <div className="grid min-w-0 flex-1 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="tantou-series-name">Series</Label>
+                  <Input
+                    id="tantou-series-name"
+                    value={draft.series_name}
+                    readOnly
+                    className="bg-muted/40"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="tantou-author-name">Tên tác giả</Label>
+                  <Input
+                    id="tantou-author-name"
+                    value={draft.series_author_name}
+                    readOnly
+                    placeholder="—"
+                    className="bg-muted/40"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Tag</Label>
+                  <SelectedPills items={draft.series_tags} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Thể loại</Label>
+                  <SelectedPills items={draft.series_genre} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="tantou-series-synopsis">Mô tả</Label>
+                  <Textarea
+                    id="tantou-series-synopsis"
+                    value={draft.series_synopsis}
+                    onChange={(e) =>
+                      setDraft((c) => ({
+                        ...c,
+                        series_synopsis: e.target.value,
+                      }))
+                    }
+                    className="min-h-28 resize-y dark:bg-zinc-900/80"
+                  />
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -309,8 +663,10 @@ export function TantouChapterReviewDashboard({
             viewingId={viewingChapterId}
             onOpen={handleOpenChapter}
           />
+        </div>
 
-          <div className="flex min-h-0 flex-1 flex-col">
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(340px,420px)] xl:items-stretch xl:gap-8">
+          <div className="flex min-h-0 flex-col">
             {viewingSubmission ? (
               <TantouPageAnnotator
                 ref={readerRef}
@@ -325,40 +681,38 @@ export function TantouChapterReviewDashboard({
                   viewingPageIndex,
                 )}
                 editorialNotes={notesByPage[viewingPageIndex] ?? []}
-                readOnly={!canEditNotes}
+                readOnly={!canEditNotes || loadingPage}
                 onEditorialNotesChange={
                   canEditNotes ? handleEditorialNotesChange : undefined
                 }
                 onClose={() => setViewingChapterId(null)}
               />
             ) : (
-              <div className="flex flex-1 items-center justify-center rounded-2xl border border-dashed border-border/80 bg-muted/20 px-4 py-10 text-center text-sm text-muted-foreground">
+              <div className="flex min-h-[420px] flex-1 items-center justify-center rounded-2xl border border-dashed border-border/80 bg-muted/20 px-4 py-10 text-center text-sm text-muted-foreground">
                 Chọn <strong>Mở</strong> trong danh sách chapter để xem trang
                 truyện cần nhận xét.
               </div>
             )}
           </div>
-        </div>
 
-        <div className="flex h-full flex-col">
-          <ReviewRatingPanel
-            submission={submission}
-            draft={draft}
-            averageScore={averageScore}
-            onRatingChange={updateRating}
-            onReviewTextChange={(text) =>
-              setDraft((c) => ({ ...c, reviewText: text }))
-            }
-            onStatusChange={(reviewStatus) =>
-              setDraft((c) => ({ ...c, reviewStatus }))
-            }
-            onCancel={onCancel}
-            onSave={() => onSaveReview(buildPayload())}
-            onSaveAndNext={() =>
-              onSaveReview(buildPayload(), { advanceNext: true })
-            }
-            hasNextChapter={!!nextPending}
-          />
+          <div className="flex min-h-0 flex-col">
+            <ReviewRatingPanel
+              draft={draft}
+              requiresEbSubmit={requiresEbSubmit}
+              onReviewTextChange={(text) =>
+                setDraft((c) => ({ ...c, reviewText: text }))
+              }
+              onStatusChange={(reviewStatus) =>
+                setDraft((c) => ({ ...c, reviewStatus }))
+              }
+              onSendToMangaka={() =>
+                onSaveReview(buildPayload(), { submitAction: "reject" })
+              }
+              onSendToEb={() =>
+                onSaveReview(buildPayload(), { submitAction: "publish" })
+              }
+            />
+          </div>
         </div>
       </div>
     </div>

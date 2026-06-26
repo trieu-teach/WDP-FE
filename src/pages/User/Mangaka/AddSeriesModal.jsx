@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   BookOpen,
   Check,
   ChevronRight,
+  ImageIcon,
   ImagePlus,
   Sparkles,
-  Users,
+  Upload,
   X,
 } from 'lucide-react'
 import {
@@ -59,7 +60,7 @@ export default function AddSeriesModal({
 
   useEffect(() => {
     if (!open) return
-    if (isEdit) setForm(seriesToForm(initialSeries))
+    if (isEdit) setForm({ ...seriesToForm(initialSeries), coverPreview: initialSeries?.coverImage || null })
     else setForm(createEmptySeriesForm(authorName))
     setTouched(false)
   }, [open, isEdit, initialSeries?.id, authorName])
@@ -84,6 +85,33 @@ export default function AddSeriesModal({
     })
   }
 
+  function toggleGenre(g) {
+    patch({
+      genre: form.genre.includes(g)
+        ? form.genre.filter(x => x !== g)
+        : [...form.genre, g],
+    })
+  }
+
+  function handleCoverChange(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const url = URL.createObjectURL(file)
+    patch({ cover: file, coverPreview: url })
+  }
+
+  function handleCoverDrop(e) {
+    e.preventDefault()
+    const file = e.dataTransfer.files?.[0]
+    if (!file || !file.type.startsWith('image/')) return
+    const url = URL.createObjectURL(file)
+    patch({ cover: file, coverPreview: url })
+  }
+
+  function handleCoverDragOver(e) {
+    e.preventDefault()
+  }
+
   function handleClose() {
     setForm(createEmptySeriesForm(authorName))
     setTouched(false)
@@ -106,7 +134,7 @@ export default function AddSeriesModal({
     if (!touched) return null
     if (key === 'name' && !form.name.trim()) return 'Tên series tối thiểu 2 ký tự.'
     if (key === 'description' && !form.description.trim()) return 'Vui lòng nhập mô tả.'
-    if (key === 'genre' && !form.genre) return 'Vui lòng chọn thể loại.'
+    if (key === 'genre' && (!Array.isArray(form.genre) || form.genre.length === 0)) return 'Vui lòng chọn ít nhất 1 thể loại.'
     if (key === 'target_audience' && !form.target_audience) return 'Vui lòng chọn đối tượng.'
     return null
   }
@@ -162,58 +190,95 @@ export default function AddSeriesModal({
                 <span className="series-modal__block-note">Bắt buộc</span>
               </div>
 
-              <div className="series-modal__field">
-                <Label htmlFor="s-name">
-                  Tên series <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="s-name"
-                  value={form.name}
-                  onChange={e => patch({ name: e.target.value })}
-                  placeholder="Ví dụ: Kiếm Thần Vô Song"
-                  maxLength={120}
-                  autoFocus
-                  className="series-modal__control"
-                />
-                {showErr('name') && (
-                  <p className="series-modal__error">{showErr('name')}</p>
-                )}
-              </div>
-
-              <div className="series-modal__field">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="s-desc">
-                    Mô tả <span className="text-destructive">*</span>
-                  </Label>
-                  <span className="text-xs text-muted-foreground tabular-nums">
-                    {descriptionFilled}/{charLimit}
-                  </span>
-                </div>
-                <Textarea
-                  id="s-desc"
-                  value={form.description}
-                  onChange={e => patch({ description: e.target.value })}
-                  placeholder="Cốt truyện, bối cảnh, nhân vật chính…"
-                  rows={4}
-                  maxLength={charLimit}
-                  className="series-modal__control series-modal__textarea"
-                />
-                <div className="h-0.5 w-full overflow-hidden rounded-full bg-muted">
-                  <div
-                    className={cn(
-                      'h-full transition-all duration-300',
-                      charPercent > 80
-                        ? 'bg-destructive'
-                        : charPercent > 50
-                          ? 'bg-amber-500'
-                          : 'bg-primary',
-                    )}
-                    style={{ width: `${charPercent}%` }}
+              <div className="grid gap-4 sm:grid-cols-[120px_1fr]">
+                {/* Cover dropzone */}
+                <div
+                  className="series-modal__cover-dropzone"
+                  onDrop={handleCoverDrop}
+                  onDragOver={handleCoverDragOver}
+                >
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="series-modal__file-input"
+                    id="s-cover"
+                    onChange={handleCoverChange}
                   />
+                  <label htmlFor="s-cover" className="cursor-pointer">
+                    {form.coverPreview ? (
+                      <>
+                        <img src={form.coverPreview} alt="Cover" className="cover-img" />
+                        <div className="cover-overlay">
+                          <Upload className="size-4" />
+                          <span>Đổi ảnh</span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center gap-2 p-2 text-center">
+                        <div className="series-modal__dropzone-icon">
+                          <ImagePlus className="size-5" />
+                        </div>
+                        <span className="text-xs leading-tight text-muted-foreground">Ảnh bìa<br/>(3:4)</span>
+                      </div>
+                    )}
+                  </label>
                 </div>
-                {showErr('description') && (
-                  <p className="series-modal__error">{showErr('description')}</p>
-                )}
+
+                <div className="flex flex-col gap-4">
+                  <div className="series-modal__field">
+                    <Label htmlFor="s-name">
+                      Tên series <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="s-name"
+                      value={form.name}
+                      onChange={e => patch({ name: e.target.value })}
+                      placeholder="Ví dụ: Kiếm Thần Vô Song"
+                      maxLength={120}
+                      autoFocus
+                      className="series-modal__control"
+                    />
+                    {showErr('name') && (
+                      <p className="series-modal__error">{showErr('name')}</p>
+                    )}
+                  </div>
+
+                  <div className="series-modal__field">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="s-desc">
+                        Mô tả <span className="text-destructive">*</span>
+                      </Label>
+                      <span className="text-xs text-muted-foreground tabular-nums">
+                        {descriptionFilled}/{charLimit}
+                      </span>
+                    </div>
+                    <Textarea
+                      id="s-desc"
+                      value={form.description}
+                      onChange={e => patch({ description: e.target.value })}
+                      placeholder="Cốt truyện, bối cảnh, nhân vật chính…"
+                      rows={4}
+                      maxLength={charLimit}
+                      className="series-modal__control series-modal__textarea"
+                    />
+                    <div className="h-0.5 w-full overflow-hidden rounded-full bg-muted">
+                      <div
+                        className={cn(
+                          'h-full transition-all duration-300',
+                          charPercent > 80
+                            ? 'bg-destructive'
+                            : charPercent > 50
+                              ? 'bg-amber-500'
+                              : 'bg-primary',
+                        )}
+                        style={{ width: `${charPercent}%` }}
+                      />
+                    </div>
+                    {showErr('description') && (
+                      <p className="series-modal__error">{showErr('description')}</p>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -236,12 +301,12 @@ export default function AddSeriesModal({
                 <div className="series-modal__genre-panel">
                   <div className="series-modal__genres">
                     {SERIES_GENRES.map(g => {
-                      const active = form.genre === g
+                      const active = form.genre.includes(g)
                       return (
                         <button
                           key={g}
                           type="button"
-                          onClick={() => patch({ genre: g })}
+                          onClick={() => toggleGenre(g)}
                           className={cn(
                             'series-modal__genre',
                             active && 'series-modal__genre--active',
@@ -253,10 +318,41 @@ export default function AddSeriesModal({
                       )
                     })}
                   </div>
+                  {form.genre.length > 0 && (
+                    <p className="series-modal__hint mt-1">
+                      Đã chọn: {form.genre.length} thể loại
+                    </p>
+                  )}
                 </div>
                 {showErr('genre') && (
                   <p className="series-modal__error">{showErr('genre')}</p>
                 )}
+              </div>
+
+              <div className="series-modal__field">
+                <Label>
+                  Độ tuổi giới hạn
+                </Label>
+                <div className="flex flex-wrap gap-2">
+                  {AGE_RATINGS.map(a => {
+                    const active = form.age_rating === a.value
+                    return (
+                      <button
+                        key={a.value}
+                        type="button"
+                        onClick={() => patch({ age_rating: a.value })}
+                        className={cn(
+                          'series-modal__publish-card',
+                          active && 'series-modal__publish-card--active',
+                        )}
+                      >
+                        <span className="text-base">{a.icon}</span>
+                        <span className="series-modal__publish-title">{a.label}</span>
+                        <span className="series-modal__publish-dot" />
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
 
               <div className="series-modal__field">
@@ -291,79 +387,7 @@ export default function AddSeriesModal({
 
             <div className="series-modal__divider" />
 
-            {/* SECTION 3: Định dạng & độ tuổi */}
-            <div className="series-modal__block">
-              <div className="series-modal__block-head">
-                <h3 className="series-modal__block-title flex items-center gap-2">
-                  <ImagePlus className="size-4 text-primary" />
-                  Định dạng & phân loại nội dung
-                </h3>
-                <span className="series-modal__block-note">Tuỳ chọn</span>
-              </div>
-
-              <div className="series-modal__field">
-                <Label>Định dạng xuất bản</Label>
-                <div className="series-modal__publish">
-                  {SERIES_FORMATS.map(f => {
-                    const active = (form.category || 'manga') === f.value
-                    return (
-                      <button
-                        key={f.value}
-                        type="button"
-                        onClick={() => patch({ category: f.value })}
-                        className={cn(
-                          'series-modal__publish-card',
-                          active && 'series-modal__publish-card--active',
-                        )}
-                      >
-                        <span className="series-modal__publish-title">{f.label}</span>
-                        <span className="series-modal__publish-hint">
-                          {f.value === 'manga' && 'Truyện tranh Nhật Bản'}
-                          {f.value === 'manhwa' && 'Truyện tranh Hàn Quốc'}
-                          {f.value === 'manhua' && 'Truyện tranh Trung Quốc'}
-                          {f.value === 'webtoon' && 'Cuộn dọc, đọc trên mobile'}
-                        </span>
-                        <span className="series-modal__publish-dot" />
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-
-              <div className="series-modal__field">
-                <Label>
-                  <Users className="inline size-3.5 mr-1 text-muted-foreground" />
-                  Độ tuổi giới hạn
-                </Label>
-                <div className="series-modal__publish">
-                  {AGE_RATINGS.map(a => {
-                    const active = form.age_rating === a.value
-                    return (
-                      <button
-                        key={a.value}
-                        type="button"
-                        onClick={() => patch({ age_rating: a.value })}
-                        className={cn(
-                          'series-modal__publish-card',
-                          active && 'series-modal__publish-card--active',
-                        )}
-                      >
-                        <span className="flex items-center gap-2">
-                          <span className="text-base leading-none">{a.icon}</span>
-                          <span className="series-modal__publish-title">{a.label}</span>
-                        </span>
-                        <span className="series-modal__publish-hint">{a.value}</span>
-                        <span className="series-modal__publish-dot" />
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-            </div>
-
-            <div className="series-modal__divider" />
-
-            {/* SECTION 4: Tags */}
+            {/* SECTION 3: Tags */}
             <div className="series-modal__block">
               <div className="series-modal__block-head">
                 <h3 className="series-modal__block-title flex items-center gap-2">

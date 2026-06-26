@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Eye, EyeOff } from 'lucide-react'
+import { Eye, EyeOff, Phone } from 'lucide-react'
 import Header from '@/components/User/Header/Header.jsx'
 import Footer from '@/components/User/Footer/Footer.jsx'
 import { AuthShell, RoleCard } from '@/components/layout/AuthShell.jsx'
@@ -18,6 +18,7 @@ export default function Register() {
     username: '',
     name: '',
     email: '',
+    phone: '',
     password: '',
     confirmPassword: '',
     role: ROLES.MANGAKA,
@@ -41,6 +42,12 @@ export default function Register() {
     }
     if (!form.email.trim()) return 'Vui lòng nhập email.'
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) return 'Email không hợp lệ.'
+    if (form.phone.trim()) {
+      const phone = form.phone.replace(/[\s.-]/g, '')
+      if (!/^(0|\+84)\d{9,10}$/.test(phone)) {
+        return 'Số điện thoại không hợp lệ (VD: 0912345678 hoặc +84912345678).'
+      }
+    }
     if (!form.role) return 'Vui lòng chọn vai trò.'
     if (form.password.length < 6) return 'Mật khẩu phải có ít nhất 6 ký tự.'
     if (form.password !== form.confirmPassword) return 'Mật khẩu xác nhận không khớp.'
@@ -67,6 +74,7 @@ export default function Register() {
         username,
         name: form.name,
         email,
+        phone: form.phone,
         password: form.password,
         role: form.role,
       })
@@ -162,6 +170,25 @@ export default function Register() {
                       value={form.email}
                       onChange={e => setField('email', e.target.value)}
                     />
+                  </div>
+
+                  <div className="auth-form__field">
+                    <label htmlFor="reg-phone">
+                      Số điện thoại <span className="text-muted-foreground">(tuỳ chọn)</span>
+                    </label>
+                    <div className="relative">
+                      <Phone className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        id="reg-phone"
+                        className="auth-form__input pl-9 placeholder:text-muted-foreground/45"
+                        type="tel"
+                        inputMode="tel"
+                        autoComplete="tel"
+                        placeholder="0912345678"
+                        value={form.phone}
+                        onChange={e => setField('phone', e.target.value)}
+                      />
+                    </div>
                   </div>
 
                   <div className="auth-form__row auth-form__row--2">

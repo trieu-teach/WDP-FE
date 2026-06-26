@@ -3,6 +3,12 @@ import { tasksService } from '@/api/tasks.service.js'
 import { submissionsService } from '@/api/submissions.service.js'
 import { apiSubmissionChapterToUi, apiTaskToUi } from '@/utils/apiMappers.js'
 
+/**
+ * Luồng mới (1 task = 1 chapter, submission-driven):
+ *  - Assistant nộp chapter → BE tạo Submission có `status: 'submitted_by_assistant'`.
+ *  - Mangaka mở `/api/submissions/mangaka` → lọc ra các submission đang chờ duyệt.
+ *  - Card "Chờ duyệt" dùng submission làm đơn vị, không quét tasks nữa.
+ */
 export function useMangakaTasks(chapterRows) {
   const [pendingReviews, setPendingReviews] = useState([])
   const [submissions, setSubmissions] = useState([])
@@ -16,60 +22,44 @@ export function useMangakaTasks(chapterRows) {
   )
 
   const refresh = useCallback(async () => {
-    const rows = chapterRowsRef.current ?? []
-    if (!rows.length) {
-      setPendingReviews([])
-      setSubmissions([])
-      setLoading(false)
-      return
-    }
     setLoading(true)
     try {
-      const [reviews, subs] = await Promise.all([
-        (async () => {
-          const items = []
-          const seen = new Set()
-          await Promise.all(
-            rows.map(async (row) => {
-              try {
-                const raw = await tasksService.getByChapter(row.id)
-                const rawTasks = Array.isArray(raw) ? raw : []
-                // Deduplicate by task ID within this chapter
-                const uniqueTasks = []
-                const localSeen = new Set()
-                for (const t of rawTasks) {
-                  const id = t._id ?? t.id
-                  if (!id || localSeen.has(id)) continue
-                  localSeen.add(id)
-                  // Only include if not already in global seen (prevents cross-chapter duplicates)
-                  if (!seen.has(id)) {
-                    seen.add(id)
-                    uniqueTasks.push(t)
-                  }
-                }
-                const tasks = uniqueTasks.map(apiTaskToUi)
-                if (tasks.length === 0) return
-                /**
-                 * Flow mới: 1 chapter = 1 task. Lấy task có status `submitted`
-                 * (hoặc tất cả task ở `submitted` nếu BE vẫn trả theo ô note).
-                 */
-                const submittedTask = tasks.find(t => t.status === 'submitted')
-                  ?? (tasks.every(t => t.status === 'submitted') ? tasks[0] : null)
-                if (submittedTask) {
-                  items.push({ chapter: row, task: submittedTask, tasks })
-                }
-              } catch {
-                /* chapter chưa có task */
-              }
-            }),
-          )
-          return items
-        })(),
-        submissionsService.getMangakaSubmissions().catch(() => []),
-      ])
+      // 1) Lấy toàn bộ submissions của Mangaka
+      let rawSubs = []
+      try {
+        const subs = await submissionsService.getMangakaSubmissions()
+        rawSubs = Array.isArray(subs) ? subs : []
+      } catch {
+        rawSubs = []
+      }
+      const subList = rawSubs.map(apiSubmissionChapterToUi)
+      setSubmissions(subList)
+
+      // 2) Map chapterId → chapterRow để tra nhanh trong UI
+      const rowMap = new Map()
+      for (const row of chapterRowsRef.current ?? []) {
+        if (row?.id) rowMap.set(String(row.id), row)
+      }
+
+      // 3) Lọc ra các submission chờ Mangaka duyệt
+      const reviews = subList
+        .filter((s) => s?.status === 'submitted_by_assistant')
+        .map((submission) => {
+          const row = rowMap.get(String(submission.id)) ?? {
+            id: submission.id,
+            seriesId: submission.seriesId,
+            series: submission.seriesName,
+            num: submission.chapterNumber,
+            title: '',
+          }
+          return {
+            chapter: row,
+            submission,
+            tasks: [],
+          }
+        })
+
       setPendingReviews(reviews)
-      const subList = Array.isArray(subs) ? subs : []
-      setSubmissions(subList.map(apiSubmissionChapterToUi))
     } finally {
       setLoading(false)
     }
@@ -79,15 +69,23 @@ export function useMangakaTasks(chapterRows) {
     void refresh()
   }, [chapterIdKey, refresh])
 
-  const approveChapterTasks = useCallback(async (tasks) => {
-    const list = Array.isArray(tasks) ? tasks : []
-    await Promise.all(list.map(t => tasksService.approve(t.id)))
+  /**
+   * Request revision: gửi note tổng hợp xuống submission endpoint.
+   */
+  const requestRevision = useCallback(async (reviews, note = '') => {
+    const list = Array.isArray(reviews) ? reviews : [reviews].filter(Boolean)
+    await Promise.all(
+      list.map((r) =>
+        submissionsService.requestRevision(r?.submission?.id ?? r?.chapter?.id, note),
+      ),
+    )
     await refresh()
   }, [refresh])
 
-  const requestRevision = useCallback(async (tasks, note = '') => {
-    const list = Array.isArray(tasks) ? tasks : []
-    await Promise.all(list.map(t => tasksService.requestRevision(t.id, note)))
+  /**
+   * Giữ lại để tương thích ngược, dù mới không còn flow acknowledge.
+   */
+  const acknowledgeTask = useCallback(async () => {
     await refresh()
   }, [refresh])
 
@@ -96,7 +94,7 @@ export function useMangakaTasks(chapterRows) {
     submissions,
     loading,
     refresh,
-    approveChapterTasks,
     requestRevision,
+    acknowledgeTask,
   }
 }

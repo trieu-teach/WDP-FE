@@ -37,10 +37,13 @@ export function apiSeriesToUi(raw, index = 0) {
   const s = raw && typeof raw === 'object' ? raw : {}
   const id = s._id ?? s.id
   const title = String(s.name ?? s.title ?? '').trim() || `Series ${index + 1}`
-  const genreStr = String(s.genre ?? '').trim()
-  const genres = genreStr
-    ? genreStr.split(/[,;|]/).map(g => g.trim()).filter(Boolean)
-    : (Array.isArray(s.genres) ? s.genres : [])
+  // BE trả genre là array; fallback để parse từ string (legacy)
+  const genreRaw = s.genre
+  const genres = Array.isArray(genreRaw)
+    ? genreRaw
+    : genreRaw
+      ? String(genreRaw).split(/[,;|]/).map(g => g.trim()).filter(Boolean)
+      : (Array.isArray(s.genres) ? s.genres : [])
 
   // author_id can be a populated object {_id, username, full_name} or a raw ObjectId string
   const authorObj = s.author_id
@@ -75,21 +78,27 @@ export function apiSeriesToUi(raw, index = 0) {
     metadataComplete: Boolean(String(s.synopsis ?? s.description ?? '').trim()),
     category: String(s.category ?? '').trim(),
     tags: Array.isArray(s.tags) ? s.tags : [],
-    age_rating: s.age_rating ?? 'All ages',
+    age_rating: s.age_rating ?? s.ageRating ?? 'All ages',
   })
 }
 
+/**
+ * Tách payload gửi BE và cover file (binary) riêng.
+ * BE nhận `cover` là multipart field.
+ */
 export function uiSeriesFormToApi(form) {
-  return {
+  const genres = Array.isArray(form.genre) ? form.genre : []
+  const payload = {
     name: String(form.name ?? '').trim(),
     description: String(form.description ?? '').trim(),
-    genre: String(form.genre ?? '').trim(),
+    genre: genres,
     target_audience: String(form.target_audience ?? '').trim(),
     synopsis: String(form.description ?? '').trim(),
-    category: String(form.category ?? '').trim(),
     tags: Array.isArray(form.tags) ? form.tags : [],
     age_rating: String(form.age_rating ?? 'All ages').trim(),
   }
+  const coverFile = form.cover && typeof form.cover === 'object' ? form.cover : null
+  return { payload, coverFile }
 }
 
 export function apiChapterToRow(chapter, seriesTitle) {
@@ -108,6 +117,9 @@ export function apiChapterToRow(chapter, seriesTitle) {
     type: 'PNG',
     pages: c.page_count ?? c.pages ?? 0,
     status: API_STATUS_TO_UI[c.status] ?? c.status ?? 'draft',
+    apiStatus: c.status ?? null,
+    revisionNotes: c.revision_notes ?? c.revisionNotes ?? '',
+    revisionSource: c.revision_source ?? c.revisionSource ?? '',
     date: formatRelativeDate(c.updatedAt ?? c.updated_at ?? c.createdAt),
     statusLabel: null,
     title: c.title ?? '',
@@ -132,17 +144,25 @@ export function apiChapterToAnnotator(chapter, pages = [], seriesTitle) {
 export function apiPageToUi(page, index = 0) {
   const p = page ?? {}
   const rawUrl =
-    p.original_image_url
+    (p.result_image_url && p.result_image_url !== '' ? p.result_image_url : null)
+    ?? (p.original_image_url && p.original_image_url !== '' ? p.original_image_url : null)
     ?? p.image_url
     ?? p.url
     ?? p.imageUrl
-    ?? p.result_image_url
     ?? null
+  const pageNum = p.page_number ?? index + 1
+  // Ưu tiên _id từ BE (24-char ObjectId). Nếu BE tạo page trong 1 request
+  // mà không trả _id, dùng page_number. Luôn dùng index làm fallback cuối
+  // để đảm bảo key DUY NHẤT trong danh sách.
+  const stableId = p._id ?? p.id ?? (p.page_number != null ? `p-${String(p.page_number)}` : null)
+  const id = stableId ? `${stableId}` : `fallback-${index}`
   return {
-    id: p._id ?? p.id ?? `page-${index}`,
-    name: p.name ?? p.filename ?? `Trang ${p.page_number ?? index + 1}`,
+    id,
+    name: p.name ?? p.filename ?? `Trang ${pageNum}`,
     url: resolveMediaUrl(rawUrl),
-    pageNumber: p.page_number ?? index + 1,
+    pageNumber: pageNum,
+    width: p.width ?? 800,
+    height: p.height ?? 1100,
   }
 }
 
@@ -253,6 +273,26 @@ const UI_TASK_TYPE_TO_API = {
   other: 'other',
 }
 
+// BE enum cho revision_annotations.error_type
+const UI_TASK_TYPE_TO_ERROR_TYPE = {
+  background: 'art',
+  shading: 'art',
+  details: 'art',
+  fx: 'content',
+  effects: 'content',
+  paint: 'art',
+  layout: 'art',
+  dialogue: 'dialogue',
+  script: 'script',
+  art: 'art',
+  content: 'content',
+  other: 'other',
+}
+
+export function uiTaskTypeToErrorType(taskType) {
+  return UI_TASK_TYPE_TO_ERROR_TYPE[taskType] ?? 'other'
+}
+
 export function uiTaskTypeToApi(taskType) {
   return UI_TASK_TYPE_TO_API[taskType] ?? 'other'
 }
@@ -278,34 +318,72 @@ export function uiNoteToTaskCreate(note, { pageId, assignedTo, price }) {
 }
 
 /**
- * Tạo 1 task duy nhất cho cả chapter (flow mới: 1 task = 1 chapter).
- * TODO backend: cập nhật `POST /tasks` để nhận `chapter_id` thay vì bắt buộc `page_id` + `region`.
- * Hiện tại gửi kèm page_id của trang đầu + region toàn ảnh làm fallback tạm thời.
+ * Tạo 1 task duy nhất cho cả chapter (luồng mới: 1 task = 1 chapter).
+ * Gửi chapter_id thay vì page_id.
  */
-export function uiChapterToTaskCreate({ chapterId, pageId, assignedTo, description, price, workType }) {
+export function uiChapterToTaskCreate({ chapterId, assignedTo, description, price, workType }) {
   return {
     chapter_id: chapterId,
-    page_id: pageId,
     assigned_to: assignedTo,
     work_type: workType ?? 'background',
-    region: { x: 0, y: 0, width: 1, height: 1 },
     description: description ?? '',
     ...(price != null ? { price } : {}),
   }
 }
 
+/**
+ * Chuyển region (%) từ BE thành pixel coordinates.
+ * @param {object} region - { x, y, width, height } tính bằng % (0-100)
+ * @param {number} imgWidth - chiều rộng thực của ảnh (px)
+ * @param {number} imgHeight - chiều cao thực của ảnh (px)
+ * @returns {{ x: number, y: number, width: number, height: number }} pixel coords
+ */
+export function regionToPixels(region, imgWidth, imgHeight) {
+  if (!region) return { x: 0, y: 0, width: imgWidth ?? 0, height: imgHeight ?? 0 }
+  return {
+    x: Math.round((region.x ?? 0) * (imgWidth || 1) / 100),
+    y: Math.round((region.y ?? 0) * (imgHeight || 1) / 100),
+    width: Math.round((region.width ?? 100) * (imgWidth || 1) / 100),
+    height: Math.round((region.height ?? 100) * (imgHeight || 1) / 100),
+  }
+}
+
 export function apiTaskToUi(raw) {
   const t = raw ?? {}
+  const region = t.region ?? null
   return {
     id: t._id ?? t.id,
     pageId: t.page_id?._id ?? t.page_id ?? null,
     chapterId: t.chapter_id?._id ?? t.chapter_id ?? null,
+    seriesName: t.seriesName ?? t.series_name ?? t.chapter_id?.seriesName ?? t.chapter_id?.series_name ?? t.chapter_id?.series?.name ?? null,
     assignedBy: t.assigned_by?._id ?? t.assigned_by ?? null,
     assignedTo: t.assigned_to?._id ?? t.assigned_to ?? null,
     workType: t.work_type ?? 'other',
-    region: t.region ?? null,
+    /**
+     * region: BE trả { x, y, width, height } tính bằng % (0-100).
+     * Dùng regionToPixels(region, imgWidth, imgHeight) để chuyển sang pixel khi vẽ overlay.
+     */
+    region,
     description: t.description ?? '',
     revisionNote: t.revision_note ?? '',
+    /**
+     * note_ids: mảng PageNote gắn với task.
+     * BE populate đầy đủ: [{ _id, text, x, y, w, h, taskType, status, createdAt }]
+     * FE nên dùng mảng này thay vì gọi riêng GET /pages/:id/notes.
+     */
+    noteIds: Array.isArray(t.note_ids)
+      ? t.note_ids.map(n => ({
+          id: n._id ?? n.id,
+          text: n.text ?? '',
+          x: n.x ?? 0,
+          y: n.y ?? 0,
+          w: n.w ?? n.width ?? 0,
+          h: n.h ?? n.height ?? 0,
+          taskType: n.taskType ?? 'other',
+          status: n.status ?? 'open',
+          createdAt: n.createdAt ?? n.created_at ?? null,
+        }))
+      : [],
     /**
      * Lịch sử các lần Mangaka yêu cầu chỉnh sửa.
      * TODO backend: BE nên trả về `revision_history: [{ at, by, note, request_revision_count }]`

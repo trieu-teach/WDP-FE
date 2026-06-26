@@ -52,7 +52,7 @@ http.interceptors.request.use(config => {
 
   config.metadata = { startTime: Date.now() }
   const method = (config.method ?? 'get').toUpperCase()
-  console.log(`[API] → Gửi request: ${method} ${formatApiUrl(config)}`)
+  console.debug(`[API] → ${method} ${formatApiUrl(config)}`)
 
   return config
 })
@@ -62,9 +62,8 @@ http.interceptors.response.use(
     const duration = Date.now() - (res.config.metadata?.startTime ?? Date.now())
     const method = (res.config.method ?? 'get').toUpperCase()
     const url = formatApiUrl(res.config)
-    console.log(
-      `[API] ✓ Kết nối thành công: ${method} ${url} — HTTP ${res.status} (${duration}ms)`,
-      res.data,
+    console.debug(
+      `[API] ✓ ${method} ${url} — HTTP ${res.status} (${duration}ms)`,
     )
     return res.data
   },
@@ -89,6 +88,20 @@ http.interceptors.response.use(
       )
     }
 
+    if (status === 401 && localStorage.getItem('token')) {
+      localStorage.removeItem('token')
+      sessionStorage.removeItem('manga_user')
+    }
+
+    // Đánh dấu lỗi 5xx để caller (vd useAssistantTasks) suppress log spam
+    if (status >= 500) {
+      err.isServerError = true
+    }
+    // Đánh dấu lỗi 4xx để caller biết đây là lỗi phía client/BE validation (không phải crash)
+    if (status >= 400 && status < 500) {
+      err.isClientError = true
+    }
+
     return Promise.reject(err)
   },
 )
@@ -105,9 +118,3 @@ export function getApiErrorMessage(err, fallback = 'Có lỗi xảy ra. Vui lòn
 
   return translated[message] ?? message
 }
-
-console.log('[API] Base URL:', API_BASE_URL)
-console.log(
-  '[API] Môi trường:',
-  import.meta.env.DEV ? 'development (Vite proxy → backend)' : 'production',
-)
