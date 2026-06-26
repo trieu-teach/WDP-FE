@@ -82,4 +82,17 @@ export const submissionsService = {
       .delete(`/submissions/chapters/${chapterId}/remove-te`)
       .then(unwrap)
   },
+
+  /**
+   * POST /submissions/chapters/:chapterId/submit-to-eb
+   * Mangaka gửi chapter debut sang EB — chapter.status → pending_EB
+   */
+  submitChapterToEb(chapterId) {
+    return http
+      .post(`/submissions/chapters/${chapterId}/submit-to-eb`)
+      .then((res) => ({
+        chapter: unwrap(res),
+        message: res?.message ?? '',
+      }))
+  },
 }

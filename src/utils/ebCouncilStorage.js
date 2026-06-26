@@ -3,7 +3,7 @@
  * Một tài khoản đại diện nhập điểm cho từng thành viên; hiển thị tổng hợp đủ cả HĐ.
  */
 
-export const EB_COUNCIL_SCORES_KEY = 'mk-eb-council-scores-v1'
+export const EB_COUNCIL_SCORES_KEY = 'mk-eb-council-scores-v2'
 
 export const EB_COUNCIL_MEMBERS = [
   { id: 'chair', name: 'PGS.TS. Trần Minh Khoa', title: 'Chủ tịch HĐ' },
@@ -41,13 +41,14 @@ export function saveCouncilMemberAssessment(seriesTitle, memberId, payload) {
   if (!key || !memberId) return null
 
   const all = readAll()
-  const current = all[key] ?? { scoreType: payload.scoreType ?? 'color', members: {} }
-  current.scoreType = payload.scoreType ?? current.scoreType
+  const current = all[key] ?? { members: {} }
   current.members = {
     ...(current.members ?? {}),
     [memberId]: {
       scores: { ...payload.scores },
       criterionNotes: { ...(payload.criterionNotes ?? {}) },
+      overallComment: payload.overallComment ?? '',
+      notes: payload.notes ?? '',
       average: payload.average,
       assessedAt: payload.assessedAt ?? new Date().toISOString(),
       enteredBy: payload.enteredBy ?? null,
@@ -110,6 +111,8 @@ export function buildCouncilAggregate(seriesRecord, scoreFieldKeys) {
       scored: true,
       scores,
       criterionNotes: entry.criterionNotes ?? {},
+      overallComment: entry.overallComment ?? '',
+      notes: entry.notes ?? '',
       average: Number(average.toFixed(1)),
       assessedAt: entry.assessedAt,
       enteredBy: entry.enteredBy,
@@ -139,38 +142,3 @@ export function buildCouncilAggregate(seriesRecord, scoreFieldKeys) {
   }
 }
 
-/** Demo: vài thành viên đã chấm sẵn để minh họa bảng tổng hợp. */
-export function seedCouncilDemoScores(seriesTitle, scoreType = 'color') {
-  const key = String(seriesTitle ?? '').trim()
-  if (!key || readCouncilSeriesScores(key)) return
-
-  const colorScores = {
-    chair: { plotDialogue: 4.5, artDesign: 4, panelingCamera: 4, pacingHook: 4.5, coloring: 4 },
-    'member-1': { plotDialogue: 3.5, artDesign: 4, panelingCamera: 3.5, pacingHook: 4, coloring: 3.5 },
-    'member-3': { plotDialogue: 4, artDesign: 3.5, panelingCamera: 4, pacingHook: 3.5, coloring: 4 },
-  }
-  const monoScores = {
-    chair: { plotDialogue: 4, artDesign: 4.5, panelingCamera: 4, pacingHook: 4, toneShading: 3.5 },
-    'member-1': { plotDialogue: 3.5, artDesign: 4, panelingCamera: 3.5, pacingHook: 3.5, toneShading: 4 },
-    'member-4': { plotDialogue: 4.5, artDesign: 4, panelingCamera: 4.5, pacingHook: 4, toneShading: 4 },
-  }
-
-  const presets = scoreType === 'mono' ? monoScores : colorScores
-  const all = readAll()
-  const members = {}
-
-  Object.entries(presets).forEach(([memberId, scores]) => {
-    const keys = Object.keys(scores)
-    const total = keys.reduce((s, k) => s + scores[k], 0)
-    members[memberId] = {
-      scores,
-      criterionNotes: {},
-      average: Number((total / keys.length).toFixed(1)),
-      assessedAt: new Date(Date.now() - 86400000).toISOString(),
-      enteredBy: 'Hệ thống demo',
-    }
-  })
-
-  all[key] = { scoreType, members }
-  writeAll(all)
-}

@@ -1,4 +1,6 @@
 import { Link } from "react-router-dom";
+import { useState } from "react";
+import { toast } from "sonner";
 
 import {
   CheckCircle2,
@@ -30,10 +32,15 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 
 import { cn } from "@/lib/utils";
 
+import { chaptersService } from "@/api/chapters.service.js";
+import { getApiErrorMessage } from "@/api/http.js";
+import { EB_CLASSIFICATION_LABELS } from "@/utils/ebEvaluationMappers.js";
 import {
   getMangakaTeRevisionPath,
+  isEbApprovedNotification,
   isSafeNotificationLink,
   isTeRevisionNotification,
+  readEbApprovalMeta,
   resolveChapterIdFromNotification,
   resolveEntityId,
 } from "@/utils/notificationTarget.js";
@@ -56,6 +63,10 @@ const TYPE_META = {
   te_review: { icon: ListChecks, label: "TE review", tone: "sky" },
 
   eb_evaluation: { icon: Sparkles, label: "EB đánh giá", tone: "emerald" },
+
+  chapter_approved_by_eb: { icon: CheckCircle2, label: "EB đã duyệt", tone: "emerald" },
+
+  chapter_pending_eb: { icon: ListChecks, label: "Chờ EB duyệt", tone: "amber" },
 
   chapter: { icon: FileText, label: "Chapter", tone: "sky" },
 
@@ -179,6 +190,8 @@ function TeRevisionLinkButton({ to, onClose, className, size, children }) {
 }
 
 export function NotificationDetailDialog({ notification, open, onOpenChange }) {
+  const [publishing, setPublishing] = useState(false);
+
   if (!notification) return null;
 
   const typeKey = String(notification.type ?? "").toLowerCase();
@@ -202,11 +215,31 @@ export function NotificationDetailDialog({ notification, open, onOpenChange }) {
   const teRevisionPath = getMangakaTeRevisionPath(chapterId);
 
   const isTeRevision = isTeRevisionNotification(notification);
+  const isEbApproved = isEbApprovedNotification(notification);
+  const ebApproval = readEbApprovalMeta(notification);
+  const publishChapterId = ebApproval.chapterId ?? chapterId;
 
   const canOpenTeReview = isTeRevision && Boolean(teRevisionPath);
 
   const showGenericLink =
-    !isTeRevision && isSafeNotificationLink(notification.link);
+    !isTeRevision && !isEbApproved && isSafeNotificationLink(notification.link);
+
+  async function handlePublishChapter() {
+    if (!publishChapterId) {
+      toast.error("Không tìm thấy mã chapter để xuất bản.");
+      return;
+    }
+    setPublishing(true);
+    try {
+      await chaptersService.publishChapter(publishChapterId);
+      toast.success("Chapter đã được xuất bản — Reader có thể đọc.");
+      onOpenChange?.(false);
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không xuất bản được chapter."));
+    } finally {
+      setPublishing(false);
+    }
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -311,6 +344,24 @@ export function NotificationDetailDialog({ notification, open, onOpenChange }) {
                     />
                   ) : null}
 
+                  {ebApproval.councilAverage != null ? (
+                    <MetaRow
+                      label="Điểm TB HĐ"
+                      value={Number(ebApproval.councilAverage).toFixed(1)}
+                    />
+                  ) : null}
+
+                  {ebApproval.classification ? (
+                    <MetaRow
+                      label="Xếp loại"
+                      value={
+                        ebApproval.classificationText
+                        || EB_CLASSIFICATION_LABELS[ebApproval.classification]
+                        || ebApproval.classification
+                      }
+                    />
+                  ) : null}
+
                   {relatedId ? (
                     <MetaRow label="Mã đối tượng" value={relatedId} mono />
                   ) : null}
@@ -347,6 +398,24 @@ export function NotificationDetailDialog({ notification, open, onOpenChange }) {
               <ListChecks className="size-3.5" />
               Xem chi tiết
             </TeRevisionLinkButton>
+          </div>
+        ) : isEbApproved ? (
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t bg-muted/20 px-6 py-3">
+            <Button asChild size="sm" variant="outline" className="gap-1.5">
+              <Link to="/tantou" onClick={() => onOpenChange?.(false)}>
+                <ExternalLink className="size-3.5" />
+                Xem chi tiết
+              </Link>
+            </Button>
+            <Button
+              size="sm"
+              className="gap-1.5"
+              disabled={publishing || !publishChapterId}
+              onClick={() => void handlePublishChapter()}
+            >
+              <CheckCircle2 className="size-3.5" />
+              {publishing ? "Đang xuất bản..." : "Xuất bản ngay"}
+            </Button>
           </div>
         ) : showGenericLink ? (
           <div className="flex items-center justify-end gap-2 border-t bg-muted/20 px-6 py-3">

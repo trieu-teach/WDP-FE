@@ -29,8 +29,15 @@ const STATUS_OPTIONS: Array<{
   },
 ];
 
+function publishOptionDescription(requiresEbSubmit: boolean) {
+  return requiresEbSubmit
+    ? "Series debut — gửi lên Hội đồng biên tập chấm điểm."
+    : "Series đã được EB duyệt — TE duyệt chapter, không cần gửi EB lại.";
+}
+
 type ReviewRatingPanelProps = {
   draft: ReviewDraft;
+  requiresEbSubmit?: boolean;
   onReviewTextChange: (text: string) => void;
   onStatusChange: (status: ReviewStatus) => void;
   onSendToMangaka: () => void;
@@ -39,6 +46,7 @@ type ReviewRatingPanelProps = {
 
 export function ReviewRatingPanel({
   draft,
+  requiresEbSubmit = true,
   onReviewTextChange,
   onStatusChange,
   onSendToMangaka,
@@ -75,6 +83,10 @@ export function ReviewRatingPanel({
           <div className="space-y-2">
             {STATUS_OPTIONS.map((option) => {
               const checked = draft.reviewStatus === option.value;
+              const description =
+                option.value === "publish"
+                  ? publishOptionDescription(requiresEbSubmit)
+                  : option.description;
               return (
                 <label
                   key={option.value}
@@ -98,7 +110,7 @@ export function ReviewRatingPanel({
                       {option.label}
                     </span>
                     <span className="block text-xs text-muted-foreground">
-                      {option.description}
+                      {description}
                     </span>
                   </span>
                 </label>
@@ -121,7 +133,7 @@ export function ReviewRatingPanel({
           ) : null}
           {draft.reviewStatus === "publish" ? (
             <Button type="button" onClick={onSendToEb}>
-              Send to EB
+              {requiresEbSubmit ? "Submit to EB" : "Approve chapter"}
             </Button>
           ) : null}
         </div>

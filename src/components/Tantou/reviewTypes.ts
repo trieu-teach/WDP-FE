@@ -74,6 +74,8 @@ export type TantouSubmission = {
     authorId?: string;
     synopsis?: string;
     coverImageUrl?: string;
+    seriesApiStatus?: string | null;
+    ebApproved?: boolean;
   };
 };
 

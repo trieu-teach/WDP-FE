@@ -76,9 +76,6 @@ import { chaptersService } from "@/api/chapters.service.js";
 import { submissionsService } from "@/api/submissions.service.js";
 import { uiNoteToTaskCreate, uiChapterToTaskCreate, apiTaskToUi, uiTaskTypeToErrorType } from "@/utils/apiMappers.js";
 import { useMangakaTasks } from "@/hooks/useMangakaTasks.js";
-import {
-  listTantouSubmissions,
-} from "@/utils/tantouWorkspaceStorage.js";
 import { useMangakaCooperation } from "@/hooks/useMangakaCooperation.js";
 import {
   formatSeriesCardLine,
@@ -434,7 +431,6 @@ export default function Mangaka() {
   const [annotatorPagesPerChapter, setAnnotatorPagesPerChapter] = useState("");
   const [annotatorUploadPageBudget, setAnnotatorUploadPageBudget] = useState("");
   const [ebApprovedTick, setEbApprovedTick] = useState(0);
-  const [tantouTick, setTantouTick] = useState(0);
   const [revisionOpen, setRevisionOpen] = useState(false);
   const [revisionNote, setRevisionNote] = useState("");
   const [revisionBusy, setRevisionBusy] = useState(false);
@@ -971,15 +967,19 @@ export default function Mangaka() {
   }
 
   const tantouRevisions = useMemo(
-    () => listTantouSubmissions().filter((s) => s.status === "revision"),
-    [tantouTick],
+    () =>
+      chapterRows
+        .filter((row) => String(row.apiStatus ?? "").toLowerCase() === "te_revision")
+        .map((row) => ({
+          id: row.id,
+          chapterId: row.id,
+          seriesTitle: row.series,
+          chapterNum: row.num,
+          pageLabel: row.title ? String(row.title) : `Chapter ${row.num}`,
+          editorialComment: row.revisionNotes ?? "",
+        })),
+    [chapterRows],
   );
-
-  useEffect(() => {
-    const onTantou = () => setTantouTick((t) => t + 1);
-    window.addEventListener("mk-tantou-storage", onTantou);
-    return () => window.removeEventListener("mk-tantou-storage", onTantou);
-  }, []);
 
   const workflowSteps = useMemo(() => {
     if (!pipelineSeries) return PIPELINE_DEBUT_STEPS;

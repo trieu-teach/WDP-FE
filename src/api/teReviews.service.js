@@ -40,7 +40,7 @@ export function normalizeTePageRecord(page) {
   }
 }
 
-/** Ưu tiên ảnh theo thứ tự BE formatPage — bỏ qua chuỗi rỗng. */
+/** Ưu tiên ảnh theo thứ tự BE: final → result → original → url fallbacks. */
 function pickFirstTeImageUrl(...values) {
   for (const value of values) {
     const text = value != null ? String(value).trim() : ''
@@ -69,6 +69,37 @@ export const getTePageImageUrl = resolveTePageImageUrl
 
 export function tePageHasImage(page) {
   return Boolean(resolveTePageImageUrl(page))
+}
+
+/**
+ * Chọn page preview từ response GET /te-reviews/chapter/:id/pages.
+ * `all=true` trả `pages[]` đầy đủ; `?page=N` có thể kèm `page` là object hoặc số.
+ */
+export function resolveTePreviewPage(preview, pageIndex = 0) {
+  if (!preview || typeof preview !== 'object') return null
+
+  const pages = Array.isArray(preview.pages) ? preview.pages : []
+  const withImage =
+    pages.find((p) => tePageHasImage(p))
+    ?? pages[pageIndex]
+    ?? pages.find((p) => Number(p?.page_number) === pageIndex + 1)
+    ?? null
+  if (withImage) return normalizeTePageRecord(withImage)
+
+  if (isTePageRecord(preview.page)) {
+    return normalizeTePageRecord(preview.page)
+  }
+
+  const pageNum = Number(preview.page)
+  if (!Number.isNaN(pageNum) && pageNum > 0 && pages.length) {
+    const match =
+      pages.find((p) => Number(p?.page_number) === pageNum)
+      ?? pages[pageNum - 1]
+      ?? null
+    return match ? normalizeTePageRecord(match) : null
+  }
+
+  return null
 }
 
 function resolveCurrentTePage(raw, pages) {
@@ -186,7 +217,7 @@ export const teReviewsService = {
     return http.get('/te-reviews/pending').then(unwrap)
   },
 
-  /** GET /te-reviews/chapter/:chapterId/pages?all=true — lấy toàn bộ trang 1 lần */
+  /** GET /te-reviews/chapter/:chapterId/pages?all=true — toàn bộ pages[] kèm URL ảnh Mangaka */
   getAllChapterPages(chapterId) {
     return http
       .get(`/te-reviews/chapter/${chapterId}/pages`, { params: { all: true } })
@@ -194,7 +225,7 @@ export const teReviewsService = {
       .then(normalizeTeChapterPagesResponse)
   },
 
-  /** GET /te-reviews/chapter/:chapterId/pages?page=N — chi tiết 1 trang + annotations */
+  /** GET /te-reviews/chapter/:chapterId/pages?page=N — một trang + annotations */
   getChapterPage(chapterId, page = 1) {
     return http
       .get(`/te-reviews/chapter/${chapterId}/pages`, { params: { page } })
@@ -234,14 +265,31 @@ export const teReviewsService = {
 
   /**
    * POST /te-reviews/chapter/:chapterId/te-action
-   * action: approve | reject
-   * notes: string[] (khi reject)
+   * action: forward_eb | request_revision | approve | ...
    */
   teAction(chapterId, { action, notes } = {}) {
-    const body = { action }
+    const mappedAction =
+      action === 'forward_eb'
+        ? 'forward_eb'
+        : action === 'reject' || action === 'request_revision'
+          ? 'request_revision'
+          : action
+    const body = { action: mappedAction }
     if (Array.isArray(notes) && notes.length) {
       body.notes = notes.map((n) => String(n ?? '').trim()).filter(Boolean)
     }
     return http.post(`/te-reviews/chapter/${chapterId}/te-action`, body).then(unwrap)
+  },
+
+  /**
+   * POST /te-reviews/series-review/:seriesId/submit
+   * Series debut — TE approve → chapters pending_TE chuyển pending_EB
+   */
+  submitSeriesReview(seriesId, { action, feedback, quick_notes, revision_feedback } = {}) {
+    const body = { action }
+    if (feedback) body.feedback = String(feedback).trim()
+    if (quick_notes) body.quick_notes = String(quick_notes).trim()
+    if (revision_feedback) body.revision_feedback = String(revision_feedback).trim()
+    return http.post(`/te-reviews/series-review/${seriesId}/submit`, body).then(unwrap)
   },
 }

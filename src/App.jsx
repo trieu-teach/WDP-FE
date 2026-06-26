@@ -46,6 +46,7 @@ export default function App() {
         <Route path="/mangaka/series/:seriesSlug/chapter/:chapterId" element={<SeriesUploadDetail />} />
         <Route path="/assistant" element={<Assistant />} />
         <Route path="/eb" element={<Eb />} />
+        <Route path="/eb/chapter/:chapterId" element={<Eb />} />
         <Route path="/mangaka/chapter/:chapterId/te-revision" element={<MangakaTeRevision />} />
         <Route path="/tantou" element={<TantouEditor />} />
         <Route path="/profile" element={<UserProfile />} />

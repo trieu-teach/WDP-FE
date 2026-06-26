@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ImageIcon } from "lucide-react";
 import { resolveMediaUrl } from "@/api/http.js";
-import { chaptersService } from "@/api/chapters.service.js";
 import {
   isTePageRecord,
   resolveTePageId,
@@ -9,7 +8,6 @@ import {
   tePageHasImage,
   teReviewsService,
 } from "@/api/teReviews.service.js";
-import { apiPageToUi } from "@/utils/apiMappers.js";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -60,36 +58,84 @@ function buildPageDetail(
   };
 }
 
-function extractChapterPagesList(
-  raw: unknown,
-): NonNullable<TantouSubmission["pagesMeta"]> {
-  if (Array.isArray(raw)) return raw;
-  if (raw && typeof raw === "object") {
-    const obj = raw as { pages?: unknown[]; data?: unknown[] };
-    if (Array.isArray(obj.pages)) return obj.pages;
-    if (Array.isArray(obj.data)) return obj.data;
+type PageMeta = NonNullable<TantouSubmission["pagesMeta"]>[number];
+
+function teResponseToPages(res: {
+  page?: unknown;
+  pages?: unknown[];
+}): PageMeta[] {
+  let pages = (res.pages ?? []) as PageMeta[];
+  if (!pages.length && isTePageRecord(res.page)) {
+    pages = [res.page as PageMeta];
   }
-  return [];
+  return pages;
 }
 
-async function fetchChapterPagesFromChaptersApi(chapterId: string) {
-  const pagesRaw = await chaptersService.getPages(chapterId);
-  const pages = extractChapterPagesList(pagesRaw);
-  return pages.map((page, index) => {
-    const ui = apiPageToUi(page, index);
-    return {
-      ...page,
-      _id: page._id ?? page.id ?? ui.id,
-      id: page.id ?? (page._id != null ? String(page._id) : ui.id),
-      page_number: page.page_number ?? ui.pageNumber,
-      url: page.url ?? ui.url,
-      image_url: page.image_url,
-      imageUrl: page.imageUrl,
-      original_image_url: page.original_image_url,
-      result_image_url: page.result_image_url,
-      final_image_url: page.final_image_url,
-    };
+function pickTePageWithImage(
+  res: { page?: unknown; pages?: unknown[] },
+  pageIndex: number,
+): PageMeta | null {
+  const pages = Array.isArray(res.pages) ? res.pages : [];
+  const candidates = [
+    res.page,
+    pages[pageIndex],
+    pages.find(
+      (p) =>
+        Number((p as { page_number?: number })?.page_number) === pageIndex + 1,
+    ),
+    pages[0],
+  ];
+  for (const candidate of candidates) {
+    if (isTePageRecord(candidate) && tePageHasImage(candidate)) {
+      return candidate as PageMeta;
+    }
+  }
+  for (const candidate of candidates) {
+    if (isTePageRecord(candidate)) return candidate as PageMeta;
+  }
+  return null;
+}
+
+/** Chỉ gọi ?page=N khi `all=true` trả page thiếu URL ảnh */
+async function hydrateMissingPageImages(chapterId: string, pages: PageMeta[]) {
+  const missingIndexes = pages
+    .map((page, index) => (tePageHasImage(page) ? -1 : index))
+    .filter((index) => index >= 0);
+
+  if (!missingIndexes.length) {
+    const details: Record<number, PageDetail> = {};
+    pages.forEach((page, index) => {
+      if (tePageHasImage(page)) details[index] = buildPageDetail(page, index);
+    });
+    return { details, enrichedPages: pages };
+  }
+
+  const details: Record<number, PageDetail> = {};
+  const enrichedPages = pages.map((page) => ({ ...page }));
+
+  pages.forEach((page, index) => {
+    if (tePageHasImage(page)) {
+      details[index] = buildPageDetail(page, index);
+    }
   });
+
+  await Promise.all(
+    missingIndexes.map(async (index) => {
+      const page = pages[index];
+      try {
+        const res = await teReviewsService.getChapterPage(chapterId, index + 1);
+        const tePage = pickTePageWithImage(res, index);
+        if (tePage) {
+          enrichedPages[index] = { ...page, ...tePage };
+          details[index] = buildPageDetail(enrichedPages[index], index);
+        }
+      } catch {
+        // giữ page từ ?all=true
+      }
+    }),
+  );
+
+  return { details, enrichedPages };
 }
 
 type TantouChapterReviewDashboardProps = {
@@ -210,24 +256,35 @@ export function TantouChapterReviewDashboard({
         const res = await teReviewsService.getAllChapterPages(chapterId);
         if (cancelled) return;
 
-        let pages = res.pages ?? [];
-        if (!pages.length && isTePageRecord(res.page)) {
-          pages = [res.page];
-        }
-
-        if (!pages.length) {
-          pages = await fetchChapterPagesFromChaptersApi(chapterId);
-        }
-
+        const pages = teResponseToPages(res);
         if (!pages.length || cancelled) return;
 
         applyLoadedPages(pages, Array.isArray(res.annotations) ? res.annotations : []);
+
+        if (pages.some((page) => !tePageHasImage(page))) {
+          const hydrated = await hydrateMissingPageImages(chapterId, pages);
+          if (cancelled) return;
+          if (Object.keys(hydrated.details).length) {
+            setPageDetailsByIndex((current) => ({ ...current, ...hydrated.details }));
+          }
+          if (hydrated.enrichedPages.some(tePageHasImage)) {
+            setChapterPagesMeta(hydrated.enrichedPages);
+          }
+        }
       } catch {
         try {
-          const pages = await fetchChapterPagesFromChaptersApi(chapterId);
-          if (!cancelled && pages.length) {
-            applyLoadedPages(pages);
+          const res = await teReviewsService.getChapterPage(chapterId, 1);
+          if (cancelled) return;
+          const pages = teResponseToPages(res);
+          if (!pages.length) return;
+
+          applyLoadedPages(pages, Array.isArray(res.annotations) ? res.annotations : []);
+          const hydrated = await hydrateMissingPageImages(chapterId, pages);
+          if (cancelled) return;
+          if (Object.keys(hydrated.details).length) {
+            setPageDetailsByIndex((current) => ({ ...current, ...hydrated.details }));
           }
+          setChapterPagesMeta(hydrated.enrichedPages);
         } catch {
           // giữ state hiện tại
         }
@@ -262,24 +319,47 @@ export function TantouChapterReviewDashboard({
         );
         if (cancelled) return;
 
-        if (needsImage && isTePageRecord(res.page)) {
-          const detail = buildPageDetail(res.page, viewingPageIndex);
+        const tePage = pickTePageWithImage(res, viewingPageIndex);
+        let imageUrl = resolveTePageImageUrl(tePage ?? undefined) ?? undefined;
+        let mergedPage = tePage;
+
+        if (needsImage && !imageUrl && chapterPagesMeta.length) {
+          const hydrated = await hydrateMissingPageImages(
+            chapterId,
+            chapterPagesMeta,
+          );
+          const detail = hydrated.details[viewingPageIndex];
+          if (detail?.imageUrl) {
+            imageUrl = detail.imageUrl;
+            mergedPage = hydrated.enrichedPages[viewingPageIndex] ?? mergedPage;
+          }
+        }
+
+        if (needsImage && (imageUrl || mergedPage)) {
+          const detail = mergedPage
+            ? buildPageDetail(mergedPage, viewingPageIndex)
+            : pageDetailsByIndex[viewingPageIndex];
           setPageDetailsByIndex((current) => ({
             ...current,
             [viewingPageIndex]: {
               ...current[viewingPageIndex],
               ...detail,
-              imageUrl: detail.imageUrl ?? current[viewingPageIndex]?.imageUrl,
+              imageUrl:
+                imageUrl
+                ?? detail?.imageUrl
+                ?? current[viewingPageIndex]?.imageUrl,
             },
           }));
-          setChapterPagesMeta((current) => {
-            const next = [...current];
-            next[viewingPageIndex] = {
-              ...(next[viewingPageIndex] ?? {}),
-              ...res.page,
-            };
-            return next;
-          });
+          if (mergedPage) {
+            setChapterPagesMeta((current) => {
+              const next = [...current];
+              next[viewingPageIndex] = {
+                ...(next[viewingPageIndex] ?? {}),
+                ...mergedPage,
+              };
+              return next;
+            });
+          }
         }
 
         if (needsNotes) {
@@ -300,11 +380,14 @@ export function TantouChapterReviewDashboard({
 
         if (needsImage) {
           try {
-            const pages = await fetchChapterPagesFromChaptersApi(chapterId);
+            const res = await teReviewsService.getChapterPage(
+              chapterId,
+              viewingPageIndex + 1,
+            );
             if (cancelled) return;
-            const page = pages[viewingPageIndex] ?? pages[0];
-            if (page) {
-              const detail = buildPageDetail(page, viewingPageIndex);
+            const tePage = pickTePageWithImage(res, viewingPageIndex);
+            if (tePage) {
+              const detail = buildPageDetail(tePage, viewingPageIndex);
               setPageDetailsByIndex((current) => ({
                 ...current,
                 [viewingPageIndex]: {
@@ -471,6 +554,8 @@ export function TantouChapterReviewDashboard({
   }
 
   const coverPreviewUrl = resolveMediaUrl(draft.series_cover_image_url);
+  const requiresEbSubmit =
+    submission.pipeline !== "recurring" && !submission.seriesMeta?.ebApproved;
 
   return (
     <div className="space-y-6 dark:text-zinc-100">
@@ -613,6 +698,7 @@ export function TantouChapterReviewDashboard({
           <div className="flex min-h-0 flex-col">
             <ReviewRatingPanel
               draft={draft}
+              requiresEbSubmit={requiresEbSubmit}
               onReviewTextChange={(text) =>
                 setDraft((c) => ({ ...c, reviewText: text }))
               }

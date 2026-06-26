@@ -94,7 +94,7 @@ function formatEarnings(value) {
 }
 
 export default function Assistant() {
-  const { user } = getSession() ?? {}
+  const user = getSession()
   const navigate = useNavigate()
 
   const { assignments, loading, error, refresh, loadChapterPages } = useAssistantAssignments()
@@ -258,7 +258,10 @@ export default function Assistant() {
   }
 
   async function handleCooperationAction(req, action) {
-    if (!user?.id) return
+    if (!req?.id) {
+      toast.error('Thiếu mã yêu cầu hợp tác.')
+      return
+    }
     setHireBusyId(req.id)
     try {
       if (action === 'accept-meet') {

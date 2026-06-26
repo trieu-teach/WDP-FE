@@ -164,4 +164,18 @@ export const chaptersService = {
   deletePageNote(pageId, noteId) {
     return notesRequest(pageId, 'delete', `/${noteId}`)
   },
+
+  /** POST /chapters/:chapterId/submit — TE gửi chapter sang EB */
+  submitToEb(chapterId) {
+    return http
+      .post(`/chapters/${chapterId}/submit`, { action: 'submit_to_eb' })
+      .then(unwrap)
+  },
+
+  /** POST /chapters/:chapterId/publish — TE xuất bản sau khi EB duyệt */
+  publishChapter(chapterId) {
+    return http
+      .post(`/chapters/${chapterId}/publish`, { action: 'publish' })
+      .then(unwrap)
+  },
 }

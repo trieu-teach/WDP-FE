@@ -28,6 +28,7 @@ import { seriesService } from "@/api/series.service.js";
 import {
   buildTeAnnotationCreatePayload,
   resolveTePageImageUrl,
+  resolveTePreviewPage,
   teReviewsService,
 } from "@/api/teReviews.service.js";
 import { getApiErrorMessage, resolveMediaUrl } from "@/api/http.js";
@@ -254,6 +255,22 @@ function parseSeriesGenres(series) {
   return [];
 }
 
+function isSeriesApprovedByEb(series, seriesTitle) {
+  const apiStatus = String(series?.status ?? "").toLowerCase();
+  if (apiStatus === "approved" || series?.is_public === true) return true;
+  return isSeriesEbApproved(seriesTitle);
+}
+
+function resolveTePipeline(series, seriesTitle) {
+  return isSeriesApprovedByEb(series, seriesTitle) ? "recurring" : "debut";
+}
+
+function submissionNeedsEbSeriesSubmit(submission, seriesTitle) {
+  if (submission?.pipeline === "recurring") return false;
+  if (submission?.seriesMeta?.ebApproved) return false;
+  return !isSeriesApprovedByEb(null, seriesTitle);
+}
+
 function mapTeChapterStatus(status) {
   const value = String(status ?? "").toLowerCase();
   if (value.includes("eb") || value === "pending_eb") return "forwarded_eb";
@@ -273,7 +290,7 @@ function mapTeQueueItem(item, preview) {
   const authorId =
     authorObj && typeof authorObj === "object" ? authorObj._id : authorObj;
   const submittedBy = item?.submitted_by ?? {};
-  const previewPage = preview?.page ?? preview?.pages?.[0] ?? null;
+  const previewPage = resolveTePreviewPage(preview, 0);
   const mangakaName = submittedBy.full_name ?? submittedBy.username ?? "Mangaka";
 
   return {
@@ -289,7 +306,7 @@ function mapTeQueueItem(item, preview) {
       : "Trang 1",
     mangakaImageUrl: resolveTePageImageUrl(previewPage),
     mangakaName,
-    pipeline: "debut",
+    pipeline: resolveTePipeline(series, seriesTitle),
     status: mapTeChapterStatus(item?.status),
     sentAt: item?.updatedAt ?? item?.createdAt ?? null,
     pagesMeta: Array.isArray(preview?.pages) ? preview.pages : [],
@@ -313,8 +330,10 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
   try {
     const raw = await seriesService.getById(mapped.seriesId);
     const series = apiSeriesToUi(raw);
+    const ebApproved = isSeriesApprovedByEb(raw, mapped.seriesTitle);
     return {
       ...mapped,
+      pipeline: resolveTePipeline(raw, mapped.seriesTitle),
       seriesTitle: series.title || mapped.seriesTitle,
       seriesMeta: {
         ...mapped.seriesMeta,
@@ -326,6 +345,8 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
           ? String(series.authorId)
           : mapped.seriesMeta.authorId,
         authorName: series.authorName || mapped.seriesMeta.authorName,
+        seriesApiStatus: raw?.status ?? null,
+        ebApproved,
       },
     };
   } catch {
@@ -384,6 +405,9 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
     const nextChapterId = String(
       reviewData.chapter_id ?? selected.chapterId ?? selected.id ?? "",
     ).trim();
+    const nextSeriesId = String(
+      reviewData.series_id ?? selected.seriesId ?? "",
+    ).trim();
     const nextChapterNumber = String(
       reviewData.chapter_number ?? selected.chapterNum ?? "",
     ).trim();
@@ -424,16 +448,33 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
       if (nextStatus === "publish" || nextStatus === "reject") {
         if (nextStatus === "reject") {
           await teReviewsService.teAction(nextChapterId, {
-            action: "reject",
+            action: "request_revision",
             notes: [nextText],
           });
           toast.success("Đã gửi về Mangaka.");
+        } else if (submissionNeedsEbSeriesSubmit(selected, nextSeriesName)) {
+          if (!nextSeriesId) {
+            toast.error(`Thiếu series_id để gửi ${LABEL_EDITOR_BOARD}.`);
+            return;
+          }
+          const res = await teReviewsService.submitSeriesReview(nextSeriesId, {
+            action: "approve",
+            ...(nextText ? { feedback: nextText, quick_notes: nextText } : {}),
+          });
+          const count = Array.isArray(res?.chapters_to_eb)
+            ? res.chapters_to_eb.length
+            : null;
+          toast.success(
+            count != null
+              ? `Đã gửi ${count} chapter sang ${LABEL_EDITOR_BOARD} để chấm điểm series.`
+              : `Đã gửi series sang ${LABEL_EDITOR_BOARD} để chấm điểm.`,
+          );
         } else {
           await teReviewsService.teAction(nextChapterId, {
             action: "approve",
             ...(nextText ? { notes: [nextText] } : {}),
           });
-          toast.success(`Đã chuyển sang ${LABEL_EDITOR_BOARD}.`);
+          toast.success("Đã duyệt chapter — series đã được EB phê duyệt trước đó.");
         }
       }
 
