@@ -152,9 +152,9 @@ export default function Assistant() {
       // Load pages ngay để hiển thị ảnh thumbnail
       if (firstAssignment?.chapterId) {
         void loadChapterPages(firstAssignment.chapterId, firstAssignment._task)
-          .then(({ pages, chapter }) => {
+          .then(({ pages, chapter, revisionNotesParsed }) => {
             setSelectedChapterPages(pages)
-            setSelectedChapterDetail(chapter)
+            setSelectedChapterDetail({ ...chapter, revision_notes_parsed: revisionNotesParsed })
           })
           .catch(() => null)
       }
@@ -252,9 +252,9 @@ export default function Assistant() {
     setSelectedChapterId(chapter.chapterId)
     setSelectedChapterPages([])
     setSelectedChapterDetail(null)
-    const { pages, chapter: detail } = await loadChapterPages(chapter.chapterId, chapter._task)
-    setSelectedChapterPages(pages)
-    setSelectedChapterDetail(detail)
+    const result = await loadChapterPages(chapter.chapterId, chapter._task)
+    setSelectedChapterPages(result.pages)
+    setSelectedChapterDetail({ ...result.chapter, revision_notes_parsed: result.revisionNotesParsed })
   }
 
   async function handleCooperationAction(req, action) {

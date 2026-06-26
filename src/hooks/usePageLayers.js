@@ -36,15 +36,6 @@ export function usePageLayers(pageId) {
 
       const origUrl = payload?.original_image_url ?? payload?.result_image_url ?? null
       setOriginalImage(origUrl)
-      if (pageId) {
-        // Debug — xem payload trả gì để biết tại sao ảnh nền không hiện.
-        console.debug('[usePageLayers]', pageId, {
-          hasPayload: !!payload,
-          keys: payload ? Object.keys(payload) : null,
-          original_image_url: origUrl,
-          layerCount: rawLayers.length,
-        })
-      }
 
       const mapped = rawLayers.map(apiLayerToUi)
       mapped.sort((a, b) => a.index - b.index)

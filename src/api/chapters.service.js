@@ -53,7 +53,19 @@ export const chaptersService = {
    * const { data, pages, tasks } = await chaptersService.uploadChapterWithPages(fd);
    */
   uploadChapterWithPages(formData) {
-    return http.post('/chapters', formData).then(unwrap)
+    return http.post('/chapters', formData).then(res => {
+      const unwrapped = unwrap(res)
+      // BE có thể trả: { chapter, pages, tasks } hoặc { data: { chapter, pages, tasks } }
+      // Hoặc { success, data: { chapter, pages, tasks } }
+      if (unwrapped && typeof unwrapped === 'object') {
+        return {
+          chapter: unwrapped.chapter ?? unwrapped.data ?? null,
+          pages: unwrapped.pages ?? [],
+          tasks: unwrapped.tasks ?? [],
+        }
+      }
+      return { chapter: null, pages: [], tasks: [] }
+    })
   },
 
   getById(id) {
@@ -92,9 +104,29 @@ export const chaptersService = {
       } else {
         fd.append('note', ' ')
       }
-      results.push(http.post(`/chapters/${chapterId}/pages`, fd).then(unwrap))
+      results.push(
+        http
+          .post(`/chapters/${chapterId}/pages`, fd)
+          .then(res => {
+            const unwrapped = unwrap(res)
+            // unwrap đệ quy: { success, data: { page, note, task } } → { page, note, task }
+            if (Array.isArray(unwrapped)) return unwrapped
+            if (unwrapped && typeof unwrapped === 'object' && 'page' in unwrapped) return unwrapped.page
+            if (unwrapped && typeof unwrapped === 'object' && '_id' in unwrapped) return unwrapped
+            if (unwrapped && typeof unwrapped === 'object' && 'data' in unwrapped) {
+              const inner = unwrapped.data
+              if (Array.isArray(inner)) return inner
+              if (inner && typeof inner === 'object' && 'page' in inner) return inner.page
+              if (inner && typeof inner === 'object' && '_id' in inner) return inner
+            }
+            return null
+          })
+      )
     }
-    return Promise.all(results)
+    return Promise.all(results).then(list => {
+      const filtered = list.flat().filter(Boolean).map(p => (Array.isArray(p) ? p[0] : p))
+      return filtered
+    })
   },
 
   deletePage(pageId) {

@@ -141,17 +141,20 @@ export function apiChapterToAnnotator(chapter, pages = [], seriesTitle) {
 export function apiPageToUi(page, index = 0) {
   const p = page ?? {}
   const rawUrl =
-    p.result_image_url
-    ?? p.original_image_url
+    (p.result_image_url && p.result_image_url !== '' ? p.result_image_url : null)
+    ?? (p.original_image_url && p.original_image_url !== '' ? p.original_image_url : null)
     ?? p.image_url
     ?? p.url
     ?? p.imageUrl
     ?? null
   const pageNum = p.page_number ?? index + 1
+  // Ưu tiên _id từ BE (24-char ObjectId). Nếu BE tạo page trong 1 request
+  // mà không trả _id, dùng page_number. Luôn dùng index làm fallback cuối
+  // để đảm bảo key DUY NHẤT trong danh sách.
+  const stableId = p._id ?? p.id ?? (p.page_number != null ? `p-${String(p.page_number)}` : null)
+  const id = stableId ? `${stableId}` : `fallback-${index}`
   return {
-    // Ưu tiên _id từ BE. Nếu BE tạo page trong 1 request mà không trả _id,
-    // dùng page_number (số thứ tự trang) — đây là giá trị ổn định thay vì `page-${index}`.
-    id: p._id ?? p.id ?? (p.page_number != null ? String(p.page_number) : `page-${index}`),
+    id,
     name: p.name ?? p.filename ?? `Trang ${pageNum}`,
     url: resolveMediaUrl(rawUrl),
     pageNumber: pageNum,
@@ -265,6 +268,26 @@ const UI_TASK_TYPE_TO_API = {
   effects: 'effects',
   details: 'details',
   other: 'other',
+}
+
+// BE enum cho revision_annotations.error_type
+const UI_TASK_TYPE_TO_ERROR_TYPE = {
+  background: 'art',
+  shading: 'art',
+  details: 'art',
+  fx: 'content',
+  effects: 'content',
+  paint: 'art',
+  layout: 'art',
+  dialogue: 'dialogue',
+  script: 'script',
+  art: 'art',
+  content: 'content',
+  other: 'other',
+}
+
+export function uiTaskTypeToErrorType(taskType) {
+  return UI_TASK_TYPE_TO_ERROR_TYPE[taskType] ?? 'other'
 }
 
 export function uiTaskTypeToApi(taskType) {

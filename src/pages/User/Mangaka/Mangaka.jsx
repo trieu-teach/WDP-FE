@@ -74,7 +74,7 @@ import { getApiErrorMessage, resolveMediaUrl } from "@/api/http.js";
 import { tasksService } from "@/api/tasks.service.js";
 import { chaptersService } from "@/api/chapters.service.js";
 import { submissionsService } from "@/api/submissions.service.js";
-import { uiNoteToTaskCreate, uiChapterToTaskCreate, apiTaskToUi } from "@/utils/apiMappers.js";
+import { uiNoteToTaskCreate, uiChapterToTaskCreate, apiTaskToUi, uiTaskTypeToErrorType } from "@/utils/apiMappers.js";
 import { useMangakaTasks } from "@/hooks/useMangakaTasks.js";
 import {
   listTantouSubmissions,
@@ -758,9 +758,10 @@ export default function Mangaka() {
 
   /**
    * Luồng mới: Gửi chapter cho Assistant.
-   * Bước 1 — Gán assistant cho chapter (nếu chưa gán hoặc đổi assistant).
-   * Bước 2 — PATCH /chapters/:id { action: 'submit', revision_notes }.
+   * Bước 1 — POST /chapters/:id/assign { assistant_id } (nếu chưa gán hoặc đổi assistant).
+   * Bước 2 — PATCH /chapters/:id { action: 'submit', assigned_to, revision_notes, revision_annotations }.
    *   BE tự động tạo Task cho mỗi Page chưa có task (kèm PageNote + region + assigned_to).
+   *   assigned_to trong body là backup — BE có thể đọc từ body hoặc fallback về chapter.assistant_id đã set ở bước 1.
    *   Đổi status chapter → pending_assistant.
    */
   async function handleSendToAssistant({
@@ -768,7 +769,6 @@ export default function Mangaka() {
     pages,
     assistantId,
   }) {
-    console.debug('[SEND-ASSISTANT] start', { chapterId: chapter?.id, pagesCount: pages?.length, assistantId })
     if (!chapter?.id) return
     if (!pages?.length) {
       toast.error('Chapter chưa có trang nào — upload ảnh trước.')
@@ -784,8 +784,10 @@ export default function Mangaka() {
     const currentAssistantId = chapterRow?.assistantId ? String(chapterRow.assistantId) : null
 
     try {
-      // Gom ghi chú để đính kèm revision_notes (không bắt buộc)
+      // Gom ghi chú để đính kèm revision_notes (string) + revision_annotations (array có toạ độ)
       const allNotes = []
+      const annotationMap = {}  // pageIndex → array of annotation objects with coords
+
       for (let pageIndex = 0; pageIndex < pages.length; pageIndex += 1) {
         const page = pages[pageIndex]
         if (!page?.id) continue
@@ -793,8 +795,26 @@ export default function Mangaka() {
         const pageNotes = annotatorNotes[pageKey]?.length
           ? annotatorNotes[pageKey]
           : await loadPageNotes(page.id, pageKey)
+
+        const annotations = []
         for (const note of pageNotes) {
-          allNotes.push({ pageNum: pageIndex + 1, note })
+          const text = String(note.text ?? '').trim()
+          allNotes.push({ pageNum: pageIndex + 1, note, text })
+          // Chỉ ghi annotation nếu note có toạ độ cụ thể (không phải full-canvas)
+          const hasCoords = Number(note.x) || Number(note.y) || Number(note.w) || Number(note.h)
+          if (hasCoords) {
+            annotations.push({
+              text,
+              x: Number(note.x) || 0,
+              y: Number(note.y) || 0,
+              w: Number(note.w) || 0,
+              h: Number(note.h) || 0,
+              error_type: uiTaskTypeToErrorType(note.taskType),
+            })
+          }
+        }
+        if (annotations.length > 0) {
+          annotationMap[`page_${pageIndex}`] = annotations
         }
       }
 
@@ -826,10 +846,14 @@ export default function Mangaka() {
       }
 
       // Bước 2 — gửi cả chapter (BE tạo Task cho pages từ PageNotes đã lưu ở bước upload)
-      console.debug('[SEND-ASSISTANT] calling PATCH /chapters/:id { action: submit }')
+      // Gửi kèm assigned_to ở top-level làm backup — BE có thể đọc trực tiếp từ body
+      // hoặc fallback về chapter.assistant_id đã set ở /assign (bước 1).
       await chaptersService.update(chapter.id, {
         action: 'submit',
+        assigned_to: targetAssistantId,
         revision_notes: revisionNotes,
+        // Gửi kèm revision_annotations (có toạ độ) để Assistant hiển thị đúng vị trí
+        ...(Object.keys(annotationMap).length > 0 ? { revision_annotations: annotationMap } : {}),
       })
 
       // Bước 3 — cập nhật UI
