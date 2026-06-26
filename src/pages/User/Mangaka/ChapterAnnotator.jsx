@@ -107,6 +107,9 @@ export default function ChapterAnnotator({
   const pages = activeChapter?.pages ?? []
   const pageKey = activeChapter ? `${activeChapterId}-${pageIndex}` : ''
   const currentPageId = pages[pageIndex]?.id ?? null
+  // Phòng thủ: chỉ gọi BE khi có ObjectId hợp lệ (24 ký tự hex).
+  // Nếu page chưa sync _id từ BE (id là placeholder "page-X" hoặc rỗng), bỏ qua.
+  const isValidObjectId = (id) => typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id)
   const pageNotes = notes[pageKey] ?? []
 
   useEffect(() => {
@@ -369,6 +372,9 @@ export default function ChapterAnnotator({
           }
           return next
         })
+        setChapters(prev => prev.map(ch =>
+          ch.id !== targetId ? ch : { ...ch, pages: [...ch.pages, ...newPages] },
+        ))
       } else {
         for (let i = 0; i < filesToAdd.length; i++) {
           const url = await fileToStorableDataUrl(filesToAdd[i])
@@ -526,7 +532,8 @@ export default function ChapterAnnotator({
       [pageKey]: [...(prev[pageKey] ?? []), newNote],
     }))
     setSelectedNoteId(clientKey)
-    scheduleNoteSave(clientKey, '')
+    // Lưu ngay lên BE (kể cả khi text rỗng) để giữ toạ độ x,y,w,h cho Assistant
+    void persistNoteById(clientKey)
   }
 
   function updateNoteField(stableKey, field, value) {
@@ -562,10 +569,11 @@ export default function ChapterAnnotator({
 
   useEffect(() => {
     if (!workspaceApi?.loadPageNotes || !currentPageId || !pageKey) return
+    if (!isValidObjectId(currentPageId)) return
     if (loadedNoteKeysRef.current.has(pageKey)) return
     loadedNoteKeysRef.current.add(pageKey)
     void workspaceApi.loadPageNotes(currentPageId, pageKey)
-  }, [currentPageId, pageKey, workspaceApi?.loadPageNotes])
+  }, [currentPageId, pageKey, workspaceApi?.loadPageNotes, isValidObjectId])
 
   useEffect(() => {
     loadedNoteKeysRef.current.clear()
@@ -725,16 +733,16 @@ export default function ChapterAnnotator({
           const badge = notes[`${activeChapterId}-${i}`]?.length ?? 0
           return (
             <button
-              key={pg.id}
+              key={`${activeChapterId}-${pg.pageNumber ?? i}-${pg.id ?? i}`}
               type="button"
               onClick={() => { setPageIndex(i); setSelectedNoteId(null) }}
-              title={pg.name}
+              title={`${pg.name} | url=${pg.url ?? 'none'}`}
               className={cn(
                 'relative shrink-0 overflow-hidden rounded-md border-2 transition-colors',
                 i === pageIndex ? 'border-primary' : 'border-transparent hover:border-muted-foreground/30',
               )}
             >
-              <span className="manga-page manga-page--thumb-strip block">
+              <span className="manga-page manga-page--thumb-strip block h-10 w-6">
                 {pg.url ? (
                   <img src={pg.url} alt={pg.name} className="manga-page__media" />
                 ) : (
@@ -1454,7 +1462,7 @@ export default function ChapterAnnotator({
           <div className="flex shrink-0 gap-2 overflow-x-auto border-t border-white/10 bg-zinc-900 p-2">
             {pages.map((pg, i) => (
               <button
-                key={pg.id}
+                key={pg.id ?? i}
                 type="button"
                 onClick={() => { setPageIndex(i); setSelectedNoteId(null) }}
                 title={pg.name}

@@ -7,9 +7,10 @@ import { apiTaskToUi, apiPageToUi } from '@/utils/apiMappers.js'
 
 function rawPageToUi(p) {
   const rawUrl =
-    p.original_image_url
+    (p.original_image_url && p.original_image_url !== '' ? p.original_image_url : null)
+    ?? (p.result_image_url && p.result_image_url !== '' ? p.result_image_url : null)
     ?? p.image_url
-    ?? p.url
+    ?? (p.url && p.url !== '' ? p.url : null)
     ?? p.src
     ?? p.imageUrl
     ?? p.image
@@ -23,6 +24,125 @@ function rawPageToUi(p) {
     height: p.height ?? p.h ?? 1100,
     pageNumber: p.page_number ?? p.pageNumber ?? p.index ?? 0,
   }
+}
+
+/**
+ * Parse revision_notes (string) thành structured notes array.
+ * Hỗ trợ format:
+ *   "Trang 1: [background] mắt thâm\nTrang 2: [color] tô màu đỏ"
+ *   "[background] mắt thâm\n[color] tô màu đỏ"
+ *   "background: mắt thâm"
+ * Nếu revision_annotations (array) có data thì dùng nó, bỏ qua string.
+ */
+function parseRevisionNotes(revisionNotes, revisionAnnotations, pageCount) {
+  // Helper: convert object {page_0: [...], page_1: [...]} → flat array với pageIndex
+  function flattenAnnotationMap(map) {
+    const out = []
+    for (const [k, v] of Object.entries(map ?? {})) {
+      if (!Array.isArray(v)) continue
+      // key là "page_N" hoặc "N"
+      const m = String(k).match(/(?:page_)?(\d+)/i)
+      const pageIndex = m ? Math.max(0, parseInt(m[1], 10)) : 0
+      for (const n of v) {
+        out.push({
+          id: n.id ?? n._id ?? `${k}-${out.length}`,
+          pageIndex,
+          taskType: n.taskType ?? 'paint',
+          text: n.text ?? '',
+          x: Number(n.x) || 0,
+          y: Number(n.y) || 0,
+          w: Number(n.w) || 0,
+          h: Number(n.h) || 0,
+          status: n.status ?? 'open',
+        })
+      }
+    }
+    return out
+  }
+
+  // Ưu tiên structured annotations
+  if (Array.isArray(revisionAnnotations) && revisionAnnotations.length > 0) {
+    return revisionAnnotations
+  }
+
+  // Nếu revision_annotations là object {page_0: [...], page_1: [...]} → flat ra
+  if (revisionAnnotations && typeof revisionAnnotations === 'object') {
+    const flat = flattenAnnotationMap(revisionAnnotations)
+    if (flat.length > 0) return flat
+  }
+
+  if (!revisionNotes || typeof revisionNotes !== 'string') return []
+
+  const lines = revisionNotes.split('\n').map(l => l.trim()).filter(Boolean)
+  const notes = []
+
+  for (const line of lines) {
+    // "Trang N: [taskType] content" hoặc "Trang N: content"
+    const pageMatch = line.match(/^Trang\s+(\d+)[:\s]+(\[[^\]]+\])?\s*(.+)/i)
+    if (pageMatch) {
+      const pageNum = parseInt(pageMatch[1], 10) - 1  // 0-indexed
+      const taskType = pageMatch[2] ? pageMatch[2].slice(1, -1) : 'paint'
+      const text = (pageMatch[3] ?? '').trim()
+      if (!text) continue
+      notes.push({
+        id: `rn-page-${pageNum}`,
+        pageIndex: pageNum,
+        taskType,
+        text,
+        x: 0, y: 0, w: 100, h: 100,
+        status: 'open',
+      })
+      continue
+    }
+
+    // "[taskType] content"
+    const tagMatch = line.match(/^\[([^\]]+)\]\s*(.+)/)
+    if (tagMatch) {
+      const taskType = tagMatch[1].trim()
+      const text = tagMatch[2].trim()
+      if (!text) continue
+      // Áp dụng cho tất cả pages
+      for (let i = 0; i < (pageCount ?? 1); i++) {
+        notes.push({
+          id: `rn-all-${i}-${taskType}`,
+          pageIndex: i,
+          taskType,
+          text,
+          x: 0, y: 0, w: 100, h: 100,
+          status: 'open',
+        })
+      }
+      continue
+    }
+
+    // "taskType: content" hoặc plain text — áp dụng cho tất cả pages
+    const text = line.replace(/^[^:]+:\s*/, '').trim()
+    if (text && text !== line) {
+      for (let i = 0; i < (pageCount ?? 1); i++) {
+        notes.push({
+          id: `rn-colon-${i}`,
+          pageIndex: i,
+          taskType: 'paint',
+          text,
+          x: 0, y: 0, w: 100, h: 100,
+          status: 'open',
+        })
+      }
+    } else if (text) {
+      for (let i = 0; i < (pageCount ?? 1); i++) {
+        notes.push({
+          id: `rn-plain-${i}`,
+          pageIndex: i,
+          taskType: 'paint',
+          text,
+          x: 0, y: 0, w: 100, h: 100,
+          status: 'open',
+        })
+      }
+    }
+  }
+
+  return notes
 }
 
 export function useAssistantAssignments() {
@@ -40,10 +160,8 @@ export function useAssistantAssignments() {
       // seriesName nằm ở response root (cùng cấp data), không phải trong từng task
       const seriesNameRoot = res?.seriesName ?? null
       if (list.length > 0) {
-        console.debug('[useAssistantAssignments] raw first item:', list[0], 'res keys:', Object.keys(res ?? {}))
       }
       const tasks = list.map(apiTaskToUi)
-      console.debug('[useAssistantAssignments] mapped tasks:', tasks.map(t => ({ id: t.id, chapterId: t.chapterId, pageId: t.pageId, status: t.status })))
 
       // Gọi song song getById cho tất cả chapters
       const chapterResults = await Promise.allSettled(
@@ -68,9 +186,6 @@ export function useAssistantAssignments() {
         seen.add(task.chapterId)
 
         const chapter = chapterMap[task.chapterId] ?? null
-        if (chapter) {
-          console.debug('[useAssistantAssignments] chapter for', task.chapterId, ':', chapter, 'keys=', Object.keys(chapter))
-        }
 
         const seriesTitle =
             seriesNameRoot ??
@@ -83,9 +198,6 @@ export function useAssistantAssignments() {
             chapter?.data?.title ??
             chapter?.title ??
             null
-        if (!seriesTitle && chapter) {
-          console.warn('[useAssistantAssignments] seriesTitle missing for chapterId=', task.chapterId, 'chapter=', chapter, 'chapterKeys=', Object.keys(chapter ?? {}), 'dataKeys=', Object.keys(chapter?.data ?? {}))
-        }
 
         results.push({
           id: task.chapterId,
@@ -141,10 +253,8 @@ export function useAssistantAssignments() {
         return null
       }),
     ])
-    console.debug('[loadChapterPages] raw chapter=', chapter, 'pagesRes=', pagesRes)
 
     // Ưu tiên: lấy pages trực tiếp từ GET /chapters/:id (BE populate sẵn).
-    // Fallback: gọi riêng GET /chapters/:id/pages.
     let pages = []
     if (chapter?.pages && Array.isArray(chapter.pages) && chapter.pages.length > 0) {
       pages = chapter.pages.map(rawPageToUi)
@@ -174,6 +284,13 @@ export function useAssistantAssignments() {
       chapter?.title ??
       ''
 
+    // Parse revision_notes string → structured notes (dùng revision_annotations array nếu có)
+    const revisionNotesParsed = parseRevisionNotes(
+      chapter?.revision_notes ?? chapter?.data?.revision_notes ?? null,
+      chapter?.revision_annotations ?? chapter?.data?.revision_annotations ?? null,
+      pages.length,
+    )
+
     // Chuẩn hóa chapter object
     const safeChapter = {
       _id: chapter?._id ?? chapter?.id ?? chapterId,
@@ -183,18 +300,12 @@ export function useAssistantAssignments() {
       chapter_number: chapter?.chapter_number ?? chapter?.data?.chapter_number ?? 0,
       title: chapter?.title ?? chapter?.data?.title ?? '',
       status: chapter?.status ?? 'pending_assistant',
-      // Mangaka gửi annotations (vị trí + nội dung note) đi kèm chapter
       revision_annotations: chapter?.revision_annotations ?? chapter?.data?.revision_annotations ?? null,
       revision_notes: chapter?.revision_notes ?? chapter?.data?.revision_notes ?? null,
+      revision_notes_parsed: revisionNotesParsed,
     }
 
-    if (pages.length > 0) {
-      console.debug('[loadChapterPages] chapterId=', chapterId, 'pageCount=', pages.length, 'chapterHasData=', !!chapter?.data, 'chapterDataKeys=', Object.keys(chapter?.data ?? {}), 'chapterKeys=', Object.keys(chapter ?? {}), 'firstPageUrl=', pages[0]?.url, 'taskNotes=', taskNotes?.length ?? 0)
-    } else {
-      console.warn('[loadChapterPages] NO PAGES for chapterId=', chapterId, 'chapter=', chapter, 'pagesRes=', pagesRes)
-    }
-
-    return { chapter: safeChapter, pages, taskNotes }
+    return { chapter: safeChapter, pages, taskNotes, revisionNotesParsed }
   }, [])
 
   const loadPageDetail = useCallback(async (pageId, taskNotes = null) => {

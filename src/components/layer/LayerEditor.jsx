@@ -29,7 +29,13 @@ import { ImageLightbox } from './ImageLightbox.jsx'
 
 function buildLayerNote(layers, notes) {
   if (!Array.isArray(notes)) return null
-  const blocked = notes.find(n => n.status === 'open' && n.layerIndex !== undefined && n.layerIndex !== null)
+  // Chỉ filter bỏ notes placeholder: full canvas (w=100, h=100, x=0, y=0) VÀ text rỗng/whitespace
+  const valid = notes.filter(n => {
+    const hasText = n.text && n.text.trim().length > 0
+    const isPlaceholder = (n.w >= 100 && n.h >= 100 && n.x === 0 && n.y === 0)
+    return hasText || !isPlaceholder
+  })
+  const blocked = valid.find(n => n.status === 'open' && n.layerIndex !== undefined && n.layerIndex !== null)
   if (!blocked) return null
   const layer = layers.find(l => l.index === blocked.layerIndex)
   return { note: blocked, layer }
@@ -128,32 +134,67 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
 
   // Build notes for the active page from revision_annotations (per-page structured notes from Mangaka)
   const chapterPageAnnotations = useMemo(() => {
+    const result = []
+
+    // 1. revision_annotations (structured array, per-page key)
     const raw = chapter?.revision_annotations
-    if (!raw || typeof raw !== 'object') return []
-    // Hỗ trợ nhiều format key: page_0, page_1 hoặc 0, 1 (số nguyên)
-    const keyIndex = String(pageIdx)
-    const arr = raw[`page_${keyIndex}`] ?? raw[keyIndex] ?? null
-    if (!Array.isArray(arr)) return []
-    return arr.map((n, i) => ({
-      id: `ra-${pageIdx}-${i}`,
-      clientKey: `ra-${pageIdx}-${i}`,
-      text: n.text ?? '',
-      x: n.x ?? 0,
-      y: n.y ?? 0,
-      w: n.w ?? 0,
-      h: n.h ?? 0,
-      taskType: n.taskType ?? 'other',
-      status: 'open',
-      assignee: n.assignee ?? '',
-      layerIndex: n.layerIndex ?? null,
-    }))
-  }, [chapter?.revision_annotations, pageIdx])
+    if (raw && typeof raw === 'object') {
+      const keyIndex = String(pageIdx)
+      const arr = raw[`page_${keyIndex}`] ?? raw[keyIndex] ?? null
+      if (Array.isArray(arr)) {
+        for (const n of arr) {
+          result.push({
+            id: n._id ?? n.id ?? `ra-${pageIdx}`,
+            clientKey: n._id ?? n.id ?? `ra-${pageIdx}`,
+            text: n.text ?? '',
+            x: n.x ?? 0,
+            y: n.y ?? 0,
+            w: n.w ?? 0,
+            h: n.h ?? 0,
+            taskType: n.taskType ?? 'other',
+            status: n.status ?? 'open',
+            assignee: n.assignee ?? '',
+            layerIndex: n.layerIndex ?? null,
+          })
+        }
+      }
+    }
+
+    // 2. revision_notes_parsed (parsed from string, includes pageIndex)
+    const parsed = chapter?.revision_notes_parsed ?? []
+    if (Array.isArray(parsed)) {
+      for (const note of parsed) {
+        // pageIndex === pageIdx HOẶC pageIndex === undefined (áp dụng cho mọi page)
+        if (note.pageIndex === undefined || note.pageIndex === pageIdx) {
+          result.push({
+            id: note.id ?? `rn-${pageIdx}`,
+            clientKey: note.id ?? `rn-${pageIdx}`,
+            text: note.text ?? '',
+            x: note.x ?? 0,
+            y: note.y ?? 0,
+            w: note.w ?? 100,
+            h: note.h ?? 100,
+            taskType: note.taskType ?? 'paint',
+            status: 'open',
+            assignee: '',
+            layerIndex: null,
+          })
+        }
+      }
+    }
+
+    return result
+  }, [chapter?.revision_annotations, chapter?.revision_notes_parsed, pageIdx])
 
   async function loadNotes() {
-    // Ưu tiên 1: notes từ task.noteIds (BE populate vào task object)
+    // Luôn kết hợp: task.noteIds + chapterPageAnnotations + API fallback
+    const results = []
+
+    // 1. Notes từ task.noteIds (BE populate vào task object)
     if (taskNotes.length > 0) {
-      setPageNotes(taskNotes.map(n => ({
+      results.push(...taskNotes.map(n => ({
         ...n,
+        source: 'taskNotes',
         clientKey: n.id ? String(n.id) : undefined,
         status: n.status ?? 'open',
         x: n.x ?? 0,
@@ -163,28 +204,77 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
         taskType: n.taskType ?? 'other',
         text: n.text ?? '',
       })))
-      return
     }
-    // Ưu tiên 2: notes từ revision_annotations (per-page structured notes từ Mangaka)
+
+    // 2. Notes từ chapterPageAnnotations (revision_annotations + revision_notes_parsed)
     if (chapterPageAnnotations.length > 0) {
-      setPageNotes(chapterPageAnnotations)
-      return
+      results.push(...chapterPageAnnotations.map(n => ({ ...n, source: n.source ?? 'chapterAnnotations' })))
     }
-    // Fallback 3: gọi API lấy notes theo pageId
-    if (!activePageId) return
-    setNotesLoading(true)
-    try {
-      const res = await chaptersService.getPageNotes(activePageId).catch(() => [])
-      setPageNotes((Array.isArray(res) ? res : []).map(apiNoteToUi))
-    } finally {
-      setNotesLoading(false)
+
+    // 3. Fallback: gọi API lấy notes theo pageId nếu chưa có gì
+    if (results.length === 0 && activePageId) {
+      setNotesLoading(true)
+      try {
+        const res = await chaptersService.getPageNotes(activePageId).catch(() => [])
+        results.push(...(Array.isArray(res) ? res : []).map(n => ({ ...apiNoteToUi(n), source: 'api' })))
+      } finally {
+        setNotesLoading(false)
+      }
     }
+
+    // Deduplicate theo id/clientKey trước khi set — phòng trường hợp 2 nguồn trả cùng 1 note
+    const seenKeys = new Set()
+    const deduped = []
+    for (const n of results) {
+      const key = n.clientKey ?? n.id ?? String(n._id ?? '')
+      if (!key || seenKeys.has(key)) continue
+      seenKeys.add(key)
+      deduped.push(n)
+    }
+    setPageNotes(deduped)
   }
 
   useEffect(() => { void loadNotes() }, [activePageId, taskNotes.length, chapterPageAnnotations.length])
 
-  const layerNoteInfo = useMemo(() => buildLayerNote(layers, pageNotes), [layers, pageNotes])
+  // Gộp notes từ mọi nguồn: task.noteIds + chapter.revision_annotations + API getPageNotes
+  const allNotes = useMemo(() => {
+    const seen = new Set()
+    const merged = []
 
+    for (const note of taskNotes) {
+      const key = note.clientKey ?? note.id ?? String(note._id ?? '')
+      if (!key || seen.has(key)) continue
+      seen.add(key)
+      merged.push(note)
+    }
+    for (const note of chapterPageAnnotations) {
+      const key = note.clientKey ?? note.id ?? String(note._id ?? '')
+      if (!key || seen.has(key)) continue
+      seen.add(key)
+      merged.push(note)
+    }
+    for (const note of pageNotes) {
+      const key = note.clientKey ?? note.id ?? String(note._id ?? '')
+      if (!key || seen.has(key)) continue
+      seen.add(key)
+      merged.push(note)
+    }
+    // Giữ lại tất cả notes, kể cả text rỗng/whitespace, để LayerCanvas vẫn hiển thị badge
+    return merged
+  }, [taskNotes, chapterPageAnnotations, pageNotes])
+
+  // DEBUG: theo dõi note đến từ đâu, có toạ độ không
+  useEffect(() => {
+    console.debug('[NOTE-DEBUG] pageIdx=', pageIdx, 'taskNotesCount=', taskNotes.length, 'chapterAnnotationsCount=', chapterPageAnnotations.length, 'pageNotesCount=', pageNotes.length, 'allNotesCount=', allNotes.length)
+    console.debug('[NOTE-DEBUG] chapter.revision_annotations raw =', chapter?.revision_annotations)
+    console.debug('[NOTE-DEBUG] chapter.revision_notes_parsed =', chapter?.revision_notes_parsed)
+    console.debug('[NOTE-DEBUG] allNotes =', allNotes.map(n => ({ id: n.id, source: n.source, x: n.x, y: n.y, w: n.w, h: n.h, taskType: n.taskType, text: n.text?.slice(0, 30) })))
+  }, [pageIdx, taskNotes, chapterPageAnnotations, pageNotes, allNotes, chapter?.revision_annotations, chapter?.revision_notes_parsed])
+
+  const layerNoteInfo = useMemo(() => buildLayerNote(layers, allNotes), [layers, allNotes])
+
+  // Ưu tiên: URL từ chapter pages (loadChapterPages đã gọi sẵn).
+  // Fallback: originalImage từ usePageLayers (chỉ khi page chưa có URL — trường hợp BE không trả URL trong page).
   const baseImage = safePage?.url ?? originalImage ?? null
 
   async function handleAddLayer(file) {
@@ -277,13 +367,13 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
                 {pages.length > 1 && (
                   <div className="mt-1 flex items-center gap-1">
                     {pages.map((page, i) => {
-                      const pid = page?.id ?? page?._id ?? i
-                      const isSubmitted = !!submittedPages[pid]
-                      const isFinalized = !!finalizedPages[pid]
+                      const pid = page?.id ?? page?._id
+                      const isSubmitted = pid ? !!submittedPages[pid] : false
+                      const isFinalized = pid ? !!finalizedPages[pid] : false
                       const isCurrent = i === safeIdx
                       return (
                         <button
-                          key={pid}
+                          key={pid ?? i}
                           type="button"
                           onClick={() => setPageIdx(i)}
                           title={`Trang ${i + 1}${isSubmitted ? ' — đã gửi' : isFinalized ? ' — đã gộp' : ''}`}
@@ -534,7 +624,7 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
                 baseImage={showOriginal ? baseImage : null}
                 className="absolute inset-0 h-full w-full"
                 region={task?.region ?? null}
-                notes={pageNotes}
+                notes={allNotes}
                 showRegion={showRegionOverlay}
                 showNotes={showNoteOverlay}
               />

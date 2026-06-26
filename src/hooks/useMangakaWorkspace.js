@@ -32,6 +32,7 @@ export function useMangakaWorkspace(user) {
   const refreshInFlight = useRef(false)
   const chapterPagesFetchRef = useRef(new Set())
   const chapterPagesInflightRef = useRef(new Set())
+  const chapterUploadTimeRef = useRef(new Map())
   const noteServerIdRef = useRef(new Map())
 
   const loadChaptersForSeries = useCallback(async (seriesItems) => {
@@ -111,10 +112,24 @@ export function useMangakaWorkspace(user) {
     })
     if (cached.length) {
       chapterPagesFetchRef.current.add(chapterId)
+      setAnnotatorChapters(prev => prev.map(ch =>
+        ch.id === chapterId ? { ...ch, pages: cached } : ch,
+      ))
       return cached
     }
 
     if (chapterPagesFetchRef.current.has(chapterId)) {
+      let fromState = []
+      setAnnotatorChapters(prev => {
+        fromState = prev.find(ch => ch.id === chapterId)?.pages ?? []
+        return prev
+      })
+      return fromState
+    }
+
+    const uploadTs = chapterUploadTimeRef.current.get(chapterId)
+    if (uploadTs && Date.now() - uploadTs < 30_000) {
+      chapterPagesFetchRef.current.add(chapterId)
       let fromState = []
       setAnnotatorChapters(prev => {
         fromState = prev.find(ch => ch.id === chapterId)?.pages ?? []
@@ -129,8 +144,18 @@ export function useMangakaWorkspace(user) {
 
     chapterPagesInflightRef.current.add(chapterId)
     try {
-      const pages = await chaptersService.getPages(chapterId)
-      const pageList = (Array.isArray(pages) ? pages : []).map(apiPageToUi)
+      const raw = await chaptersService.getPages(chapterId)
+      const unwrapped = (() => {
+        if (Array.isArray(raw)) return raw
+        if (raw && typeof raw === 'object' && 'data' in raw) {
+          const inner = raw.data
+          if (Array.isArray(inner)) return inner
+          if (inner && typeof inner === 'object' && 'data' in inner) return inner.data ?? []
+          return [inner].filter(Boolean)
+        }
+        return []
+      })()
+      const pageList = unwrapped.map(apiPageToUi)
       chapterPagesFetchRef.current.add(chapterId)
       setAnnotatorChapters(prev => prev.map(ch =>
         ch.id === chapterId ? { ...ch, pages: pageList } : ch,
@@ -189,8 +214,12 @@ export function useMangakaWorkspace(user) {
       if (assistantId) fd.append('assistant_id', assistantId)
       Array.from(files).forEach(file => fd.append('pages', file))
       const result = await chaptersService.uploadChapterWithPages(fd)
-      created = result.chapter ?? result.data ?? result
-      uploadedPages = (result.pages ?? []).map(apiPageToUi)
+      const raw = result ?? {}
+      // created: ưu tiên chapter, rồi data, rồi chính nó
+      created = raw.chapter ?? raw.data ?? raw
+      // pages: có thể nested { data: page } hoặc flat
+      const rawPages = Array.isArray(raw.pages) ? raw.pages : []
+      uploadedPages = rawPages.map(p => apiPageToUi(p?.data ?? p))
     } else {
       created = await chaptersService.create({
         series_id: seriesId,
@@ -227,14 +256,17 @@ export function useMangakaWorkspace(user) {
   const uploadChapterPages = useCallback(async (chapterId, files, pageNotes = []) => {
     const uploaded = await chaptersService.uploadPages(chapterId, files, pageNotes)
     const pageList = (Array.isArray(uploaded) ? uploaded : [uploaded])
-      .flat()
       .filter(Boolean)
       .map(p => (Array.isArray(p) ? p[0] : p))
-      .map(apiPageToUi)
+    const uiPages = pageList.map(apiPageToUi)
     setAnnotatorChapters(prev => prev.map(ch => {
       if (ch.id !== chapterId) return ch
-      return { ...ch, pages: [...ch.pages, ...pageList] }
+      return { ...ch, pages: [...ch.pages, ...uiPages] }
     }))
+    chapterPagesFetchRef.current.add(chapterId)
+    chapterPagesInflightRef.current.delete(chapterId)
+    chapterUploadTimeRef.current.set(chapterId, Date.now())
+    return uiPages
     setChapterRows(prev => prev.map(r => {
       if (r.id !== chapterId) return r
       return { ...r, pages: (r.pages ?? 0) + pageList.length, date: new Date().toLocaleDateString('vi-VN') }
@@ -272,9 +304,27 @@ export function useMangakaWorkspace(user) {
 
   const loadPageNotes = useCallback(async (pageId, pageKey) => {
     const notes = await chaptersService.getPageNotes(pageId)
-    const list = (Array.isArray(notes) ? notes : []).map(apiNoteToUi)
-    setAnnotatorNotes(prev => ({ ...prev, [pageKey]: list }))
-    return list
+    const unwrapped = (() => {
+      if (Array.isArray(notes)) return notes
+      if (notes && typeof notes === 'object' && 'data' in notes) {
+        const inner = notes.data
+        if (Array.isArray(inner)) return inner
+        if (inner && typeof inner === 'object' && 'data' in inner) return inner.data ?? []
+        return [inner].filter(Boolean)
+      }
+      return []
+    })()
+    const list = unwrapped.map(apiNoteToUi)
+    // Deduplicate theo id/clientKey để tránh React key collision khi BE trả duplicate
+    const seen = new Set()
+    const deduped = list.filter(n => {
+      const key = n.clientKey ?? n.id ?? String(n._id ?? '')
+      if (!key || seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    setAnnotatorNotes(prev => ({ ...prev, [pageKey]: deduped }))
+    return deduped
   }, [])
 
   const savePageNote = useCallback(async (pageId, pageKey, note) => {

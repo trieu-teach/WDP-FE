@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ImagePlus, Move, MoveDiagonal, RotateCcw, ZoomIn, ZoomOut } from 'lucide-react'
+import { ImagePlus, Loader2, Move, MoveDiagonal, RotateCcw, ZoomIn, ZoomOut } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { regionToPixels } from '@/utils/apiMappers.js'
@@ -61,6 +61,7 @@ export default function LayerCanvas({
   const containerRef = useRef(null)
   const canvasRef = useRef(null)
   const [imgCache, setImgCache] = useState({})
+  const [imgLoading, setImgLoading] = useState(false)
   const [renderError, setRenderError] = useState(null)
 
   const [zoom, setZoom] = useState(1)
@@ -78,6 +79,7 @@ export default function LayerCanvas({
     if (baseImage) urls.unshift(baseImage)
     const newOnes = urls.filter((u) => !imgCache[u])
     if (newOnes.length === 0) return
+    setImgLoading(true)
     let cancelled = false
     Promise.allSettled(newOnes.map(loadImage)).then((results) => {
       if (cancelled) return
@@ -88,6 +90,7 @@ export default function LayerCanvas({
         })
         return next
       })
+      setImgLoading(false)
     })
     return () => { cancelled = true }
   }, [sorted, imgCache, baseImage])
@@ -155,23 +158,94 @@ export default function LayerCanvas({
             const fill = WORK_TYPE_COLORS[note.taskType] ?? WORK_TYPE_COLORS.other
 
             ctx.save()
-            ctx.fillStyle = fill
-            ctx.strokeStyle = color
-            ctx.lineWidth = 1.5
-            ctx.fillRect(nx, ny, nw, nh)
-            ctx.strokeRect(nx, ny, nw, nh)
 
-            if (note.text && note.text.trim()) {
-              const label = `[${note.taskType ?? 'note'}] ${note.text.trim()}`
-              ctx.font = 'bold 11px sans-serif'
-              const tw = ctx.measureText(label).width
-              const padX = 5, padY = 3
-              const lx = Math.min(nx, nx + nw - tw - padX * 2)
-              const ly = Math.max(0, ny - 18)
+            // Nếu note full-canvas (w=100, h=100) và không có text cụ thể → hiện badge thay vì overlay
+            const isFullCanvas = (nw >= canvas.width * 0.95 && nh >= canvas.height * 0.95)
+            const hasSpecificRegion = !isFullCanvas
+
+            if (hasSpecificRegion) {
+              // Vẽ vùng note với độ đậm cao hơn để nhìn thấy trên layer
+              ctx.fillStyle = fill
+              ctx.strokeStyle = color
+              ctx.lineWidth = 3
+              ctx.globalAlpha = 0.9
+              ctx.fillRect(nx, ny, nw, nh)
+              ctx.globalAlpha = 1
+              ctx.setLineDash([8, 4])
+              ctx.strokeRect(nx, ny, nw, nh)
+              ctx.setLineDash([])
+
+              // Text bên trong vùng khoanh với word-wrap
+              const labelText = (note.text && note.text.trim().length > 0) ? note.text.trim() : 'Ghi chú'
+              const typeLabel = `[${note.taskType ?? 'note'}]`
+              ctx.font = 'bold 12px sans-serif'
+              const typeW = ctx.measureText(typeLabel).width
+              const padX = 6, padY = 4, lineH = 16
+              const maxW = nw - padX * 2
+
+              // Tính text wrapper để wrap
+              function wrapText(text, maxWidth) {
+                const words = text.split(' ')
+                const lines = []
+                let current = ''
+                for (const word of words) {
+                  const test = current ? `${current} ${word}` : word
+                  if (ctx.measureText(test).width > maxWidth && current) {
+                    lines.push(current)
+                    current = word
+                  } else {
+                    current = test
+                  }
+                }
+                if (current) lines.push(current)
+                return lines
+              }
+
+              // Vẽ type label
               ctx.fillStyle = color
-              ctx.fillRect(lx, ly, tw + padX * 2, 16)
+              ctx.fillRect(nx + padX, ny + padY, typeW + padX, 20)
               ctx.fillStyle = '#ffffff'
-              ctx.fillText(label, lx + padX, ly + 12)
+              ctx.fillText(typeLabel, nx + padX + 3, ny + padY + 14)
+
+              // Vẽ text content bên dưới type label
+              const textLines = wrapText(labelText, maxW)
+              const startY = ny + padY + 24
+              // Limit số dòng để không tràn khỏi vùng
+              const maxLines = Math.floor((nh - (startY - ny) - padY) / lineH)
+              const visibleLines = textLines.slice(0, Math.max(1, maxLines))
+
+              ctx.font = '12px sans-serif'
+              for (let i = 0; i < visibleLines.length; i++) {
+                const ly = startY + i * lineH
+                if (ly + lineH > ny + nh - padY) break
+                ctx.fillStyle = 'rgba(0,0,0,0.7)'
+                ctx.fillRect(nx + padX, ly - 10, ctx.measureText(visibleLines[i]).width + 4, 14)
+                ctx.fillStyle = '#ffffff'
+                ctx.fillText(visibleLines[i], nx + padX + 2, ly)
+              }
+            } else {
+              // Badge ở góc trên-trái cho note full-canvas
+              const labelText = (note.text && note.text.trim().length > 0) ? note.text.trim() : 'Ghi chú'
+              const label = `[${note.taskType ?? 'note'}] ${labelText}`
+              ctx.font = 'bold 13px sans-serif'
+              const tw = ctx.measureText(label).width
+              const padX = 8, padY = 5
+              const badgeX = 12
+              const badgeY = 12
+              const badgeW = tw + padX * 2
+              const badgeH = 26
+
+              ctx.fillStyle = color
+              ctx.shadowColor = 'rgba(0,0,0,0.6)'
+              ctx.shadowBlur = 8
+              ctx.shadowOffsetX = 0
+              ctx.shadowOffsetY = 2
+              ctx.fillRect(badgeX, badgeY, badgeW, badgeH)
+              ctx.shadowColor = 'transparent'
+              ctx.shadowBlur = 0
+
+              ctx.fillStyle = '#ffffff'
+              ctx.fillText(label, badgeX + padX, badgeY + 18)
             }
             ctx.restore()
           }
@@ -182,19 +256,24 @@ export default function LayerCanvas({
         setRenderError(err.message)
       }
     }
-
     draw()
   }, [sorted, imgCache, mode, region, notes, showRegion, showNotes, baseImage])
 
-  // Zoom with wheel
-  const handleWheel = useCallback((e) => {
-    e.preventDefault()
-    if (e.ctrlKey || e.metaKey) {
-      const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP
-      setZoom((z) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, +(z + delta).toFixed(2))))
-    } else {
-      setPan((p) => ({ x: p.x - e.deltaX, y: p.y - e.deltaY }))
+  // Zoom with wheel — phải gắn qua DOM với passive: false để preventDefault hoạt động
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const onWheel = (e) => {
+      e.preventDefault()
+      if (e.ctrlKey || e.metaKey) {
+        const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP
+        setZoom((z) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, +(z + delta).toFixed(2))))
+      } else {
+        setPan((p) => ({ x: p.x - e.deltaX, y: p.y - e.deltaY }))
+      }
     }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
   }, [])
 
   // Pan with mouse drag
@@ -255,7 +334,6 @@ export default function LayerCanvas({
         className,
       )}
       style={{ cursor: isPanning ? 'grabbing' : cursorMode === 'pan' ? 'grab' : 'default' }}
-      onWheel={handleWheel}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
@@ -265,7 +343,7 @@ export default function LayerCanvas({
       {/* Dot-grid background */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-[0.05]"
+        className="pointer-events-none absolute inset-0 opacity-[0.03]"
         style={{
           backgroundImage: 'radial-gradient(circle, #888 1px, transparent 1px)',
           backgroundSize: '24px 24px',
@@ -322,8 +400,17 @@ export default function LayerCanvas({
           </div>
         )}
 
+        {imgLoading && (
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-[#1a1a2e]/70 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-2">
+              <Loader2 className="h-8 w-8 animate-spin text-violet-400" />
+              <span className="text-xs font-medium text-white/60">Đang tải ảnh…</span>
+            </div>
+          </div>
+        )}
+
         {/* Layer count badge */}
-        {sorted.length > 0 && visibleCount > 0 && (
+        {sorted.length > 0 && visibleCount > 0 && !imgLoading && (
           <div className="pointer-events-none absolute left-2.5 top-2.5 z-10 inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-black/60 px-2.5 py-1 text-[10px] font-semibold text-white shadow-sm backdrop-blur">
             <span className="size-1.5 rounded-full bg-violet-400" />
             {visibleCount}/{sorted.length} hiện
