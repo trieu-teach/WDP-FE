@@ -36,6 +36,29 @@ export function readCouncilSeriesScores(seriesTitle) {
   return readAll()[key] ?? null
 }
 
+/** Chapter đã chấm đủ Hội đồng (API hoặc localStorage) — ẩn khỏi hàng chờ duyệt. */
+export function isEbChapterFullyScored(chapterItem) {
+  if (!chapterItem?.id) return false
+
+  if (chapterItem.councilAverage != null) return true
+
+  if (
+    Array.isArray(chapterItem.memberScores)
+    && chapterItem.memberScores.length >= EB_COUNCIL_MEMBERS.length
+  ) {
+    return true
+  }
+
+  const record = readCouncilSeriesScores(chapterItem.id)
+  if (!record?.members) return false
+
+  const scoredCount = EB_COUNCIL_MEMBERS.filter(
+    (member) => record.members[member.id]?.scores,
+  ).length
+
+  return scoredCount >= EB_COUNCIL_MEMBERS.length
+}
+
 export function saveCouncilMemberAssessment(seriesTitle, memberId, payload) {
   const key = String(seriesTitle ?? '').trim()
   if (!key || !memberId) return null

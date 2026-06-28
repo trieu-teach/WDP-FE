@@ -52,20 +52,7 @@ body {
   box-sizing: border-box;
 }
 
-/* Home — nền full, chữ căn giữa khối */
-.home-hero {
-  padding-top: 48px;
-  padding-bottom: 80px;
-}
-
-.home-hero__inner {
-  width: 100%;
-  max-width: var(--page-max);
-  margin-inline: auto;
-  padding-inline: var(--page-px);
-  box-sizing: border-box;
-}
-
+/* Home — legacy section spacing (hero styles live in Home.css) */
 .home-section {
   width: 100%;
   max-width: var(--page-max);

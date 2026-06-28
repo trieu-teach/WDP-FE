@@ -14,7 +14,7 @@ import {
 import { NotificationBell } from '@/components/layout/NotificationBell.jsx'
 import { cn } from '@/lib/utils'
 
-export default function Header({ links = [], onLogout, className }) {
+export default function Header({ links = [], onLogout, className, tone = 'default' }) {
   const navigate = useNavigate()
   const user = getSession()
   const workspacePath = user ? getRolePath(user.role) : null
@@ -28,11 +28,34 @@ export default function Header({ links = [], onLogout, className }) {
     navigate('/login')
   }
 
+  const isLight = tone === 'light'
+
   return (
-    <header className={cn('sticky top-0 z-50 w-full border-b bg-background/80 backdrop-blur-xl', className)}>
+    <header
+      className={cn(
+        'sticky top-0 z-50 w-full',
+        isLight
+          ? 'border-b-0 bg-transparent'
+          : 'border-b bg-background/80 backdrop-blur-xl',
+        className,
+      )}
+    >
       <div className="page-container flex h-16 items-center justify-between gap-4">
-        <Link to="/" className="flex items-center gap-2.5 font-semibold tracking-tight">
-          <span className="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
+        <Link
+          to="/"
+          className={cn(
+            'flex items-center gap-2.5 font-semibold tracking-tight',
+            isLight && 'text-white',
+          )}
+        >
+          <span
+            className={cn(
+              'flex size-9 items-center justify-center rounded-xl shadow-sm',
+              isLight
+                ? 'bg-white text-[#0b1f3f]'
+                : 'bg-primary text-primary-foreground',
+            )}
+          >
             <BookOpen className="size-4" />
           </span>
           <span className="hidden sm:inline">MangaHub</span>
@@ -40,7 +63,12 @@ export default function Header({ links = [], onLogout, className }) {
 
         <nav className="hidden items-center gap-1 md:flex">
           {links.map(link => {
-            const cls = 'rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
+            const cls = cn(
+              'rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+              isLight
+                ? 'text-white/80 hover:bg-white/10 hover:text-white'
+                : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+            )
             if (link.href) {
               return (
                 <a key={link.label} href={link.href} className={cls}>
@@ -87,10 +115,19 @@ export default function Header({ links = [], onLogout, className }) {
             </Button>
           ) : (
             <>
-              <Button variant="ghost" size="sm" asChild className="hidden sm:inline-flex">
+              <Button
+                variant="ghost"
+                size="sm"
+                asChild
+                className={cn('hidden sm:inline-flex', isLight && 'text-white hover:bg-white/10 hover:text-white')}
+              >
                 <Link to="/login">Đăng nhập</Link>
               </Button>
-              <Button size="sm" asChild>
+              <Button
+                size="sm"
+                asChild
+                className={cn(isLight && 'bg-white text-[#0b1f3f] hover:bg-white/90')}
+              >
                 <Link to="/register">Đăng ký</Link>
               </Button>
             </>

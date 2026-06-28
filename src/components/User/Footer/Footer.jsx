@@ -1,8 +1,49 @@
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
+import { toast } from 'sonner'
 import { BookOpen } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
+import { getSession } from '@/lib/auth.js'
 
-export default function Footer() {
+const LOGIN_TOAST = {
+  title: 'Vui lòng đăng nhập',
+  description: 'Bạn cần đăng nhập để truy cập tính năng này trên MangaHub.',
+}
+
+const GUARDED_PATHS = new Set(['/mangaka', '/assistant', '/tantou', '/eb', '/register'])
+
+function FooterLink({ to, authGuard, onAuthRequired, className, children }) {
+  const navigate = useNavigate()
+  const user = getSession()
+  const needsGuard = authGuard && !user && GUARDED_PATHS.has(to)
+
+  if (!needsGuard) {
+    return (
+      <Link to={to} className={className}>
+        {children}
+      </Link>
+    )
+  }
+
+  return (
+    <Link
+      to={to}
+      className={className}
+      onClick={(e) => {
+        e.preventDefault()
+        if (onAuthRequired) {
+          onAuthRequired(to)
+          return
+        }
+        toast.info(LOGIN_TOAST.title, { description: LOGIN_TOAST.description })
+        navigate('/login')
+      }}
+    >
+      {children}
+    </Link>
+  )
+}
+
+export default function Footer({ authGuard = false, onAuthRequired }) {
   return (
     <footer className="mt-auto border-t bg-muted/30">
       <div className="page-container py-10">
@@ -19,11 +60,11 @@ export default function Footer() {
             </p>
           </div>
           <nav className="flex flex-wrap gap-x-8 gap-y-3 text-sm">
-            <Link to="/" className="text-muted-foreground transition-colors hover:text-foreground">Trang chủ</Link>
-            <Link to="/login" className="text-muted-foreground transition-colors hover:text-foreground">Đăng nhập</Link>
-            <Link to="/register" className="text-muted-foreground transition-colors hover:text-foreground">Đăng ký</Link>
-            <Link to="/mangaka" className="text-muted-foreground transition-colors hover:text-foreground">Mangaka</Link>
-            <Link to="/tantou" className="text-muted-foreground transition-colors hover:text-foreground">Tantou</Link>
+            <FooterLink to="/" authGuard={authGuard} onAuthRequired={onAuthRequired} className="text-muted-foreground transition-colors hover:text-foreground">Trang chủ</FooterLink>
+            <FooterLink to="/login" authGuard={authGuard} onAuthRequired={onAuthRequired} className="text-muted-foreground transition-colors hover:text-foreground">Đăng nhập</FooterLink>
+            <FooterLink to="/register" authGuard={authGuard} onAuthRequired={onAuthRequired} className="text-muted-foreground transition-colors hover:text-foreground">Đăng ký</FooterLink>
+            <FooterLink to="/mangaka" authGuard={authGuard} onAuthRequired={onAuthRequired} className="text-muted-foreground transition-colors hover:text-foreground">Mangaka</FooterLink>
+            <FooterLink to="/tantou" authGuard={authGuard} onAuthRequired={onAuthRequired} className="text-muted-foreground transition-colors hover:text-foreground">Tantou</FooterLink>
           </nav>
         </div>
         <Separator className="my-8" />

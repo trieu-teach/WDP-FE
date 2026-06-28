@@ -51,6 +51,7 @@ import {
 import {
   EB_COUNCIL_MEMBERS,
   buildCouncilAggregate,
+  isEbChapterFullyScored,
   readCouncilSeriesScores,
   saveCouncilMemberAssessment,
 } from "@/utils/ebCouncilStorage.js";
@@ -279,6 +280,11 @@ export default function Eb() {
   useEffect(() => {
     void loadPending();
   }, [loadPending, councilTick]);
+
+  const queueChapters = useMemo(
+    () => pendingChapters.filter((item) => !isEbChapterFullyScored(item)),
+    [pendingChapters, councilTick],
+  );
 
   const loadChapterDetail = useCallback(async (chapterId) => {
     if (!chapterId) return null
@@ -764,21 +770,21 @@ export default function Eb() {
                   <Select
                     value={activeChapter?.id || undefined}
                     onValueChange={(id) => openChapterEvaluate(id)}
-                    disabled={pendingChapters.length === 0 || apiLoading}
+                    disabled={queueChapters.length === 0 || apiLoading}
                   >
                     <SelectTrigger className="w-full">
                       <SelectValue
                         placeholder={
                           apiLoading
                             ? "Đang tải hàng chờ..."
-                            : pendingChapters.length
+                            : queueChapters.length
                               ? "Chọn chapter trong hàng chờ"
                               : "Chưa có chapter chờ EB duyệt"
                         }
                       />
                     </SelectTrigger>
                     <SelectContent>
-                      {pendingChapters.map((item) => (
+                      {queueChapters.map((item) => (
                         <SelectItem key={item.id} value={item.id}>
                           {item.seriesName} · Ch.{item.chapterNumber}
                           {item.title ? ` — ${item.title}` : ""}
@@ -790,7 +796,7 @@ export default function Eb() {
                     <p className="text-xs text-muted-foreground">
                       Đang tải từ <code className="text-[10px]">GET /eb-evaluations/pending</code>...
                     </p>
-                  ) : pendingChapters.length === 0 ? (
+                  ) : queueChapters.length === 0 ? (
                     <p className="text-xs text-muted-foreground">
                       TE cần bấm Approve series trước — chapters sẽ chuyển sang{" "}
                       <code className="text-[10px]">pending_EB</code>.
@@ -1156,7 +1162,7 @@ export default function Eb() {
                 Đang tải hàng chờ EB...
               </CardContent>
             </Card>
-          ) : pendingChapters.length === 0 ? (
+          ) : queueChapters.length === 0 ? (
             <Card>
               <CardContent className="py-16 text-center text-muted-foreground">
                 Không có chapter nào đang chờ EB duyệt.
@@ -1164,7 +1170,7 @@ export default function Eb() {
             </Card>
           ) : (
             <div className="grid gap-4">
-              {pendingChapters.map((ch) => (
+              {queueChapters.map((ch) => (
                 <Card
                   key={ch.id}
                   className="transition-shadow hover:shadow-md"
