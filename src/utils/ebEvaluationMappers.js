@@ -281,7 +281,7 @@ export function validateEbScore(value) {
   return ''
 }
 
-/** Chuẩn hóa ngày publish gửi BE: "YYYY-MM-DD" */
+/** Chuẩn hóa ngày publish (chỉ ngày): "YYYY-MM-DD" */
 export function formatEbScheduledPublishDate(value) {
   const text = String(value ?? '').trim()
   if (!text) return ''
@@ -289,6 +289,50 @@ export function formatEbScheduledPublishDate(value) {
   const date = new Date(text)
   if (Number.isNaN(date.getTime())) return text.slice(0, 10)
   return date.toISOString().slice(0, 10)
+}
+
+/**
+ * Gộp ngày + giờ → ISO 8601 cho BE (scheduled_publish_at).
+ * BE job quét mỗi phút — cần đủ giờ/phút, không chỉ ngày.
+ */
+export function formatEbScheduledPublishDateTime(dateValue, timeValue = '09:00') {
+  const dateText = String(dateValue ?? '').trim()
+  if (!dateText) return ''
+
+  if (/^\d{4}-\d{2}-\d{2}T/.test(dateText)) {
+    const parsed = new Date(dateText)
+    return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString()
+  }
+
+  let datePart = ''
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateText)) {
+    datePart = dateText
+  } else {
+    const parsed = new Date(dateText)
+    if (Number.isNaN(parsed.getTime())) return ''
+    datePart = parsed.toISOString().slice(0, 10)
+  }
+
+  const timeText = String(timeValue ?? '09:00').trim() || '09:00'
+  const match = /^(\d{1,2}):(\d{2})$/.exec(timeText)
+  const hours = match ? Math.min(23, Math.max(0, Number(match[1]))) : 9
+  const minutes = match ? Math.min(59, Math.max(0, Number(match[2]))) : 0
+
+  const [year, month, day] = datePart.split('-').map(Number)
+  const local = new Date(year, month - 1, day, hours, minutes, 0, 0)
+  if (Number.isNaN(local.getTime())) return ''
+  return local.toISOString()
+}
+
+/** Hiển thị scheduled_publish_at (ISO) cho người dùng. */
+export function formatEbScheduledPublishDisplay(isoValue) {
+  if (!isoValue) return ''
+  const date = new Date(isoValue)
+  if (Number.isNaN(date.getTime())) return String(isoValue)
+  return new Intl.DateTimeFormat('vi-VN', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date)
 }
 
 export function buildEmptyEbScores() {

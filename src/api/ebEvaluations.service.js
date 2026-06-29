@@ -117,7 +117,10 @@ export const ebEvaluationsService = {
 
   /**
    * POST /eb-evaluations/series/:seriesId/confirm-publish
-   * Body: { publication_schedule?: "weekly"|"monthly", scheduled_publish_at?: "YYYY-MM-DD" }
+   * Body: {
+   *   publication_schedule?: "weekly"|"monthly",
+   *   scheduled_publish_at?: string — ISO 8601 (ngày + giờ + phút)
+   * }
    */
   confirmPublish(seriesId, { publication_schedule, scheduled_publish_at } = {}) {
     const id = String(seriesId ?? '').trim()

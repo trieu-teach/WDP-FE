@@ -29,7 +29,8 @@ import { LABEL_EDITOR_BOARD } from "@/constants/roleTerminology.js";
 import {
   EB_PUBLICATION_SCHEDULES,
   formatEbClassification,
-  formatEbScheduledPublishDate,
+  formatEbScheduledPublishDateTime,
+  formatEbScheduledPublishDisplay,
   mapEbChapterDetailResponse,
   mapEbChapterPendingItem,
   normalizeEbEvaluateResponse,
@@ -52,6 +53,7 @@ export default function EbPublish() {
   const [submitting, setSubmitting] = useState(false);
   const [publicationSchedule, setPublicationSchedule] = useState("");
   const [scheduledPublishAt, setScheduledPublishAt] = useState("");
+  const [scheduledPublishTime, setScheduledPublishTime] = useState("09:00");
   const [lastEvaluation, setLastEvaluation] = useState(null);
 
   const loadChapter = useCallback(async () => {
@@ -141,9 +143,13 @@ export default function EbPublish() {
       return;
     }
     const schedule = publicationSchedule.trim();
-    const scheduled_publish_at = formatEbScheduledPublishDate(scheduledPublishAt);
+    const scheduled_publish_at = scheduledPublishAt
+      ? formatEbScheduledPublishDateTime(scheduledPublishAt, scheduledPublishTime)
+      : "";
     if (!schedule && !scheduled_publish_at) {
-      toast.error("Chọn lịch phát hành (weekly/monthly) hoặc ngày publish cụ thể.");
+      toast.error(
+        "Chọn lịch phát hành (weekly/monthly) hoặc ngày + giờ publish cụ thể.",
+      );
       return;
     }
     if (!hasScores) {
@@ -160,7 +166,7 @@ export default function EbPublish() {
       const seriesName = res?.series?.name ?? chapter?.seriesName ?? "Series";
       toast.success(
         res?.message
-        || `Series "${seriesName}" đã publish${scheduled_publish_at ? ` ngày ${scheduled_publish_at}` : ""}${res?.council_average != null ? ` · DTB ${Number(res.council_average).toFixed(1)}` : ""}.`,
+        || `Series "${seriesName}" đã publish${scheduled_publish_at ? ` · ${formatEbScheduledPublishDisplay(scheduled_publish_at)}` : ""}${res?.council_average != null ? ` · DTB ${Number(res.council_average).toFixed(1)}` : ""}.`,
       );
       navigate("/eb");
     } catch (err) {
@@ -277,17 +283,50 @@ export default function EbPublish() {
                   </Select>
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="eb-scheduled-publish">
-                    Ngày publish cụ thể (YYYY-MM-DD)
-                  </Label>
-                  <Input
-                    id="eb-scheduled-publish"
-                    type="date"
-                    value={scheduledPublishAt}
-                    onChange={(event) => setScheduledPublishAt(event.target.value)}
-                  />
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="eb-scheduled-publish">
+                      Ngày publish (YYYY-MM-DD)
+                    </Label>
+                    <Input
+                      id="eb-scheduled-publish"
+                      type="date"
+                      value={scheduledPublishAt}
+                      onChange={(event) => setScheduledPublishAt(event.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="eb-scheduled-publish-time">
+                      Giờ publish (giờ : phút)
+                    </Label>
+                    <Input
+                      id="eb-scheduled-publish-time"
+                      type="time"
+                      step={60}
+                      value={scheduledPublishTime}
+                      disabled={!scheduledPublishAt}
+                      onChange={(event) =>
+                        setScheduledPublishTime(event.target.value || "09:00")
+                      }
+                    />
+                  </div>
                 </div>
+                {scheduledPublishAt ? (
+                  <p className="text-xs text-muted-foreground">
+                    Dự kiến publish:{" "}
+                    <strong className="text-foreground">
+                      {formatEbScheduledPublishDisplay(
+                        formatEbScheduledPublishDateTime(
+                          scheduledPublishAt,
+                          scheduledPublishTime,
+                        ),
+                      )}
+                    </strong>
+                    {" "}
+                    (BE job quét mỗi phút theo{" "}
+                    <code className="text-[10px]">scheduled_publish_at</code> ISO)
+                  </p>
+                ) : null}
 
                 <Button
                   className="w-full"
@@ -306,7 +345,8 @@ export default function EbPublish() {
                 <p className="text-xs text-muted-foreground">
                   Cần DTB ≥ 2.5. Gửi{" "}
                   <code className="text-[10px]">publication_schedule</code> và/hoặc{" "}
-                  <code className="text-[10px]">scheduled_publish_at</code>.
+                  <code className="text-[10px]">scheduled_publish_at</code> (ISO 8601, có
+                  giờ/phút).
                 </p>
 
                 {!hasScores ? (
