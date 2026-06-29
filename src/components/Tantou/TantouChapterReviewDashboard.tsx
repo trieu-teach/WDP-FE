@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ImageIcon } from "lucide-react";
 import { resolveMediaUrl } from "@/api/http.js";
+import { seriesService } from "@/api/series.service.js";
 import {
   isTePageRecord,
   resolveTePageId,
@@ -8,6 +9,14 @@ import {
   tePageHasImage,
   teReviewsService,
 } from "@/api/teReviews.service.js";
+import {
+  isChapterAwaitingTePublish,
+  tePhaseLabel,
+} from "@/utils/teReviewPhase.js";
+import {
+  isTeSeriesLevelSubmission,
+  submissionTeTabType,
+} from "@/utils/teReviewPending.js";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,6 +40,7 @@ import type {
   TantouSubmission,
 } from "./reviewTypes";
 import {
+  buildChapterRowsFromSeriesProfile,
   createReviewDraft,
   formatReleaseDate,
   getMangakaNotesForStoryPage,
@@ -38,7 +48,10 @@ import {
   isSameChapter,
   mapApiAnnotationsToNotesByPage,
   mapApiAnnotationsToPageNotes,
+  normalizeTeSeriesChapters,
   resolveStoryPagesForChapter,
+  resolveViewingSubmission,
+  type SeriesProfileChapter,
 } from "./reviewUtils";
 
 type PageDetail = {
@@ -145,9 +158,10 @@ type TantouChapterReviewDashboardProps = {
   onCancel: () => void;
   onSaveReview: (
     payload: ReviewSavePayload,
-    options?: { submitAction?: "reject" | "publish" },
+    options?: { submitAction?: "reject" | "publish"; saveDraftOnly?: boolean },
   ) => void;
   onSelectChapter: (submissionId: string) => void;
+  saving?: boolean;
 };
 
 function SelectedPills({ items }: { items: string[] }) {
@@ -176,6 +190,7 @@ export function TantouChapterReviewDashboard({
   onCancel,
   onSaveReview,
   onSelectChapter,
+  saving = false,
 }: TantouChapterReviewDashboardProps) {
   const [draft, setDraft] = useState<ReviewDraft>(() =>
     createReviewDraft(submission),
@@ -206,7 +221,35 @@ export function TantouChapterReviewDashboard({
     Record<number, PageDetail>
   >({});
   const [loadingPage, setLoadingPage] = useState(false);
+  const [seriesChapters, setSeriesChapters] = useState<SeriesProfileChapter[]>(
+    [],
+  );
+  const [seriesChaptersLoading, setSeriesChaptersLoading] = useState(false);
   const readerRef = useRef<HTMLDivElement>(null);
+
+  const resolvedSeriesId =
+    submission.seriesId
+    ?? relatedSubmissions.find((s) => s.seriesId)?.seriesId
+    ?? null;
+
+  const viewingSubmission = useMemo(
+    () =>
+      resolveViewingSubmission(
+        viewingChapterId,
+        submission,
+        relatedSubmissions,
+        seriesChapters,
+      ),
+    [
+      viewingChapterId,
+      submission,
+      relatedSubmissions,
+      seriesChapters,
+    ],
+  );
+
+  const activeChapterId =
+    viewingSubmission.chapterId ?? viewingSubmission.id ?? submission.id;
 
   useEffect(() => {
     setDraft(createReviewDraft(submission));
@@ -215,12 +258,66 @@ export function TantouChapterReviewDashboard({
     setChapterPagesMeta(submission.pagesMeta ?? []);
     setPageDetailsByIndex({});
     setNotesByPage({});
+    setSeriesChapters([]);
   }, [submission.id]);
+
+  /** Lấy toàn bộ chapter theo series (profile TE → fallback /series/:id/chapters) */
+  useEffect(() => {
+    const seriesId = resolvedSeriesId;
+    if (!seriesId) {
+      setSeriesChapters([]);
+      setSeriesChaptersLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setSeriesChaptersLoading(true);
+
+    async function loadSeriesChapters() {
+      let chapters: SeriesProfileChapter[] = [];
+
+      try {
+        const profileRes = await teReviewsService.getSeriesProfile(seriesId);
+        if (cancelled) return;
+        chapters = normalizeTeSeriesChapters(
+          Array.isArray(profileRes?.chapters) ? profileRes.chapters : [],
+        );
+      } catch {
+        // fallback bên dưới
+      }
+
+      if (!chapters.length && !cancelled) {
+        try {
+          const res = await seriesService.getChapters(seriesId);
+          if (cancelled) return;
+          chapters = normalizeTeSeriesChapters(
+            Array.isArray(res?.chapters) ? res.chapters : [],
+          );
+        } catch {
+          chapters = [];
+        }
+      }
+
+      if (!cancelled) {
+        setSeriesChapters(chapters);
+        setSeriesChaptersLoading(false);
+      }
+    }
+
+    void loadSeriesChapters();
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedSeriesId]);
 
   useEffect(() => {
     let cancelled = false;
-    const chapterId = submission.chapterId ?? submission.id;
+    const chapterId = activeChapterId;
     if (!chapterId) return;
+
+    setChapterPagesMeta([]);
+    setPageDetailsByIndex({});
+    setNotesByPage({});
 
     function applyLoadedPages(
       pages: NonNullable<TantouSubmission["pagesMeta"]>,
@@ -234,6 +331,8 @@ export function TantouChapterReviewDashboard({
         details[index] = buildPageDetail(page, index);
         if (Array.isArray(page.annotations) && page.annotations.length) {
           initialNotes[index] = mapApiAnnotationsToPageNotes(page.annotations);
+        } else {
+          initialNotes[index] = [];
         }
       });
 
@@ -245,9 +344,7 @@ export function TantouChapterReviewDashboard({
       }
 
       setPageDetailsByIndex(details);
-      if (Object.keys(initialNotes).length) {
-        setNotesByPage((current) => ({ ...current, ...initialNotes }));
-      }
+      setNotesByPage((current) => ({ ...current, ...initialNotes }));
     }
 
     async function loadAllChapterPages() {
@@ -297,11 +394,11 @@ export function TantouChapterReviewDashboard({
     return () => {
       cancelled = true;
     };
-  }, [submission.id, submission.chapterId]);
+  }, [activeChapterId]);
 
   useEffect(() => {
     let cancelled = false;
-    const chapterId = submission.chapterId ?? submission.id;
+    const chapterId = activeChapterId;
     if (!chapterId) return;
 
     const pageMeta = chapterPagesMeta[viewingPageIndex];
@@ -432,8 +529,7 @@ export function TantouChapterReviewDashboard({
       cancelled = true;
     };
   }, [
-    submission.id,
-    submission.chapterId,
+    activeChapterId,
     viewingPageIndex,
     chapterPagesMeta,
     pageDetailsByIndex,
@@ -441,6 +537,12 @@ export function TantouChapterReviewDashboard({
   ]);
 
   const chapterRows: ChapterRow[] = useMemo(() => {
+    if (seriesChapters.length) {
+      return buildChapterRowsFromSeriesProfile(
+        seriesChapters,
+        relatedSubmissions,
+      );
+    }
     return groupSubmissionsByChapter(
       relatedSubmissions,
       submission.seriesTitle,
@@ -451,25 +553,24 @@ export function TantouChapterReviewDashboard({
       releaseDate: formatReleaseDate(group.sentAt),
       status: group.status,
     }));
-  }, [relatedSubmissions, submission.seriesTitle]);
+  }, [seriesChapters, relatedSubmissions, submission.seriesTitle]);
 
-  const viewingSubmission = useMemo(() => {
-    if (!viewingChapterId) return null;
-    const base =
-      relatedSubmissions.find((s) => s.id === viewingChapterId) ?? submission;
-    if (base.id !== submission.id) return base;
-    return {
-      ...base,
-      pagesMeta: chapterPagesMeta.length ? chapterPagesMeta : base.pagesMeta,
-    };
-  }, [viewingChapterId, relatedSubmissions, submission, chapterPagesMeta]);
+  const viewingSubmissionWithPages = useMemo(
+    () => ({
+      ...viewingSubmission,
+      pagesMeta: chapterPagesMeta.length
+        ? chapterPagesMeta
+        : viewingSubmission.pagesMeta,
+    }),
+    [viewingSubmission, chapterPagesMeta],
+  );
 
   const storyPages = useMemo(() => {
-    if (!viewingSubmission) return [];
+    if (!viewingSubmissionWithPages) return [];
 
     const summary = chapterPagesMeta.length
       ? chapterPagesMeta
-      : (viewingSubmission.pagesMeta ?? []);
+      : (viewingSubmissionWithPages.pagesMeta ?? []);
 
     if (summary.length) {
       return summary.map((page, index) => ({
@@ -495,31 +596,36 @@ export function TantouChapterReviewDashboard({
       ];
     }
 
-    return resolveStoryPagesForChapter(viewingSubmission, relatedSubmissions);
+    return resolveStoryPagesForChapter(
+      viewingSubmissionWithPages,
+      relatedSubmissions,
+    );
   }, [
     chapterPagesMeta,
     pageDetailsByIndex,
     relatedSubmissions,
     viewingPageIndex,
-    viewingSubmission,
+    viewingSubmissionWithPages,
   ]);
 
   const currentStoryPage = storyPages[viewingPageIndex] ?? storyPages[0];
-  const canEditNotes =
-    !!viewingSubmission && isSameChapter(viewingSubmission, submission);
+  const canEditNotes = !!viewingSubmissionWithPages;
 
   useEffect(() => {
-    if (!viewingSubmission) return;
+    if (!viewingSubmissionWithPages) return;
     setViewingPageIndex(
-      isSameChapter(viewingSubmission, submission)
+      isSameChapter(viewingSubmissionWithPages, submission)
         ? (submission.pageIndex ?? 0)
         : 0,
     );
-  }, [viewingSubmission?.id, submission]);
+  }, [viewingSubmissionWithPages?.id, submission]);
 
   function handleOpenChapter(id: string) {
     setViewingChapterId(id);
-    onSelectChapter(id);
+    const inQueue = relatedSubmissions.some(
+      (s) => String(s.id) === id || String(s.chapterId) === id,
+    );
+    if (inQueue) onSelectChapter(id);
     setViewingPageIndex(0);
     requestAnimationFrame(() => {
       readerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -532,17 +638,32 @@ export function TantouChapterReviewDashboard({
   }
 
   function buildPayload(): ReviewSavePayload {
-    const primaryPageIndex = submission.pageIndex ?? 0;
+    const target = viewingSubmissionWithPages;
+    const primaryPageIndex = target.pageIndex ?? 0;
+    const chapterApiStatus =
+      target.apiChapterStatus
+      ?? seriesChapters.find(
+        (ch) => String(ch._id ?? ch.id) === String(target.chapterId ?? target.id),
+      )?.status
+      ?? "";
+    const publishOnly =
+      !requiresEbSubmit && isChapterAwaitingTePublish(chapterApiStatus);
+
     return {
       ...draft,
+      chapter_id: target.chapterId ?? target.id,
+      chapter_number: String(target.chapterNum ?? ""),
+      chapter_title: String(target.chapterTitle ?? ""),
       averageScore: 0,
-      coverImageUrl: draft.series_cover_image_url || submission.mangakaImageUrl,
+      coverImageUrl: draft.series_cover_image_url || target.mangakaImageUrl,
       editorialNotes:
         notesByPage[primaryPageIndex] ?? draft.editorialNotes ?? [],
       editorialNotesByPage: notesByPage,
       pagesMeta: chapterPagesMeta.length
         ? chapterPagesMeta
-        : submission.pagesMeta,
+        : target.pagesMeta,
+      chapterApiStatus,
+      publishOnly,
     };
   }
 
@@ -554,8 +675,72 @@ export function TantouChapterReviewDashboard({
   }
 
   const coverPreviewUrl = resolveMediaUrl(draft.series_cover_image_url);
-  const requiresEbSubmit =
-    submission.pipeline !== "recurring" && !submission.seriesMeta?.ebApproved;
+  const requiresEbSubmit = isTeSeriesLevelSubmission(submission);
+  const publishOnlyMode =
+    !requiresEbSubmit
+    && isChapterAwaitingTePublish(
+      viewingSubmissionWithPages.apiChapterStatus
+      ?? seriesChapters.find(
+        (ch) =>
+          String(ch._id ?? ch.id)
+          === String(viewingSubmissionWithPages.chapterId ?? viewingSubmissionWithPages.id),
+      )?.status,
+    );
+
+  useEffect(() => {
+    const seriesId = resolvedSeriesId;
+    if (!seriesId || !isTeSeriesLevelSubmission(submission)) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadSeriesReviewContext() {
+      try {
+        const [reviewRes, profileRes] = await Promise.all([
+          teReviewsService.getSeriesReview(seriesId).catch(() => null),
+          teReviewsService.getSeriesProfile(seriesId).catch(() => null),
+        ]);
+        if (cancelled) return;
+
+        const review = reviewRes?.review ?? reviewRes ?? null;
+        const series = profileRes?.series ?? profileRes ?? null;
+
+        setDraft((current) => ({
+          ...current,
+          ...(review?.feedback
+            ? { reviewText: String(review.feedback) }
+            : {}),
+          ...(review?.quick_notes
+            ? { quickNotes: String(review.quick_notes) }
+            : {}),
+          ...(review?.revision_feedback
+            ? { revisionFeedback: String(review.revision_feedback) }
+            : {}),
+          ...(series?.name ? { series_name: String(series.name) } : {}),
+          ...(series?.synopsis
+            ? { series_synopsis: String(series.synopsis) }
+            : {}),
+          ...(Array.isArray(series?.genre) && series.genre.length
+            ? { series_genre: series.genre }
+            : {}),
+          ...(Array.isArray(series?.tags) && series.tags.length
+            ? { series_tags: series.tags }
+            : {}),
+          ...(series?.cover_image_url
+            ? { series_cover_image_url: String(series.cover_image_url) }
+            : {}),
+        }));
+      } catch {
+        // giữ draft hiện tại
+      }
+    }
+
+    void loadSeriesReviewContext();
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedSeriesId, submission.tabType, submission.phase, submission.pipeline]);
 
   return (
     <div className="space-y-6 dark:text-zinc-100">
@@ -572,14 +757,14 @@ export function TantouChapterReviewDashboard({
             {draft.series_name || submission.seriesTitle}
           </h1>
           <p className="text-sm text-muted-foreground">
-            Ch. {submission.chapterNum} · {submission.pageLabel} ·{" "}
-            {submission.mangakaName}
+            Ch. {viewingSubmissionWithPages.chapterNum} ·{" "}
+            {viewingSubmissionWithPages.pageLabel} · {submission.mangakaName}
           </p>
         </div>
         <Badge
-          variant={submission.pipeline === "debut" ? "destructive" : "secondary"}
+          variant={requiresEbSubmit ? "destructive" : "secondary"}
         >
-          {submission.pipeline === "debut" ? "Debut" : "Chapter"}
+          {tePhaseLabel(submissionTeTabType(submission))}
         </Badge>
       </header>
 
@@ -659,25 +844,26 @@ export function TantouChapterReviewDashboard({
 
           <ChapterListTable
             rows={chapterRows}
-            activeId={submission.id}
-            viewingId={viewingChapterId}
+            activeId={activeChapterId}
+            viewingId={viewingChapterId ?? activeChapterId}
+            loading={seriesChaptersLoading}
             onOpen={handleOpenChapter}
           />
         </div>
 
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(340px,420px)] xl:items-stretch xl:gap-8">
           <div className="flex min-h-0 flex-col">
-            {viewingSubmission ? (
+            {viewingSubmissionWithPages ? (
               <TantouPageAnnotator
                 ref={readerRef}
-                submission={viewingSubmission}
+                submission={viewingSubmissionWithPages}
                 storyPages={storyPages}
                 currentPageIndex={viewingPageIndex}
                 onPageIndexChange={handlePageIndexChange}
                 pageLabel={currentStoryPage?.pageLabel}
                 pageImageUrl={currentStoryPage?.imageUrl}
                 mangakaNotes={getMangakaNotesForStoryPage(
-                  viewingSubmission,
+                  viewingSubmissionWithPages,
                   viewingPageIndex,
                 )}
                 editorialNotes={notesByPage[viewingPageIndex] ?? []}
@@ -699,11 +885,24 @@ export function TantouChapterReviewDashboard({
             <ReviewRatingPanel
               draft={draft}
               requiresEbSubmit={requiresEbSubmit}
+              publishOnlyMode={publishOnlyMode}
+              saving={saving}
               onReviewTextChange={(text) =>
                 setDraft((c) => ({ ...c, reviewText: text }))
               }
+              onQuickNotesChange={(text) =>
+                setDraft((c) => ({ ...c, quickNotes: text }))
+              }
+              onRevisionFeedbackChange={(text) =>
+                setDraft((c) => ({ ...c, revisionFeedback: text }))
+              }
               onStatusChange={(reviewStatus) =>
                 setDraft((c) => ({ ...c, reviewStatus }))
+              }
+              onSaveDraft={
+                requiresEbSubmit
+                  ? () => onSaveReview(buildPayload(), { saveDraftOnly: true })
+                  : undefined
               }
               onSendToMangaka={() =>
                 onSaveReview(buildPayload(), { submitAction: "reject" })

@@ -53,7 +53,141 @@ const LEGACY_SCORE_KEYS = {
   overall: 'pacing_climax',
 }
 
-/** Chuẩn hóa item từ GET /eb-evaluations/pending (hoặc chapter-pending) */
+/** Chuẩn hóa pages từ BE (image_url). */
+export function mapEbPages(rawPages = []) {
+  return [...(Array.isArray(rawPages) ? rawPages : [])]
+    .sort((a, b) => (a.page_number ?? 0) - (b.page_number ?? 0))
+    .map((p) => ({
+      id: resolveEntityId(p._id ?? p.id),
+      pageNumber: Number(p.page_number ?? 0) || 0,
+      imageUrl: resolveMediaUrl(
+        p.image_url ?? p.url ?? p.final_image_url ?? p.result_image_url,
+      ),
+      status: p.status ?? '',
+    }))
+    .filter((p) => p.imageUrl)
+}
+
+/** Item từ GET /eb-evaluations/pending — mỗi phần tử là 1 Series (summary). */
+export function mapEbSeriesPendingItem(raw) {
+  if (!raw) return null
+
+  const seriesId = resolveEntityId(raw._id ?? raw.id)
+  if (!seriesId) return null
+
+  const author =
+    raw.author_id && typeof raw.author_id === 'object' ? raw.author_id : {}
+  const firstRef = raw.first_pending_chapter ?? raw.first_chapter ?? null
+  const firstChapterId = firstRef
+    ? resolveEntityId(firstRef._id ?? firstRef.id)
+    : ''
+
+  return {
+    id: seriesId,
+    seriesId,
+    name: raw.name ?? 'Series',
+    seriesName: raw.name ?? 'Series',
+    coverUrl: resolveMediaUrl(raw.cover_image_url),
+    synopsis: String(raw.synopsis ?? '').trim(),
+    genre: Array.isArray(raw.genre) ? raw.genre.filter(Boolean) : [],
+    tags: Array.isArray(raw.tags) ? raw.tags.filter(Boolean) : [],
+    status: raw.status ?? 'pending_EB',
+    publicationSchedule: raw.publication_schedule ?? null,
+    mangakaName: author.full_name ?? author.username ?? '',
+    councilAverage: raw.council_average ?? null,
+    classification: raw.classification ?? null,
+    classificationText: raw.classification_text ?? raw.classificationText ?? '',
+    evaluationId: resolveEntityId(raw.evaluation_id),
+    evaluationStatus: raw.evaluation_status ?? null,
+    evaluationLocked: Boolean(raw.evaluation_locked),
+    firstChapter: firstChapterId
+      ? {
+          id: firstChapterId,
+          chapterNumber: firstRef.chapter_number ?? firstRef.chapterNumber,
+          title: firstRef.title ?? '',
+          updatedAt: firstRef.updatedAt ?? firstRef.updated_at ?? null,
+        }
+      : null,
+    previewImageUrl: resolveMediaUrl(raw.cover_image_url),
+    raw,
+  }
+}
+
+/** GET /eb-evaluations/series/:id/detail */
+export function mapEbSeriesDetailResponse(data) {
+  if (!data || typeof data !== 'object') return null
+
+  const seriesRaw = data.series ?? {}
+  const series = mapEbSeriesPendingItem(seriesRaw) ?? {
+    id: resolveEntityId(seriesRaw._id),
+    seriesId: resolveEntityId(seriesRaw._id),
+    name: seriesRaw.name ?? 'Series',
+    seriesName: seriesRaw.name ?? 'Series',
+  }
+
+  const firstChapterRaw = data.first_chapter ?? null
+  const firstChapterId = firstChapterRaw
+    ? resolveEntityId(firstChapterRaw._id ?? firstChapterRaw.id)
+    : ''
+  const firstChapterPages = mapEbPages(firstChapterRaw?.pages)
+
+  const pendingChapters = (Array.isArray(data.pending_chapters)
+    ? data.pending_chapters
+    : []
+  ).map((ch) => ({
+    id: resolveEntityId(ch._id ?? ch.id),
+    chapterNumber: ch.chapter_number ?? ch.chapterNumber,
+    title: ch.title ?? '',
+    status: ch.status ?? 'pending_EB',
+    updatedAt: ch.updatedAt ?? ch.updated_at ?? null,
+  })).filter((ch) => ch.id)
+
+  return {
+    series,
+    firstChapter: firstChapterId
+      ? {
+          id: firstChapterId,
+          chapterNumber:
+            firstChapterRaw.chapter_number ?? firstChapterRaw.chapterNumber,
+          title: firstChapterRaw.title ?? '',
+          status: firstChapterRaw.status ?? 'pending_EB',
+          pages: firstChapterPages,
+        }
+      : null,
+    pendingChapters,
+    evaluation: data.evaluation ?? null,
+  }
+}
+
+/** GET /eb-scores/chapter/:id/preview */
+export function mapEbChapterPreviewResponse(data) {
+  if (!data || typeof data !== 'object') return null
+
+  const chapterRaw = data.chapter ?? {}
+  const seriesRaw = data.series ?? {}
+  const submittedBy =
+    data.submitted_by && typeof data.submitted_by === 'object'
+      ? data.submitted_by
+      : {}
+
+  const chapterId = resolveEntityId(chapterRaw._id ?? chapterRaw.id)
+  if (!chapterId) return null
+
+  return {
+    id: chapterId,
+    chapterId,
+    chapterNumber: chapterRaw.chapter_number ?? chapterRaw.chapterNumber,
+    title: chapterRaw.title ?? '',
+    status: chapterRaw.status ?? 'pending_EB',
+    seriesId: resolveEntityId(seriesRaw._id ?? seriesRaw.id),
+    seriesName: seriesRaw.name ?? '',
+    seriesCoverUrl: resolveMediaUrl(seriesRaw.cover_image_url),
+    mangakaName: submittedBy.full_name ?? submittedBy.username ?? '',
+    pages: mapEbPages(data.pages),
+  }
+}
+
+/** Chuẩn hóa item từ GET /eb-evaluations/pending (legacy chapter-centric) */
 export function mapEbChapterPendingItem(raw) {
   if (!raw) return null
 
@@ -256,9 +390,10 @@ export function buildMemberScoresPayload({
   return rows
 }
 
-export function validateMemberScoresPayload(memberScores) {
-  if (!Array.isArray(memberScores) || memberScores.length < EB_COUNCIL_SIZE) {
-    return `Cần đủ ${EB_COUNCIL_SIZE} thành viên Hội đồng trước khi gửi đánh giá.`
+export function validateMemberScoresPayload(memberScores, requiredCount = EB_COUNCIL_SIZE) {
+  const minCount = Math.max(1, Number(requiredCount) || EB_COUNCIL_SIZE)
+  if (!Array.isArray(memberScores) || memberScores.length < minCount) {
+    return `Cần đủ ${minCount} thành viên Hội đồng trước khi gửi đánh giá.`
   }
 
   for (const row of memberScores) {
@@ -315,22 +450,88 @@ export function normalizeEbEvaluateResponse(res) {
   }
 }
 
-/** Map GET /eb-evaluations/chapter/:id */
+/** Gộp preview + series detail — thay GET /eb-evaluations/chapter/:id (404). */
+export function buildEbChapterDetailPayload({ preview, seriesDetail, chapterId }) {
+  const cid = resolveEntityId(chapterId)
+  const chapterRaw = preview?.chapter && typeof preview.chapter === 'object'
+    ? preview.chapter
+    : {}
+  const seriesRaw = seriesDetail?.series ?? preview?.series ?? {}
+  const evaluation = seriesDetail?.evaluation ?? null
+
+  const pendingMatch = (Array.isArray(seriesDetail?.pending_chapters)
+    ? seriesDetail.pending_chapters
+    : []
+  ).find((ch) => resolveEntityId(ch) === cid)
+
+  const firstChapter =
+    resolveEntityId(seriesDetail?.first_chapter) === cid
+      ? seriesDetail.first_chapter
+      : null
+
+  const chapter = {
+    ...chapterRaw,
+    _id: cid || resolveEntityId(chapterRaw._id ?? chapterRaw.id),
+    chapter_number:
+      chapterRaw.chapter_number
+      ?? chapterRaw.chapterNumber
+      ?? pendingMatch?.chapter_number
+      ?? firstChapter?.chapter_number,
+    title: chapterRaw.title ?? pendingMatch?.title ?? firstChapter?.title ?? '',
+    status:
+      chapterRaw.status
+      ?? pendingMatch?.status
+      ?? firstChapter?.status
+      ?? 'pending_EB',
+    pages: chapterRaw.pages ?? firstChapter?.pages,
+  }
+
+  return {
+    chapter,
+    series: seriesRaw,
+    evaluation,
+    evaluation_history: evaluation ? [evaluation] : [],
+    council_average: evaluation?.council_average ?? null,
+    classification: evaluation?.classification ?? null,
+    classification_text: evaluation?.classification_text ?? '',
+  }
+}
+
+/** Map chapter context từ preview + GET /eb-evaluations/series/:id/detail */
 export function mapEbChapterDetailResponse(data) {
   if (!data || typeof data !== 'object') return null
+  const evaluation = data.evaluation ?? null
+  const evaluationHistory = Array.isArray(data.evaluation_history)
+    ? data.evaluation_history
+    : evaluation
+      ? [evaluation]
+      : []
+  const latestEval = evaluationHistory.at(-1) ?? evaluation
+
   const chapterRaw = data.chapter ?? data
   const seriesRaw = data.series ?? chapterRaw?.series_id ?? {}
   const chapter = mapEbChapterPendingItem({
     ...chapterRaw,
     series_id: seriesRaw,
+    council_average:
+      data.council_average
+      ?? latestEval?.council_average
+      ?? chapterRaw.council_average,
+    classification:
+      data.classification
+      ?? latestEval?.classification
+      ?? chapterRaw.classification,
+    classification_text:
+      data.classification_text
+      ?? latestEval?.classification_text
+      ?? chapterRaw.classification_text,
+    evaluation_id: latestEval?._id ?? latestEval?.id ?? data.evaluation_id,
   })
   if (!chapter) return null
   return {
     ...chapter,
     seriesDetail: seriesRaw,
-    evaluationHistory: Array.isArray(data.evaluation_history)
-      ? data.evaluation_history
-      : [],
+    evaluationHistory,
   }
 }
 

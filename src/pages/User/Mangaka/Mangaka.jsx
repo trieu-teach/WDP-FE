@@ -54,7 +54,6 @@ import ChapterAnnotator from "./ChapterAnnotator.jsx";
 import AddSeriesModal from "./AddSeriesModal.jsx";
 import MangakaAssistants from "./MangakaAssistants.jsx";
 import { seriesPath } from "./SeriesUploadDetail.jsx";
-import { ImageCompareGrid } from "@/components/layout/ImageCompareGrid.jsx";
 import { ChapterPipeline } from "@/components/layout/ChapterPipeline.jsx";
 import {
   LABEL_EDITOR_BOARD,
@@ -71,11 +70,16 @@ import {
 import { resolveAnnotatorChapter } from "@/utils/mangakaWorkspaceReader.js";
 import { useMangakaWorkspace } from "@/hooks/useMangakaWorkspace.js";
 import { getApiErrorMessage, resolveMediaUrl } from "@/api/http.js";
-import { tasksService } from "@/api/tasks.service.js";
 import { chaptersService } from "@/api/chapters.service.js";
 import { submissionsService } from "@/api/submissions.service.js";
-import { uiNoteToTaskCreate, uiChapterToTaskCreate, apiTaskToUi, uiTaskTypeToErrorType } from "@/utils/apiMappers.js";
+import { tasksService } from "@/api/tasks.service.js";
+import { uiNoteToTaskCreate, uiChapterToTaskCreate, uiTaskTypeToErrorType, canMangakaSendToTe, chapterPagesToCompareUrls, apiTaskToUi } from "@/utils/apiMappers.js";
 import { useMangakaTasks } from "@/hooks/useMangakaTasks.js";
+import { dedupeTasksByPage } from "@/utils/chapterTaskFlow.js";
+import {
+  mangakaTeSubmitMessage,
+  resolveTePhase,
+} from "@/utils/teReviewPhase.js";
 import { useMangakaCooperation } from "@/hooks/useMangakaCooperation.js";
 import {
   formatSeriesCardLine,
@@ -109,6 +113,11 @@ const STATUS_BADGE = {
     label: "Chờ duyệt",
     className:
       "bg-amber-100 text-amber-700 hover:bg-amber-100 dark:bg-amber-500/15 dark:text-amber-400",
+  },
+  approved: {
+    label: "Đã duyệt",
+    className:
+      "bg-emerald-100 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400",
   },
   tantou: {
     label: `Chờ ${LABEL_TANTOU_EDITOR}`,
@@ -412,10 +421,9 @@ export default function Mangaka() {
 
   const {
     pendingReviews,
-    loading: tasksLoading,
+    teReadyChapters,
     refresh: refreshMangakaTasks,
     requestRevision,
-    acknowledgeTask,
   } = useMangakaTasks(chapterRows);
 
   const { assignees: hiredAssistants } = useMangakaCooperation();
@@ -431,10 +439,6 @@ export default function Mangaka() {
   const [annotatorPagesPerChapter, setAnnotatorPagesPerChapter] = useState("");
   const [annotatorUploadPageBudget, setAnnotatorUploadPageBudget] = useState("");
   const [ebApprovedTick, setEbApprovedTick] = useState(0);
-  const [revisionOpen, setRevisionOpen] = useState(false);
-  const [revisionNote, setRevisionNote] = useState("");
-  const [revisionBusy, setRevisionBusy] = useState(false);
-  const [ackBusy, setAckBusy] = useState(false);
 
   // TE assignment — luồng mới
   const [teUsers, setTeUsers] = useState([]);          // danh sách TE active
@@ -443,6 +447,12 @@ export default function Mangaka() {
   const [selectedTeId, setSelectedTeId] = useState(null);      // TE đã chọn cho lastApprovedChapter
   const [teAssigning, setTeAssigning] = useState(false);      // đang gán
   const [teSending, setTeSending] = useState(false);          // đang gửi sang TE
+  const [teSendChapter, setTeSendChapter] = useState(null);   // chapter đang mở dialog gửi TE
+  const [lastApprovedChapter, setLastApprovedChapter] = useState(null);
+
+  const teTargetChapter = teSelectorOpen
+    ? (teSendChapter ?? lastApprovedChapter)
+    : (lastApprovedChapter ?? teSendChapter);
 
   // Load danh sách TE khi mở selector
   useEffect(() => {
@@ -456,55 +466,75 @@ export default function Mangaka() {
     return () => { cancelled = true; };
   }, [teSelectorOpen]);
 
-  /**
-   * Gán TE cho chapter rồi gửi sang TE.
-   * Bước 1: PATCH assign-te
-   * Bước 2: POST submit-to-te
-   *
-   * @param {string|null} teId  — TE được chọn trong dialog
-   */
-  async function handleAssignTeAndSend(teId) {
-    const chapter = lastApprovedChapter ?? pendingCompositeReview
-    if (!chapter) return
-    const chapterId = chapter.id
-    setTeAssigning(true)
-
-    // Bước 0: nếu chapter vẫn ở submitted_by_assistant thì approve trước
-    // (PATCH /approve chỉ chấp nhận draft | pending_assistant | TE_revision | review | submitted_by_assistant)
-    if (chapter.status === 'submitted_by_assistant') {
-      try {
-        await submissionsService.approveChapter(chapterId)
-        chapter.status = 'review'
-      } catch (err) {
-        toast.error(getApiErrorMessage(err, 'Duyệt chapter thất bại.'))
-        setTeAssigning(false)
-        return
-      }
-    }
-
-    try {
-      await submissionsService.assignTe(chapterId, teId)
-      setSelectedTeId(teId)
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, 'Gán TE thất bại.'))
-      setTeAssigning(false)
-      return
-    }
-    setTeAssigning(false);
-
-    // Gửi sang TE
-    setTeSending(true);
-    try {
-      await submissionsService.submitChapterToTe(chapterId);
-      toast.success(
-        `Đã gửi Ch. ${chapter.num} sang ${LABEL_TANTOU_EDITOR}.`,
+  async function verifyChapterPagesReadyForTe(chapterId) {
+    const pages = await loadChapterPages(chapterId, { force: true });
+    const { resultCount, pageCount } = chapterPagesToCompareUrls(pages);
+    if (pageCount > 0 && resultCount < pageCount) {
+      throw new Error(
+        `${pageCount - resultCount} trang chưa có ảnh kết quả từ Assistant.`,
       );
-      setTeSelectorOpen(false);
-      setLastApprovedChapter(null);
+    }
+    return pages;
+  }
+
+  function openTeSelector(chapter) {
+    if (!chapter) return;
+    setTeSendChapter(chapter);
+    setSelectedTeId(chapter.teId ?? chapter.te_id ?? null);
+    setTeSelectorOpen(true);
+  }
+
+  /** Bước 6 — Gán TE (không đổi status chapter). */
+  async function handleAssignTe(teId) {
+    const chapter = teTargetChapter;
+    if (!chapter?.id || !teId) return;
+    setTeAssigning(true);
+    try {
+      const res = await submissionsService.assignTe(chapter.id, teId);
+      setSelectedTeId(teId);
+      toast.success(res.message || "Đã gán TE cho chapter.");
       await refreshMangakaTasks();
       await refreshWorkspace();
     } catch (err) {
-      toast.error(getApiErrorMessage(err, `Gửi sang ${LABEL_TANTOU_EDITOR} thất bại.`));
+      toast.error(getApiErrorMessage(err, "Gán TE thất bại."));
+    } finally {
+      setTeAssigning(false);
+    }
+  }
+
+  /** Bước 7 — Gửi chapter sang TE. teId optional: override hoặc broadcast. */
+  async function handleSubmitToTe(teId) {
+    const chapter = teTargetChapter;
+    if (!chapter?.id) return;
+    const apiStatus = chapter.apiStatus ?? chapter.status;
+    if (!canMangakaSendToTe(apiStatus)) {
+      toast.error("Chapter chưa sẵn sàng gửi TE. Vui lòng duyệt chapter trước.");
+      return;
+    }
+
+    setTeSending(true);
+    try {
+      await verifyChapterPagesReadyForTe(chapter.id);
+      const res = await submissionsService.submitChapterToTe(
+        chapter.id,
+        teId || undefined,
+      );
+      const phase = resolveTePhase({
+        phase: res.phase,
+        seriesStatus: res.seriesInfo?.status,
+      });
+      toast.success(
+        res.message || mangakaTeSubmitMessage(phase),
+      );
+      setTeSelectorOpen(false);
+      setLastApprovedChapter(null);
+      setTeSendChapter(null);
+      await refreshMangakaTasks();
+      await refreshWorkspace();
+    } catch (err) {
+      toast.error(
+        getApiErrorMessage(err, `Gửi sang ${LABEL_TANTOU_EDITOR} thất bại.`),
+      );
     } finally {
       setTeSending(false);
     }
@@ -603,17 +633,6 @@ export default function Mangaka() {
     setCardRevision(null);
   }
 
-  async function handleCardApprove(row, review) {
-    if (!review?.submission?.id && !row?.id) return;
-    // Đảm bảo row có status API để handleAssignTeAndSend biết có cần approve hay không
-    if (!row.status && review?.submission?.status) {
-      row.status = review.submission.status
-    }
-    setLastApprovedChapter(row);
-    setSelectedTeId(null);
-    setTeSelectorOpen(true);
-  }
-
   async function handleCardSendBack() {
     if (!cardRevision) return;
     const { row, review, note } = cardRevision;
@@ -642,75 +661,28 @@ export default function Mangaka() {
     [seriesList, annotateSeries],
   );
 
-  const pendingReview = pendingReviews[0] ?? null;
-  const pendingCompositeReview = pendingReview?.chapter ?? null;
-  const pendingSubmittedTasks = pendingReview?.tasks ?? [];
-  // Flow mới (submission-driven): load lại pages của chapter đang duyệt
-  // để lấy ảnh mới nhất (kết quả Assistant vừa nộp).
-  const pendingResultUrls = useMemo(() => {
-    const urls = []
-    for (const task of pendingSubmittedTasks) {
-      if (Array.isArray(task.resultImageUrls) && task.resultImageUrls.length) {
-        urls.push(...task.resultImageUrls)
-      } else if (task.resultImageUrl) {
-        urls.push(task.resultImageUrl)
-      }
-    }
-    if (urls.length) return urls
-    if (!pendingCompositeReview) return []
-    const list = (annotatorChapters ?? []).find(
-      c => c.id === pendingCompositeReview.id,
-    )
-    return (list?.pages ?? []).map(p => p?.url).filter(Boolean)
-  }, [pendingSubmittedTasks, pendingCompositeReview, annotatorChapters]);
-  const pendingChapterTask = pendingReview?.task ?? null;
-  // Flow mới (submission-driven): tổng hợp thông tin hiển thị từ submission
-  // để UI dùng chung shape với phiên bản cũ (status / revisionNote / revisionHistory).
-  const pendingSubmission = pendingReview?.submission ?? null;
-  const pendingChapterSummary = pendingSubmission
-    ? {
-        id: pendingSubmission.id,
-        status: 'in_review', // Mangaka đã nhận thông tin từ API → luôn ở trạng thái "đã nhận"
-        revisionNote: pendingSubmission.revision_notes ?? '',
-        revisionHistory: Array.isArray(pendingSubmission.revision_history)
-          ? pendingSubmission.revision_history.map((h) => ({
-              at: h.at ?? h.createdAt ?? h.updatedAt ?? pendingSubmission.updatedAt,
-              by: h.by ?? h.requested_by ?? null,
-              note: h.note ?? h.revision_note ?? '',
-            }))
-          : pendingSubmission.revision_notes
-            ? [{ at: pendingSubmission.updatedAt, note: pendingSubmission.revision_notes }]
-            : [],
-      }
-    : null;
-  const pendingChapterView = pendingChapterTask ?? pendingChapterSummary;
-  // Ảnh gốc các trang của chapter đang duyệt (fallback nếu BE không trả diff)
-  const pendingOriginalUrls = useMemo(() => {
-    if (!pendingCompositeReview) return []
-    const list = (annotatorChapters ?? []).find(
-      c => c.id === pendingCompositeReview.id,
-    )
-    return (list?.pages ?? []).map(p => p?.url).filter(Boolean)
-  }, [pendingCompositeReview, annotatorChapters])
-
   // Chapter vừa duyệt xong — dùng để nhắc gửi Tantou
-  const [lastApprovedChapter, setLastApprovedChapter] = useState(null)
   useEffect(() => {
     if (!lastApprovedChapter) return
     const t = window.setTimeout(() => setLastApprovedChapter(null), 60_000)
     return () => window.clearTimeout(t)
   }, [lastApprovedChapter])
 
-  // Khi chapter chờ duyệt thay đổi → load lại pages để lấy ảnh mới nhất (kết quả Assistant nộp).
+  const pendingReviewChapterIds = useMemo(
+    () => (pendingReviews ?? []).map((r) => r?.chapter?.id).filter(Boolean).join("|"),
+    [pendingReviews],
+  );
+
+  // Luồng pages: refresh pages từ BE khi có chapter chờ duyệt (lấy result_image_url mới).
   useEffect(() => {
-    const id = pendingCompositeReview?.id
-    if (!id) return
-    let cancelled = false
-    loadChapterPages(id)
+    if (!pendingReviewChapterIds) return;
+    const ids = pendingReviewChapterIds.split("|").filter(Boolean);
+    let cancelled = false;
+    Promise.all(ids.map((id) => loadChapterPages(id, { force: true })))
       .then(() => { if (cancelled) void 0 })
-      .catch(() => { if (cancelled) void 0 })
-    return () => { cancelled = true }
-  }, [pendingCompositeReview?.id, loadChapterPages])
+      .catch(() => { if (cancelled) void 0 });
+    return () => { cancelled = true };
+  }, [pendingReviewChapterIds, loadChapterPages]);
 
   const seriesRankings = useMemo(() => {
     const titles = new Set(seriesList.map((s) => s.title));
@@ -841,16 +813,35 @@ export default function Mangaka() {
         }
       }
 
-      // Bước 2 — gửi cả chapter (BE tạo Task cho pages từ PageNotes đã lưu ở bước upload)
-      // Gửi kèm assigned_to ở top-level làm backup — BE có thể đọc trực tiếp từ body
-      // hoặc fallback về chapter.assistant_id đã set ở /assign (bước 1).
-      await chaptersService.update(chapter.id, {
-        action: 'submit',
+      // Bước 2 — gửi chapter cho Assistant.
+      // LUỒNG 2: POST /chapters đã tạo 1 task/trang — không gọi action:submit (tránh tạo task trùng).
+      const existingRaw = await tasksService.getByChapter(chapter.id).catch(() => [])
+      const existingTasks = dedupeTasksByPage(
+        (Array.isArray(existingRaw) ? existingRaw : []).map(apiTaskToUi),
+      )
+      const pageIds = new Set(
+        pages.map((p) => String(p.id)).filter(Boolean),
+      )
+      const taskPageIds = new Set(
+        existingTasks.map((t) => String(t.pageId)).filter(Boolean),
+      )
+      const tasksAlreadyCoverPages =
+        pageIds.size > 0 && [...pageIds].every((id) => taskPageIds.has(id))
+
+      const submitPayload = {
         assigned_to: targetAssistantId,
         revision_notes: revisionNotes,
-        // Gửi kèm revision_annotations (có toạ độ) để Assistant hiển thị đúng vị trí
         ...(Object.keys(annotationMap).length > 0 ? { revision_annotations: annotationMap } : {}),
-      })
+      }
+
+      if (tasksAlreadyCoverPages) {
+        await chaptersService.update(chapter.id, submitPayload)
+      } else {
+        await chaptersService.update(chapter.id, {
+          action: 'submit',
+          ...submitPayload,
+        })
+      }
 
       // Bước 3 — cập nhật UI
       await updateChapterStatus(chapter.id, 'assistant')
@@ -914,56 +905,6 @@ export default function Mangaka() {
       notes,
       imageOverride: pageUrl,
     });
-  }
-
-  async function handleApproveChapter() {
-    if (!pendingReview?.chapter) return;
-    const row = pendingReview.chapter;
-    if (!row.status && pendingReview.submission?.status) {
-      row.status = pendingReview.submission.status;
-    }
-    setLastApprovedChapter(row);
-    setSelectedTeId(null);
-    setTeSelectorOpen(true);
-  }
-
-  async function handleAcknowledgeTask() {
-    if (!pendingChapterTask?.id) return;
-    if (pendingChapterTask.status !== 'submitted') return;
-    setAckBusy(true);
-    try {
-      await acknowledgeTask(pendingChapterTask.id);
-      toast.success(`Đã nhận task chương ${pendingReview.chapter.num} — đang kiểm duyệt.`);
-      await refreshMangakaTasks();
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, 'Nhận task thất bại.'));
-    } finally {
-      setAckBusy(false);
-    }
-  }
-
-  async function handleConfirmChapterRevision() {
-    if (!pendingReview?.chapter) return;
-    setRevisionBusy(true);
-    try {
-      const note =
-        revisionNote.trim()
-        || "Mangaka yêu cầu chỉnh sửa — xem ghi chú trên từng trang.";
-      await requestRevision([pendingReview], note);
-      await updateChapterStatus(pendingReview.chapter.id, "assistant");
-      setRevisionOpen(false);
-      setRevisionNote("");
-      toast.success(
-        "Đã trả chapter cho Assistant. Thêm ghi chú trên trang cần sửa rồi bấm Gửi cả chapter.",
-      );
-      openAnnotate(pendingReview.chapter.series, pendingReview.chapter.id);
-      await refreshMangakaTasks();
-      await refreshWorkspace();
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, "Gửi yêu cầu sửa thất bại."));
-    } finally {
-      setRevisionBusy(false);
-    }
   }
 
   const tantouRevisions = useMemo(
@@ -1199,7 +1140,7 @@ export default function Mangaka() {
         className="from-rose-950 to-zinc-950"
         label="Mangaka Workspace"
         title={`Xin chào${user?.name ? `, ${user.name.split(" ")[0]}` : ""}`}
-        description={`Tạo hồ sơ giới thiệu & nộp bản thảo lên ${LABEL_EDITOR_BOARD} · đánh dấu vùng giao việc cho Assistant · duyệt bản tổng hợp ngay trên trang.`}
+        description={`Tạo hồ sơ giới thiệu & nộp bản thảo lên ${LABEL_EDITOR_BOARD} · upload chapter & ghi chú cho Assistant · duyệt bản tổng hợp tại trang riêng.`}
       >
         <div className="mt-6 flex flex-wrap gap-3">
           <Button
@@ -1217,6 +1158,21 @@ export default function Mangaka() {
           >
             <Upload className="size-4" />
             Upload chapter
+          </Button>
+          <Button
+            variant="outline"
+            className="border-white/20 bg-white/5 text-white hover:bg-white/10 hover:text-white"
+            asChild
+          >
+            <Link to="/mangaka/review">
+              <ClipboardCheck className="size-4" />
+              Duyệt bản Assistant
+              {pendingReviews.length > 0 ? (
+                <Badge className="ml-1 bg-amber-500 text-white hover:bg-amber-500">
+                  {pendingReviews.length}
+                </Badge>
+              ) : null}
+            </Link>
           </Button>
           <Button
             variant="outline"
@@ -1243,7 +1199,7 @@ export default function Mangaka() {
           </div>
         ) : null}
 
-        <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+        <div className={cn("grid gap-6", tab !== "annotate" && "lg:grid-cols-[1fr_320px]")}>
           <div>
             <Tabs value={tab} onValueChange={setTab}>
               <TabsList className="mb-5 h-auto flex-wrap">
@@ -1256,6 +1212,24 @@ export default function Mangaka() {
                     </TabsTrigger>
                   );
                 })}
+                <Link
+                  to="/mangaka/review"
+                  className={cn(
+                    "inline-flex h-9 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium whitespace-nowrap transition-colors",
+                    "text-muted-foreground hover:bg-muted hover:text-foreground",
+                  )}
+                >
+                  <ClipboardCheck className="size-4" />
+                  Duyệt bản Assistant
+                  {pendingReviews.length > 0 ? (
+                    <Badge
+                      variant="secondary"
+                      className="h-5 min-w-5 justify-center px-1.5 text-[10px]"
+                    >
+                      {pendingReviews.length}
+                    </Badge>
+                  ) : null}
+                </Link>
               </TabsList>
 
               <TabsContent value="series" className="space-y-4">
@@ -1356,18 +1330,9 @@ export default function Mangaka() {
                             {groupChapters.map((c) => {
                               const annot = resolveAnnotatorChapter(c, annotatorChapters);
                               const review = pendingReviewByChapter.get(String(c.id));
-                              const submittedTasks = review?.tasks ?? [];
-                              const submittedTask = review?.task ?? null;
-                              // Ảnh assistant đã gửi: ưu tiên mảng resultImageUrls, fallback 1 ảnh resultImageUrl
-                              const resultUrls = [];
-                              for (const t of submittedTasks) {
-                                if (Array.isArray(t?.resultImageUrls) && t.resultImageUrls.length) {
-                                  resultUrls.push(...t.resultImageUrls);
-                                } else if (t?.resultImageUrl) {
-                                  resultUrls.push(t.resultImageUrl);
-                                }
-                              }
-                              const hasSubmittedImages = resultUrls.length > 0;
+                              const pageCompare = chapterPagesToCompareUrls(annot?.pages ?? []);
+                              const resultUrls = pageCompare.results.filter(Boolean);
+                              const hasSubmittedImages = Boolean(review && pageCompare.resultCount > 0);
                               const firstResultUrl = hasSubmittedImages ? resultUrls[0] : null;
                               const originalUrl = annot?.pages?.find(p => p?.url)?.url;
                               // Đã có ảnh assistant → hiện ảnh kết quả làm thumbnail, đánh dấu "đã chỉnh"
@@ -1375,6 +1340,7 @@ export default function Mangaka() {
                               const statusBadge = hasSubmittedImages
                                 ? { label: 'Đã gửi ảnh', className: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400' }
                                 : (STATUS_BADGE[c.status] ?? STATUS_BADGE.draft);
+                              const canSendTe = canMangakaSendToTe(c.apiStatus);
                               return (
                                 <div
                                   key={c.id}
@@ -1429,17 +1395,19 @@ export default function Mangaka() {
                                     </div>
                                   </Link>
 
-                                  {/* Hành động cho chapter đã có ảnh Assistant gửi */}
-                                  {review && submittedTask ? (
+                                  {/* Hành động cho chapter chờ Mangaka duyệt */}
+                                  {review ? (
                                     <div className="flex gap-2 border-t bg-muted/30 px-3 py-2">
                                       <Button
                                         size="xs"
                                         variant="default"
                                         className="flex-1"
-                                        onClick={() => void handleCardApprove(c, review)}
+                                        asChild
                                       >
-                                        <CheckCircle2 className="size-3" />
-                                        Chấp nhận
+                                        <Link to={`/mangaka/review/chapter/${c.id}`}>
+                                          <ClipboardCheck className="size-3" />
+                                          Xem & duyệt
+                                        </Link>
                                       </Button>
                                       <Button
                                         size="xs"
@@ -1449,6 +1417,19 @@ export default function Mangaka() {
                                       >
                                         <Send className="size-3" />
                                         Gửi lại
+                                      </Button>
+                                    </div>
+                                  ) : null}
+                                  {canSendTe ? (
+                                    <div className="border-t bg-sky-50/40 px-3 py-2 dark:bg-sky-500/5">
+                                      <Button
+                                        size="xs"
+                                        variant="secondary"
+                                        className="w-full"
+                                        onClick={() => openTeSelector(c)}
+                                      >
+                                        <Users className="size-3" />
+                                        Gửi cho {LABEL_TANTOU_EDITOR}
                                       </Button>
                                     </div>
                                   ) : null}
@@ -1498,6 +1479,7 @@ export default function Mangaka() {
             </Tabs>
           </div>
 
+          {tab !== "annotate" ? (
           <aside className="space-y-4">
             <Card>
               <CardHeader className="pb-3">
@@ -1566,161 +1548,46 @@ export default function Mangaka() {
               </CardContent>
             </Card>
 
-            {pendingCompositeReview ? (
-              <Card className="border-primary/30 shadow-md">
+            {teReadyChapters.length > 0 ? (
+              <Card className="border-sky-200 bg-sky-50/40 shadow-sm dark:border-sky-500/30 dark:bg-sky-500/5">
                 <CardHeader className="pb-3">
                   <CardTitle className="flex items-center gap-2 text-base">
-                    <ClipboardCheck className="size-4 text-primary" />
-                    Bản tổng hợp từ Assistant
+                    <Users className="size-4 text-sky-600" />
+                    Sẵn sàng gửi {LABEL_TANTOU_EDITOR}
                   </CardTitle>
                   <CardDescription>
-                    <strong className="text-foreground">
-                      {pendingCompositeReview.series}
-                    </strong>{" "}
-                    · Ch. {pendingCompositeReview.num}
+                    {teReadyChapters.length} chapter đã duyệt — chọn TE hoặc gửi cho tất cả.
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge
-                      className={
-                        pendingChapterView?.status === 'in_review'
-                          ? 'bg-sky-100 text-sky-700 hover:bg-sky-100 dark:bg-sky-500/15 dark:text-sky-400'
-                          : STATUS_BADGE.review.className
-                      }
-                      variant="secondary"
+                <CardContent className="space-y-2">
+                  {teReadyChapters.slice(0, 5).map(({ chapter, submission }) => (
+                    <div
+                      key={chapter.id}
+                      className="flex items-center justify-between gap-2 rounded-lg border bg-card px-3 py-2"
                     >
-                      {pendingChapterView?.status === 'in_review' ? 'Đang duyệt' : 'Chờ duyệt'}
-                    </Badge>
-                    {pendingChapterView?.status === 'in_review' ? (
-                      <span className="text-[11px] text-muted-foreground">
-                        Bạn đã nhận task này
-                      </span>
-                    ) : null}
-                  </div>
-
-                  <div className="overflow-hidden rounded-lg border bg-muted">
-                    {pendingResultUrls.length > 0 ? (
-                      <ImageCompareGrid
-                        originals={pendingOriginalUrls}
-                        results={pendingResultUrls}
-                      />
-                    ) : (
-                      <div className="flex flex-col items-center justify-center gap-1 p-6 text-center text-xs text-muted-foreground">
-                        <ImageIcon className="size-6 opacity-40" />
-                        <span>
-                          {tasksLoading
-                            ? "Đang tải chapter từ Assistant..."
-                            : "Chờ Assistant nộp đủ ảnh các trang"}
-                        </span>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">
+                          {chapter.series} · Ch. {chapter.num}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {submission?.status ?? chapter.apiStatus}
+                          {submission?.te_id ? " · đã gán TE" : ""}
+                        </p>
                       </div>
-                    )}
-                  </div>
-
-                  {pendingSubmittedTasks.length > 0 || pendingChapterView ? (
-                    <p className="text-xs text-muted-foreground">
-                      {pendingResultUrls.length} trang kết quả · submission {pendingChapterView?.id ?? ''}
-                      {pendingChapterView?.revisionNote
-                        ? ` · yêu cầu sửa trước: "${pendingChapterView.revisionNote}"`
-                        : ''}
-                    </p>
-                  ) : null}
-
-                  {/* TE info — nếu đã gán TE trong submission */}
-                  {pendingReview?.submission?.te_id ? (
-                    <div className="flex items-center gap-2 rounded-lg border border-sky-200/60 bg-sky-50/40 px-3 py-2 dark:border-sky-500/20 dark:bg-sky-500/5">
-                      <User className="size-3.5 shrink-0 text-sky-600 dark:text-sky-400" />
-                      <span className="text-xs text-sky-700 dark:text-sky-300">
-                        TE đã gán
-                      </span>
                       <Button
                         size="xs"
-                        variant="ghost"
-                        className="ml-auto h-5 px-1.5 text-[10px] text-muted-foreground hover:text-destructive"
-                        onClick={() => void handleRemoveTe(pendingCompositeReview.id)}
+                        onClick={() =>
+                          openTeSelector({
+                            ...chapter,
+                            apiStatus: submission?.status ?? chapter.apiStatus,
+                            te_id: submission?.te_id,
+                          })
+                        }
                       >
-                        Gỡ
+                        Gửi TE
                       </Button>
                     </div>
-                  ) : (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="w-full"
-                      onClick={() => {
-                        setSelectedTeId(null)
-                        setTeSelectorOpen(true)
-                      }}
-                    >
-                      <Users className="size-3.5" />
-                      Chọn {LABEL_TANTOU_EDITOR} và gửi
-                    </Button>
-                  )}
-
-                  {pendingChapterView?.revisionHistory?.length ? (
-                    <div className="rounded-lg border border-amber-200/70 bg-amber-50/40 p-3 text-xs dark:border-amber-500/20 dark:bg-amber-500/5">
-                      <p className="mb-1.5 font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-400">
-                        Lịch sử yêu cầu sửa · {pendingChapterView.revisionHistory.length} lần
-                      </p>
-                      <ol className="space-y-1.5">
-                        {pendingChapterView.revisionHistory.map((h, i) => (
-                          <li key={i} className="flex items-start gap-2 text-foreground/80">
-                            <span className="mt-0.5 size-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden />
-                            <div className="min-w-0 flex-1">
-                              <p className="break-words">{h.note || '(không có ghi chú)'}</p>
-                              {h.at ? (
-                                <p className="text-[10px] text-muted-foreground">
-                                  {new Date(h.at).toLocaleString('vi-VN')}
-                                </p>
-                              ) : null}
-                            </div>
-                          </li>
-                        ))}
-                      </ol>
-                    </div>
-                  ) : null}
-
-                  {pendingChapterView?.status === 'submitted' ? (
-                    <Button
-                      size="sm"
-                      className="w-full"
-                      variant="secondary"
-                      disabled={ackBusy}
-                      onClick={() => void handleAcknowledgeTask()}
-                    >
-                      {ackBusy ? 'Đang nhận task...' : 'Nhận task để duyệt'}
-                    </Button>
-                  ) : null}
-
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      className="flex-1"
-                      onClick={() => void handleApproveChapter()}
-                    >
-                      <CheckCircle2 className="size-3.5" />
-                      Phê duyệt chapter
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="flex-1"
-                      onClick={() => setRevisionOpen(true)}
-                    >
-                      Yêu cầu sửa
-                    </Button>
-                  </div>
-
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="w-full"
-                    disabled={seriesList.length === 0}
-                    onClick={() => openAnnotate(pendingCompositeReview.series)}
-                  >
-                    Mở trên trang
-                    <ArrowRight className="size-3.5" />
-                  </Button>
+                  ))}
                 </CardContent>
               </Card>
             ) : null}
@@ -1747,14 +1614,10 @@ export default function Mangaka() {
                     </Button>
                     <Button
                       size="sm"
-                      onClick={() => {
-                        // Lưu chapter đang chờ để gán TE
-                        setSelectedTeId(null)
-                        setTeSelectorOpen(true)
-                      }}
+                      onClick={() => openTeSelector(lastApprovedChapter)}
                     >
                       <Users className="size-3.5" />
-                      Chọn {LABEL_TANTOU_EDITOR}
+                      Gửi cho {LABEL_TANTOU_EDITOR}
                     </Button>
                   </div>
                 </CardContent>
@@ -1879,43 +1742,11 @@ export default function Mangaka() {
               </Card>
             ) : null}
           </aside>
+          ) : null}
         </div>
       </main>
 
       <Footer />
-
-      <Dialog open={revisionOpen} onOpenChange={setRevisionOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Yêu cầu sửa chapter</DialogTitle>
-            <DialogDescription>
-              Ghi chú chung (tuỳ chọn), sau đó thêm ghi chú trên từng trang chưa đạt
-              rồi <strong>gửi lại cả chapter</strong> cho Assistant.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <Label htmlFor="revision-note">Ghi chú cho Assistant</Label>
-            <Textarea
-              id="revision-note"
-              rows={4}
-              placeholder="VD: Trang 3–5 cần tô bóng lại, trang 7 màu nền chưa khớp..."
-              value={revisionNote}
-              onChange={(e) => setRevisionNote(e.target.value)}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRevisionOpen(false)}>
-              Huỷ
-            </Button>
-            <Button
-              disabled={revisionBusy}
-              onClick={() => void handleConfirmChapterRevision()}
-            >
-              {revisionBusy ? "Đang gửi..." : "Trả chapter & mở ghi chú"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={Boolean(cardRevision)} onOpenChange={(o) => { if (!o) closeCardRevision() }}>
         <DialogContent className="sm:max-w-md">
@@ -1971,9 +1802,9 @@ export default function Mangaka() {
               Chọn {LABEL_TANTOU_EDITOR}
             </DialogTitle>
             <DialogDescription>
-              {lastApprovedChapter
-                ? `Gán TE cho Ch. ${lastApprovedChapter.num} — ${lastApprovedChapter.series} rồi gửi sang duyệt.`
-                : 'Chọn TE để gán cho chapter này.'}
+              {teTargetChapter
+                ? `Ch. ${teTargetChapter.num} — ${teTargetChapter.series}. Chọn TE (tuỳ chọn) rồi gán hoặc gửi. Không chọn TE → gửi cho tất cả TE active.`
+                : "Chọn TE để gán cho chapter này."}
             </DialogDescription>
           </DialogHeader>
 
@@ -2022,16 +1853,36 @@ export default function Mangaka() {
             </div>
           )}
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setTeSelectorOpen(false)} disabled={teAssigning || teSending}>
+          <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-between">
+            <Button
+              variant="outline"
+              onClick={() => setTeSelectorOpen(false)}
+              disabled={teAssigning || teSending}
+            >
               Huỷ
             </Button>
-            <Button
-              disabled={!selectedTeId || teAssigning || teSending || teLoading}
-              onClick={() => void handleAssignTeAndSend(selectedTeId)}
-            >
-              {teAssigning ? 'Đang gán TE...' : teSending ? 'Đang gửi...' : 'Gán và gửi sang TE'}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="secondary"
+                disabled={!selectedTeId || teAssigning || teSending || teLoading}
+                onClick={() => void handleAssignTe(selectedTeId)}
+              >
+                {teAssigning ? "Đang gán..." : "Gán TE"}
+              </Button>
+              <Button
+                variant="outline"
+                disabled={teSending || teLoading}
+                onClick={() => void handleSubmitToTe(null)}
+              >
+                {teSending ? "Đang gửi..." : "Gửi tất cả TE"}
+              </Button>
+              <Button
+                disabled={teSending || teLoading}
+                onClick={() => void handleSubmitToTe(selectedTeId || undefined)}
+              >
+                {teSending ? "Đang gửi..." : selectedTeId ? "Gửi cho TE đã chọn" : "Gửi cho TE"}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

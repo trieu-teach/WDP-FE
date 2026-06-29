@@ -28,8 +28,11 @@ export function readMangakaWorkspace() {
 /** Ghép dòng bảng chapter với phiên upload (ảnh blob / placeholder). */
 export function resolveAnnotatorChapter(chapterRow, annotatorChapters) {
   if (!chapterRow || !Array.isArray(annotatorChapters)) return null
-  const byId = annotatorChapters.find(c => c.id === chapterRow.id)
-  if (byId) return byId
+  const rowId = chapterRow.id != null ? String(chapterRow.id) : null
+  if (rowId) {
+    const byId = annotatorChapters.find((c) => String(c.id) === rowId)
+    if (byId) return byId
+  }
   return annotatorChapters.find(
     c => c.series === chapterRow.series && String(c.num) === String(chapterRow.num),
   ) ?? null

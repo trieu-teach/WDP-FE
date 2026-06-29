@@ -248,7 +248,7 @@ export function usePageLayers(pageId) {
       setFinalImage(url)
       setFinalComposedAt(data?.final_composed_at ?? data?.composedAt ?? res?.final_composed_at ?? new Date().toISOString())
       toast.success('Đã gộp layer thành ảnh hoàn chỉnh.')
-      return res
+      return url
     } catch (err) {
       const msg = getApiErrorMessage(err, 'Không gộp được layer.')
       console.error('[usePageLayers.finalize] error:', err, 'message:', msg)

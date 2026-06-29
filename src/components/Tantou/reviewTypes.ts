@@ -39,8 +39,21 @@ export type TantouSubmission = {
   editorialNotes?: PageNote[];
   editorialNotesByPage?: Record<number, PageNote[]>;
   mangakaName?: string;
+  /** Nhóm pending từ GET /te-reviews/pending */
+  tabType?: "series_level" | "chapter_level";
+  /** Alias — giữ tương thích UI cũ */
+  phase?: "series_level" | "chapter_level";
   pipeline?: "debut" | "recurring";
   status?: string;
+  /** Status gốc từ BE (pending_TE, approved_by_EB, …) */
+  apiChapterStatus?: string;
+  /** TE được gán review chapter (null = chưa ai nhận) */
+  teId?: string | null;
+  teAssignedAt?: string | null;
+  teAssignmentStatus?: "unassigned" | "mine" | "other";
+  teAssignmentLabel?: string;
+  /** false khi chapter.te_id thuộc TE khác */
+  canReview?: boolean;
   sentAt?: string;
   reviewedAt?: string;
   forwardedAt?: string;
@@ -92,6 +105,8 @@ export type ReviewDraft = {
   series_author_id: string;
   series_author_name: string;
   reviewText: string;
+  quickNotes?: string;
+  revisionFeedback?: string;
   reviewStatus: ReviewStatus;
   ratings: ReviewRatings;
   editorialNotes: PageNote[];
@@ -102,6 +117,8 @@ export type ReviewSavePayload = ReviewDraft & {
   coverImageUrl?: string;
   editorialNotesByPage?: Record<number, PageNote[]>;
   pagesMeta?: TantouSubmission["pagesMeta"];
+  chapterApiStatus?: string;
+  publishOnly?: boolean;
 };
 
 export type StoryPage = {

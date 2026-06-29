@@ -12,6 +12,10 @@ export const tasksService = {
     return http.post('/tasks', payload).then(unwrap)
   },
 
+  /**
+   * Assistant — tasks được gán cho user hiện tại.
+   * Filter theo chapter: `?chapter_id=...`
+   */
   getMyAssignments(params) {
     return http.get('/tasks/my-assignments', { params }).then(res => {
       const body = res && typeof res === 'object' ? res : {}
@@ -25,6 +29,22 @@ export const tasksService = {
     })
   },
 
+  /**
+   * Assistant — lấy tasks của 1 chapter (thay cho getByChapter — Mangaka only).
+   */
+  async getAssignmentsByChapter(chapterId, params = {}) {
+    const res = await this.getMyAssignments({
+      chapter_id: chapterId,
+      limit: 100,
+      ...params,
+    })
+    return res.items ?? []
+  },
+
+  /**
+   * Mangaka only — requireMangaka + chapter.submitted_by = current user.
+   * Assistant gọi endpoint này sẽ nhận 403.
+   */
   getByChapter(chapterId) {
     return http.get(`/tasks/chapter/${chapterId}`).then(unwrap)
   },
@@ -33,6 +53,29 @@ export const tasksService = {
     return http.patch(`/tasks/${taskId}/start`).then(unwrap)
   },
 
+  /**
+   * LUỒNG 2 — Bước 6: Assistant gửi URL ảnh kết quả (đã upload Cloudinary / finalize).
+   * PATCH /tasks/:id/upload-result
+   */
+  uploadResult(taskId, resultImageUrl) {
+    return http
+      .patch(`/tasks/${taskId}/upload-result`, {
+        result_image_url: resultImageUrl,
+      })
+      .then(unwrap)
+  },
+
+  /**
+   * LUỒNG 2 — Bước 7: Nộp tất cả task của chapter sau khi đã upload-result từng task.
+   * POST /tasks/chapter/:chapterId/submit-all-by-assistant
+   */
+  submitAllByAssistant(chapterId) {
+    return http
+      .post(`/tasks/chapter/${chapterId}/submit-all-by-assistant`, {})
+      .then(unwrap)
+  },
+
+  /** @deprecated LUỒNG 2 dùng uploadResult + submitAllByAssistant */
   submit(taskId, resultFile) {
     console.debug('[tasksService.submit] taskId=', taskId)
     const fd = new FormData()
@@ -43,14 +86,9 @@ export const tasksService = {
   },
 
   /**
-   * Nộp cả chapter cho Mangaka.
-   * - Nếu có resultFiles: gửi multipart (Assistant vừa upload file mới cho từng page)
-   * - Nếu KHÔNG có resultFiles: chỉ gọi POST — BE tự lấy page.result_image_url (đã qua /finalize)
-   *   hoặc page.original_image_url (page chưa làm) theo priority chain.
-   *
-   * @param {string} chapterId
-   * @param {File[]|null} [resultFiles=null] - ảnh kết quả mới (optional)
-   * @returns {Promise<any>}
+   * Flow B — chỉ cập nhật page.result_image_url + chapter.status.
+   * KHÔNG cập nhật Task. Để nộp chapter chuẩn dùng POST /tasks/:id/submit từng task (Flow A).
+   * @deprecated Cho workflow submit — dùng tasksService.submit() từng task.
    */
   submitChapter(chapterId, resultFiles = null) {
     if (resultFiles && resultFiles.length > 0) {

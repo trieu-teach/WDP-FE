@@ -36,15 +36,57 @@ export function readCouncilSeriesScores(seriesTitle) {
   return readAll()[key] ?? null
 }
 
+/** Danh sách thành viên HĐ đã thêm cho chapter/series đang chấm. */
+export function readCouncilRoster(seriesKey) {
+  const record = readCouncilSeriesScores(seriesKey)
+  if (Array.isArray(record?.roster)) return record.roster
+  return []
+}
+
+export function addCouncilMember(seriesKey, name) {
+  const key = String(seriesKey ?? '').trim()
+  const trimmed = String(name ?? '').trim()
+  if (!key || !trimmed) return null
+
+  const all = readAll()
+  const current = all[key] ?? { members: {}, roster: [] }
+  const roster = Array.isArray(current.roster) ? [...current.roster] : []
+
+  if (roster.some((m) => String(m.name ?? '').trim().toLowerCase() === trimmed.toLowerCase())) {
+    return null
+  }
+
+  const member = {
+    id: `member-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    name: trimmed,
+    title: 'Thành viên HĐ',
+  }
+  roster.push(member)
+  current.roster = roster
+  all[key] = current
+  writeAll(all)
+  return member
+}
+
+function resolveCouncilMembersForChapter(chapterItem) {
+  const key = String(chapterItem?.id ?? '').trim()
+  if (!key) return []
+  return readCouncilRoster(key)
+}
+
 /** Chapter đã chấm đủ Hội đồng (API hoặc localStorage) — ẩn khỏi hàng chờ duyệt. */
 export function isEbChapterFullyScored(chapterItem) {
   if (!chapterItem?.id) return false
 
   if (chapterItem.councilAverage != null) return true
 
+  const councilMembers = resolveCouncilMembersForChapter(chapterItem)
+  const requiredCount = councilMembers.length
+  if (!requiredCount) return false
+
   if (
     Array.isArray(chapterItem.memberScores)
-    && chapterItem.memberScores.length >= EB_COUNCIL_MEMBERS.length
+    && chapterItem.memberScores.length >= requiredCount
   ) {
     return true
   }
@@ -52,11 +94,11 @@ export function isEbChapterFullyScored(chapterItem) {
   const record = readCouncilSeriesScores(chapterItem.id)
   if (!record?.members) return false
 
-  const scoredCount = EB_COUNCIL_MEMBERS.filter(
+  const scoredCount = councilMembers.filter(
     (member) => record.members[member.id]?.scores,
   ).length
 
-  return scoredCount >= EB_COUNCIL_MEMBERS.length
+  return scoredCount >= requiredCount
 }
 
 export function saveCouncilMemberAssessment(seriesTitle, memberId, payload) {
@@ -89,13 +131,14 @@ export function clampCouncilScore(value, max = 5) {
 }
 
 /** DTB từng thành viên + DTB hội đồng (trung bình các thành viên đã chấm). */
-export function buildCouncilAggregate(seriesRecord, scoreFieldKeys) {
+export function buildCouncilAggregate(seriesRecord, scoreFieldKeys, councilMembers = []) {
+  const membersList = Array.isArray(councilMembers) ? councilMembers : []
   const emptyCriterionAverages = Object.fromEntries(
     scoreFieldKeys.map((key) => [key, 0]),
   )
   if (!seriesRecord?.members) {
     return {
-      memberRows: EB_COUNCIL_MEMBERS.map((member) => ({
+      memberRows: membersList.map((member) => ({
         ...member,
         scored: false,
         scores: {},
@@ -109,7 +152,7 @@ export function buildCouncilAggregate(seriesRecord, scoreFieldKeys) {
     }
   }
 
-  const memberRows = EB_COUNCIL_MEMBERS.map((member) => {
+  const memberRows = membersList.map((member) => {
     const entry = seriesRecord.members[member.id]
     if (!entry?.scores) {
       return {

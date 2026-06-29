@@ -8,6 +8,7 @@ type ChapterListTableProps = {
   rows: ChapterRow[];
   activeId: string;
   viewingId: string | null;
+  loading?: boolean;
   onOpen: (id: string) => void;
 };
 
@@ -30,6 +31,7 @@ export function ChapterListTable({
   rows,
   activeId,
   viewingId,
+  loading = false,
   onOpen,
 }: ChapterListTableProps) {
   return (
@@ -62,7 +64,16 @@ export function ChapterListTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-border bg-background/60">
-            {rows.length === 0 ? (
+            {loading ? (
+              <tr>
+                <td
+                  colSpan={5}
+                  className="px-3 py-8 text-center text-muted-foreground"
+                >
+                  Đang tải chapter của truyện…
+                </td>
+              </tr>
+            ) : rows.length === 0 ? (
               <tr>
                 <td
                   colSpan={5}

@@ -182,6 +182,8 @@ export function createReviewDraft(submission: TantouSubmission | null): ReviewDr
       submission?.seriesMeta?.authorName ?? submission?.mangakaName ?? "",
     reviewText:
       submission?.reviewText ?? submission?.editorialComment ?? "",
+    quickNotes: "",
+    revisionFeedback: "",
     reviewStatus: submission?.reviewStatus === "draft"
       ? "publish"
       : (submission?.reviewStatus ?? "publish"),
@@ -284,6 +286,122 @@ export function groupSubmissionsByChapter(
         Number(a.chapterNum) - Number(b.chapterNum) ||
         a.chapterNum.localeCompare(b.chapterNum, "vi"),
     );
+}
+
+export type SeriesProfileChapter = {
+  _id?: string;
+  id?: string;
+  chapter_number?: number;
+  title?: string;
+  status?: string;
+  updatedAt?: string;
+  createdAt?: string;
+  sentAt?: string;
+};
+
+/** Chuẩn hoá chapter từ profile TE hoặc GET /series/:id/chapters */
+export function normalizeTeSeriesChapters(raw: unknown[]): SeriesProfileChapter[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const ch = item as Record<string, unknown>;
+      const id = ch._id ?? ch.id;
+      if (id == null) return null;
+      return {
+        _id: String(id),
+        id: String(id),
+        chapter_number: Number(
+          ch.chapter_number ?? ch.chapterNumber ?? ch.num ?? 0,
+        ) || undefined,
+        title: ch.title != null ? String(ch.title) : undefined,
+        status: ch.status != null ? String(ch.status) : undefined,
+        updatedAt:
+          (ch.updatedAt ?? ch.updated_at ?? ch.submitted_at) as string | undefined,
+        createdAt: (ch.createdAt ?? ch.created_at) as string | undefined,
+        sentAt: (ch.sentAt ?? ch.sent_at ?? ch.submitted_at) as string | undefined,
+      };
+    })
+    .filter((ch): ch is SeriesProfileChapter => ch != null);
+}
+
+export function mapTeProfileChapterStatus(status?: string): string {
+  const value = String(status ?? "").toLowerCase();
+  if (value === "pending_eb") return "forwarded_eb";
+  if (value.includes("publish") || value === "approved") return "approved_publish";
+  if (value.includes("revision")) return "revision";
+  return "pending";
+}
+
+/** Giai đoạn 1 — danh sách chapter từ GET /te-reviews/series/:id/profile */
+export function buildChapterRowsFromSeriesProfile(
+  profileChapters: SeriesProfileChapter[],
+  relatedSubmissions: TantouSubmission[],
+): ChapterRow[] {
+  if (!profileChapters.length) return [];
+
+  const subsByChapterId = new Map<string, TantouSubmission>();
+  for (const sub of relatedSubmissions) {
+    const cid = String(sub.chapterId ?? sub.id);
+    if (cid) subsByChapterId.set(cid, sub);
+  }
+
+  return [...profileChapters]
+    .sort(
+      (a, b) =>
+        Number(a.chapter_number ?? 0) - Number(b.chapter_number ?? 0),
+    )
+    .map((ch, index) => {
+      const chapterId = String(ch._id ?? ch.id ?? "");
+      const sub = subsByChapterId.get(chapterId);
+      return {
+        id: chapterId,
+        index: index + 1,
+        name: `Ch. ${ch.chapter_number ?? ch.title ?? index + 1}`,
+        releaseDate: formatReleaseDate(
+          sub?.sentAt ?? ch.sentAt ?? ch.updatedAt ?? ch.createdAt,
+        ),
+        status: sub?.status ?? mapTeProfileChapterStatus(ch.status),
+      };
+    });
+}
+
+export function resolveViewingSubmission(
+  viewingChapterId: string | null,
+  anchor: TantouSubmission,
+  relatedSubmissions: TantouSubmission[],
+  profileChapters: SeriesProfileChapter[] = [],
+): TantouSubmission {
+  const targetId = viewingChapterId ?? anchor.chapterId ?? anchor.id;
+
+  const fromQueue = relatedSubmissions.find(
+    (s) =>
+      String(s.id) === String(targetId)
+      || String(s.chapterId) === String(targetId),
+  );
+  if (fromQueue) return fromQueue;
+
+  const fromProfile = profileChapters.find(
+    (ch) => String(ch._id ?? ch.id) === String(targetId),
+  );
+  if (fromProfile) {
+    const chapterId = String(fromProfile._id ?? fromProfile.id);
+    return {
+      ...anchor,
+      id: chapterId,
+      chapterId,
+      chapterNum: String(fromProfile.chapter_number ?? ""),
+      chapterTitle: String(fromProfile.title ?? ""),
+      pageIndex: 0,
+      pageLabel: "Trang 1",
+      apiChapterStatus: fromProfile.status,
+      status: mapTeProfileChapterStatus(fromProfile.status),
+      pagesMeta: [],
+      mangakaImageUrl: undefined,
+    };
+  }
+
+  return anchor;
 }
 
 export function resolveStoryPagesForSubmission(

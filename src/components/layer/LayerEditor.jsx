@@ -21,7 +21,9 @@ import { usePageLayers } from '@/hooks/usePageLayers.js'
 import { layersService } from '@/api/layers.service.js'
 import { apiNoteToUi, apiTaskToUi } from '@/utils/apiMappers.js'
 import { chaptersService } from '@/api/chapters.service.js'
-import { getApiErrorMessage } from '@/api/http.js'
+import { tasksService } from '@/api/tasks.service.js'
+import { getApiErrorMessage, resolveMediaUrl } from '@/api/http.js'
+import { normalizeResultImageUrl, dedupeTasksByPage, sortTasksByPage } from '@/utils/chapterTaskFlow.js'
 import { cn } from '@/lib/utils'
 import LayerCanvas from './LayerCanvas.jsx'
 import LayerStackPanel from './LayerStackPanel.jsx'
@@ -60,14 +62,18 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
   const [submittedPages, setSubmittedPages] = useState({})  // pageId → true
   // Cache ảnh gộp (URL) cho từng page, để hiển thị ngay sau khi gộp
   const [finalImagesByPage, setFinalImagesByPage] = useState({})  // pageId → url
+  const [tasksByPageId, setTasksByPageId] = useState({})  // pageId → task UI
 
   const taskFromProp = taskProp ? (typeof taskProp === 'object' ? apiTaskToUi(taskProp) : null) : null
-  const task = chapter?._task ?? taskFromProp
-  const taskNotes = task?.noteIds ?? []
+  const chapterId = chapter?.chapterId ?? chapter?.id ?? chapter?._id ?? null
 
   const safeIdx = Math.min(Math.max(0, pageIdx), Math.max(0, pages.length - 1))
   const safePage = pages[safeIdx] ?? null
   const activePageId = safePage?.id ?? safePage?._id ?? pageIdProp ?? null
+
+  const fallbackTask = chapter?._task ?? taskFromProp
+  const activeTask = tasksByPageId[String(activePageId)] ?? fallbackTask ?? null
+  const taskNotes = activeTask?.noteIds ?? []
 
   const layersApi = usePageLayers(activePageId)
   const {
@@ -94,10 +100,9 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
   const handleFinalize = useCallback(async () => {
     if (!activePageId) return
     try {
-      const url = await finalize()
+      const url = normalizeResultImageUrl(await finalize())
       setFinalizedPages(prev => ({ ...prev, [activePageId]: true }))
       if (url) {
-        // Lưu URL ảnh gộp vào cache theo pageId
         setFinalImagesByPage(prev => ({ ...prev, [activePageId]: url }))
       }
     } catch { /* finalize đã toast lỗi rồi */ }
@@ -128,6 +133,53 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
       })
     }
   }, [finalImage, activePageId])
+
+  // Load task theo page — Assistant: GET /tasks/my-assignments?chapter_id=
+  useEffect(() => {
+    if (!chapterId) return
+    let cancelled = false
+    tasksService.getAssignmentsByChapter(chapterId)
+      .then((raw) => {
+        if (cancelled) return
+        const list = dedupeTasksByPage(
+          (Array.isArray(raw) ? raw : []).map(apiTaskToUi),
+        )
+        const map = {}
+        const submitted = {}
+        for (const t of list) {
+          if (t.pageId) {
+            map[String(t.pageId)] = t
+            if (['submitted', 'in_review', 'approved'].includes(t.status)) {
+              submitted[String(t.pageId)] = true
+            }
+          }
+        }
+        setTasksByPageId(map)
+        if (Object.keys(submitted).length) {
+          setSubmittedPages((prev) => ({ ...prev, ...submitted }))
+        }
+      })
+      .catch(() => { if (!cancelled) setTasksByPageId({}) })
+    return () => { cancelled = true }
+  }, [chapterId])
+
+  // Đánh dấu trang đã có resultUrl từ BE
+  useEffect(() => {
+    const nextFinal = {}
+    const nextImages = {}
+    for (const p of pages) {
+      const pid = p?.id ?? p?._id
+      if (!pid) continue
+      if (p.resultUrl) {
+        nextFinal[pid] = true
+        nextImages[pid] = p.resultUrl
+      }
+    }
+    if (Object.keys(nextFinal).length) {
+      setFinalizedPages((prev) => ({ ...prev, ...nextFinal }))
+      setFinalImagesByPage((prev) => ({ ...prev, ...nextImages }))
+    }
+  }, [pages])
 
   const [pageNotes, setPageNotes] = useState([])
   const [notesLoading, setNotesLoading] = useState(false)
@@ -305,11 +357,14 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
       return
     }
     // Auto-chuyển task: pending → in_progress khi upload layer đầu tiên
-    if (layers.length === 0 && task?.status === 'pending') {
+    if (layers.length === 0 && activeTask?.status === 'pending') {
       try {
-        const { tasksService } = await import('@/api/tasks.service.js')
-        await tasksService.start(task.id)
-        onSubmitted?.({ ...task, status: 'in_progress' })
+        await tasksService.start(activeTask.id)
+        setTasksByPageId((prev) => ({
+          ...prev,
+          [String(activePageId)]: { ...activeTask, status: 'in_progress' },
+        }))
+        onSubmitted?.({ ...activeTask, status: 'in_progress' })
         toast.success('Đã bắt đầu làm.')
       } catch {
         // Không block upload vì lỗi start không ảnh hưởng layer
@@ -328,32 +383,118 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
   }
 
   /**
-   * GỬI cả chapter cho Mangaka (không gộp lại).
-   * BE tự lấy page.result_image_url (nếu đã gộp) hoặc page.original_image_url.
-   * Page nào chưa gộp → BE tự fallback về ảnh gốc.
+   * LUỒNG 2 — Bước 3→6 (từng task) rồi Bước 7 submit-all-by-assistant.
+   * Ảnh kết quả lấy từ finalize (URL) → PATCH upload-result, không POST multipart submit.
    */
-  async function handleSubmitChapter({ chapterTaskId, chapterId }) {
+  async function pushTaskResultUrl(pageTask, imageUrl) {
+    if (!pageTask?.id) return null
+
+    const absoluteUrl = normalizeResultImageUrl(imageUrl)
+    if (!absoluteUrl) return null
+
+    const alreadyOnServer = normalizeResultImageUrl(pageTask.resultImageUrl)
+    if (
+      ['submitted', 'in_review', 'approved'].includes(pageTask.status)
+      && alreadyOnServer
+    ) {
+      return pageTask
+    }
+
+    if (pageTask.status === 'pending') {
+      await tasksService.start(pageTask.id)
+    }
+
+    const raw = await tasksService.uploadResult(pageTask.id, absoluteUrl)
+    const payload = raw?.data ?? raw
+    return apiTaskToUi(payload?.task ?? payload)
+  }
+
+  function resolvePageTaskImageUrl(page, pageTask) {
+    const pid = page?.id ?? page?._id
+    const fromCache = pid ? finalImagesByPage[pid] : null
+    return (
+      normalizeResultImageUrl(fromCache)
+      ?? normalizeResultImageUrl(page?.resultUrl)
+      ?? normalizeResultImageUrl(pageTask?.resultImageUrl)
+      ?? null
+    )
+  }
+
+  async function handleSubmitChapter() {
     if (!chapterId) {
       toast.error('Không tìm thấy chapterId — không thể gửi.')
       return
     }
     setSubmittingAll(true)
     try {
-      toast.info('Đang gửi chapter cho Mangaka…')
-      const { tasksService } = await import('@/api/tasks.service.js')
-      const { apiTaskToUi } = await import('@/utils/apiMappers.js')
-      // Không truyền files → BE tự dùng result_image_url / original_image_url
-      const updated = await tasksService.submitChapter(chapterId, null)
-      const newTask = apiTaskToUi(updated)
-      // Mark tất cả pages đã gửi
-      const submittedIds = pages.map(p => p?.id).filter(Boolean)
-      setSubmittedPages(prev => {
-        const next = { ...prev }
-        submittedIds.forEach(id => { next[id] = true })
-        return next
-      })
-      toast.success(`Đã gửi ${submittedIds.length} trang cho Mangaka.`)
-      onSubmitted?.(newTask)
+      toast.info('Đang lưu kết quả từng task…')
+      const raw = await tasksService.getAssignmentsByChapter(chapterId)
+      const allTasks = dedupeTasksByPage(
+        (Array.isArray(raw) ? raw : []).map(apiTaskToUi),
+      )
+      const pageTasks = allTasks.filter((t) => t.pageId)
+      const tasksToSubmit = sortTasksByPage(
+        pageTasks.length ? pageTasks : allTasks,
+      )
+
+      if (!tasksToSubmit.length) {
+        toast.error('Không tìm thấy task nào cho chapter này.')
+        return
+      }
+
+      let uploadedCount = 0
+      for (const pageTask of tasksToSubmit) {
+        const pid = pageTask.pageId ? String(pageTask.pageId) : null
+        const page = pid
+          ? pages.find((p) => String(p?.id ?? p?._id) === pid)
+          : pages[uploadedCount] ?? null
+        const pageLabel = pageTask.pageNumber ?? page?.pageNumber ?? (uploadedCount + 1)
+
+        const imageUrl = resolvePageTaskImageUrl(page, pageTask)
+        if (!imageUrl) {
+          toast.error(
+            `Trang ${pageLabel} chưa gộp layer — hãy bấm "Gộp layer" trước khi gửi Mangaka.`,
+          )
+          return
+        }
+
+        const alreadyOnServer = normalizeResultImageUrl(pageTask.resultImageUrl)
+        if (
+          ['submitted', 'in_review', 'approved'].includes(pageTask.status)
+          && alreadyOnServer
+        ) {
+          uploadedCount += 1
+          if (pid) setSubmittedPages((prev) => ({ ...prev, [pid]: true }))
+          continue
+        }
+
+        const updated = await pushTaskResultUrl(pageTask, imageUrl)
+        const savedUrl = normalizeResultImageUrl(updated?.resultImageUrl)
+        if (!updated || !savedUrl) {
+          toast.error(`Không lưu được ảnh cho task trang ${pageLabel}. Thử gộp layer lại.`)
+          return
+        }
+        if (pid) {
+          setTasksByPageId((prev) => ({ ...prev, [pid]: updated }))
+          setSubmittedPages((prev) => ({ ...prev, [pid]: true }))
+        }
+        uploadedCount += 1
+      }
+
+      toast.info('Đang nộp chapter cho Mangaka…')
+      const submitRes = await tasksService.submitAllByAssistant(chapterId)
+      const submittedTasks = submitRes?.data?.tasks ?? submitRes?.tasks ?? []
+      const count = submittedTasks.length || uploadedCount
+
+      for (const p of pages) {
+        const pid = p?.id ?? p?._id
+        if (pid) setSubmittedPages((prev) => ({ ...prev, [pid]: true }))
+      }
+
+      toast.success(
+        submitRes?.message ?? `Đã nộp ${count} task cho Mangaka.`,
+      )
+      onSubmitted?.()
     } catch (err) {
       console.error('[handleSubmitChapter] submit failed:', err)
       toast.error(getApiErrorMessage(err, 'Gửi chapter thất bại.'))
@@ -486,7 +627,7 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
             Gốc
           </Button>
 
-          {task?.region && (
+          {activeTask?.region && (
             <Button
               size="sm"
               variant={showRegionOverlay ? 'secondary' : 'ghost'}
@@ -645,7 +786,7 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
                 fullscreen={fullscreen}
                 baseImage={showOriginal ? baseImage : null}
                 className="absolute inset-0 h-full w-full"
-                region={task?.region ?? null}
+                region={activeTask?.region ?? null}
                 notes={allNotes}
                 showRegion={showRegionOverlay}
                 showNotes={showNoteOverlay}
@@ -705,12 +846,12 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
                       ? 'border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 hover:border-emerald-500/50'
                       : 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-violet-500/20 hover:from-violet-500 hover:to-indigo-500',
                   )}
-                  disabled={submittingAll || finalizing || pages.length === 0 || task?.status === 'submitted'}
-                  onClick={() => handleSubmitChapter({ chapterTaskId: chapter?._task?.id, chapterId: chapter?.chapterId })}
+                  disabled={submittingAll || finalizing || pages.length === 0}
+                  onClick={() => void handleSubmitChapter()}
                 >
                   {submittingAll ? (
-                    <><Loader2 className="size-3.5 animate-spin" /> Đang gửi {pages.length} trang…</>
-                  ) : task?.status === 'submitted' || submittedPages[activePageId] ? (
+                    <><Loader2 className="size-3.5 animate-spin" /> Đang nộp task…</>
+                  ) : Object.keys(submittedPages).length >= pages.length && pages.length > 0 ? (
                     <><Eye className="size-3.5" /> Đã gửi</>
                   ) : (
                     <><Send className="size-3.5" /> Gửi Mangaka</>

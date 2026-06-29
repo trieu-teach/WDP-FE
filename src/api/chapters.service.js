@@ -53,18 +53,14 @@ export const chaptersService = {
    * const { data, pages, tasks } = await chaptersService.uploadChapterWithPages(fd);
    */
   uploadChapterWithPages(formData) {
-    return http.post('/chapters', formData).then(res => {
-      const unwrapped = unwrap(res)
-      // BE có thể trả: { chapter, pages, tasks } hoặc { data: { chapter, pages, tasks } }
-      // Hoặc { success, data: { chapter, pages, tasks } }
-      if (unwrapped && typeof unwrapped === 'object') {
-        return {
-          chapter: unwrapped.chapter ?? unwrapped.data ?? null,
-          pages: unwrapped.pages ?? [],
-          tasks: unwrapped.tasks ?? [],
-        }
+    return http.post('/chapters', formData).then((body) => {
+      if (!body || typeof body !== 'object') {
+        return { chapter: null, pages: [], tasks: [] }
       }
-      return { chapter: null, pages: [], tasks: [] }
+      const chapter = body.data ?? body.chapter ?? null
+      const pages = Array.isArray(body.pages) ? body.pages : []
+      const tasks = Array.isArray(body.tasks) ? body.tasks : []
+      return { chapter, pages, tasks }
     })
   },
 
@@ -137,6 +133,11 @@ export const chaptersService = {
     return http.get(`/chapters/pages/${pageId}`).then(unwrap)
   },
 
+  /** LUỒNG 2 — Bước 4a: GET /pages/:pageId */
+  getPageById(pageId) {
+    return http.get(`/pages/${pageId}`).then(unwrap)
+  },
+
   assignAssistant(chapterId, assistant_id) {
     return http.post(`/chapters/${chapterId}/assign`, { assistant_id })
   },
@@ -146,7 +147,17 @@ export const chaptersService = {
   },
 
   getMyAssignments(params) {
-    return http.get('/chapters/my-assignments', { params }).then(unwrap)
+    return http.get('/chapters/my-assignments', { params }).then((body) => {
+      if (!body || typeof body !== 'object') {
+        return { items: [], pagination: null }
+      }
+      const data = body.data
+      const items = Array.isArray(data) ? data : []
+      return {
+        items,
+        pagination: body.pagination ?? null,
+      }
+    })
   },
 
   getPageNotes(pageId) {

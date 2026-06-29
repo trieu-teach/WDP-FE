@@ -85,6 +85,49 @@
   background: color-mix(in srgb, var(--ws-accent, #2a9d8f) 8%, transparent);
 }
 
+.eb-pages-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.eb-page-item {
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.eb-page-item__img {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  background: color-mix(in srgb, var(--muted) 40%, transparent);
+}
+
+.eb-page-item__caption {
+  padding: 8px 10px;
+  font-size: 12px;
+  text-align: center;
+  color: var(--muted-foreground);
+  border-top: 1px solid var(--border);
+}
+
+.eb-chapter-pages-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 720px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.eb-chapter-pages-scroll .eb-page-item__img {
+  max-height: none;
+}
+
 .eb-queue-item__meta strong {
   display: block;
   font-size: 18px;

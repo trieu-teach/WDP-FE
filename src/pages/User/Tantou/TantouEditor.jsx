@@ -27,8 +27,6 @@ import { getSession, logout } from "@/lib/auth.js";
 import { seriesService } from "@/api/series.service.js";
 import {
   buildTeAnnotationCreatePayload,
-  resolveTePageImageUrl,
-  resolveTePreviewPage,
   teReviewsService,
 } from "@/api/teReviews.service.js";
 import { getApiErrorMessage, resolveMediaUrl } from "@/api/http.js";
@@ -39,6 +37,19 @@ import {
   PATH_EDITOR_BOARD,
 } from "@/constants/roleTerminology.js";
 import { readEbDebutApproved } from "@/utils/ebDebutStorage.js";
+import {
+  phaseToPipeline,
+  resolveTePhase,
+} from "@/utils/teReviewPhase.js";
+import {
+  enrichTeSubmissionAssignment,
+  flattenTePendingSections,
+  isTeChapterLevelSubmission,
+  isTeSeriesLevelSubmission,
+  mapTePendingChapterToSubmission,
+  parseTePendingResponse,
+  resolveTeEntityId,
+} from "@/utils/teReviewPending.js";
 import {
   applyScheduleForEbApprovedSeries,
   isSeriesEbApproved,
@@ -92,8 +103,18 @@ function formatReviewedAt(value) {
 }
 
 function SubmissionCard({ sub, onReview, onQuickApprove, showQuickApprove }) {
+  const canReview = sub.canReview !== false;
+  const assignmentVariant =
+    sub.teAssignmentStatus === "mine"
+      ? "default"
+      : sub.teAssignmentStatus === "other"
+        ? "destructive"
+        : "outline";
+
   return (
-    <Card className="group transition-all hover:shadow-md">
+    <Card
+      className={`group transition-all hover:shadow-md${!canReview ? " opacity-75" : ""}`}
+    >
       <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
         <div className="flex size-16 shrink-0 overflow-hidden rounded-lg bg-muted sm:size-20">
           {sub.mangakaImageUrl ? (
@@ -114,16 +135,33 @@ function SubmissionCard({ sub, onReview, onQuickApprove, showQuickApprove }) {
             <Badge variant={statusVariant(sub.status)}>
               {statusLabel(sub.status)}
             </Badge>
+            {sub.teAssignmentStatus ? (
+              <Badge variant={assignmentVariant} className="text-[10px]">
+                {sub.teAssignmentStatus === "unassigned"
+                  ? "Chưa ai nhận"
+                  : sub.teAssignmentStatus === "mine"
+                    ? "Của bạn"
+                    : "TE khác"}
+              </Badge>
+            ) : null}
           </div>
           <p className="text-sm text-muted-foreground">
             Ch. {sub.chapterNum} · {sub.pageLabel} · {sub.mangakaName}
           </p>
+          {sub.teAssignmentLabel ? (
+            <p className="text-xs text-muted-foreground">{sub.teAssignmentLabel}</p>
+          ) : null}
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={() => onReview(sub)}>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!canReview}
+            onClick={() => onReview(sub)}
+          >
             Mở & nhận xét
           </Button>
-          {showQuickApprove && sub.status === "pending" ? (
+          {showQuickApprove && sub.status === "pending" && canReview ? (
             <Button size="sm" onClick={() => onQuickApprove(sub.id)}>
               Duyệt nhanh
             </Button>
@@ -137,7 +175,9 @@ function SubmissionCard({ sub, onReview, onQuickApprove, showQuickApprove }) {
 export default function TantouEditor() {
   const navigate = useNavigate();
   const user = getSession();
+  const currentTeId = user?.id ?? null;
   const [submissions, setSubmissions] = useState([]);
+  const [pendingSections, setPendingSections] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
@@ -150,10 +190,26 @@ export default function TantouEditor() {
   const loadQueue = useCallback(async () => {
     setLoading(true);
     try {
-      const queue = await teReviewsService.getPending();
-      const mapped = await Promise.all(
-        (Array.isArray(queue) ? queue : []).map(async (item) => {
-          const chapterId = String(item?._id ?? "");
+      const raw = await teReviewsService.getPending();
+      const parsed = parseTePendingResponse(raw);
+      setPendingSections(parsed);
+
+      const flat = flattenTePendingSections(parsed);
+      const baseMapped = flat.map(({ chapter, series, tabType }) =>
+        enrichTeSubmissionAssignment(
+          mapTePendingChapterToSubmission(chapter, series, tabType, null),
+          currentTeId,
+        ),
+      );
+      setSubmissions(baseMapped);
+      setLoading(false);
+
+      if (!flat.length) return;
+
+      const enriched = await Promise.all(
+        flat.map(async (entry, index) => {
+          const chapterId = resolveTeEntityId(entry.chapter);
+          if (!chapterId) return enrichTeQueueItemWithSeriesDetail(baseMapped[index]);
           let preview = null;
           try {
             preview = await teReviewsService.getAllChapterPages(chapterId);
@@ -161,18 +217,26 @@ export default function TantouEditor() {
             preview = null;
           }
           return enrichTeQueueItemWithSeriesDetail(
-            mapTeQueueItem(item, preview),
+            enrichTeSubmissionAssignment(
+              mapTePendingChapterToSubmission(
+                entry.chapter,
+                entry.series,
+                entry.tabType,
+                preview,
+              ),
+              currentTeId,
+            ),
           );
         }),
       );
-      setSubmissions(mapped);
+      setSubmissions(enriched);
     } catch (err) {
       toast.error(getApiErrorMessage(err, "Không tải được hàng chờ Tantou."));
       setSubmissions([]);
-    } finally {
+      setPendingSections(null);
       setLoading(false);
     }
-  }, []);
+  }, [currentTeId]);
 
   useEffect(() => {
     void loadQueue();
@@ -188,10 +252,7 @@ export default function TantouEditor() {
   );
 
   const debutQueue = useMemo(
-    () =>
-      submissions.filter(
-        (s) => s.pipeline === "debut" && s.status !== "approved_publish",
-      ),
+    () => submissions.filter((s) => isTeSeriesLevelSubmission(s)),
     [submissions],
   );
 
@@ -199,10 +260,10 @@ export default function TantouEditor() {
     () =>
       submissions.filter(
         (s) =>
-          (s.pipeline === "recurring" || isSeriesEbApproved(s.seriesTitle)) &&
-          s.status === "pending",
+          isTeChapterLevelSubmission(s)
+          && (s.status === "pending" || s.status === "revision"),
       ),
-    [submissions, tick],
+    [submissions],
   );
 
   const scheduleSeries = useMemo(() => {
@@ -234,6 +295,12 @@ export default function TantouEditor() {
   }
 
   function openReview(sub) {
+    if (sub?.canReview === false) {
+      toast.error(
+        sub?.teAssignmentLabel ?? "Chapter này đã được gán cho TE khác.",
+      );
+      return;
+    }
     setSelectedId(sub.id);
     setReviewOpen(true);
   }
@@ -241,6 +308,36 @@ export default function TantouEditor() {
   function closeReview() {
     setReviewOpen(false);
     refresh();
+  }
+
+  async function handleQuickApprove(chapterId) {
+    const sub = submissions.find((s) => s.id === chapterId);
+    if (!sub || !isTeChapterLevelSubmission(sub) || !sub.seriesId) return;
+    if (sub.canReview === false) {
+      toast.error(
+        sub.teAssignmentLabel ?? "Chapter này đã được gán cho TE khác.",
+      );
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const res = await teReviewsService.reviewChapter(sub.seriesId, {
+        chapter_id: String(chapterId),
+        action: "approve",
+        feedback: "OK",
+      });
+      toast.success(res?.message ?? "Chapter đã được publish.");
+      refresh();
+    } catch (err) {
+      const fallback =
+        err?.response?.status === 403
+          ? "Chapter này đã được gán cho TE khác."
+          : "Duyệt nhanh thất bại.";
+      toast.error(getApiErrorMessage(err, fallback));
+    } finally {
+      setSaving(false);
+    }
   }
 
 function parseSeriesGenres(series) {
@@ -257,83 +354,81 @@ function parseSeriesGenres(series) {
 
 function isSeriesApprovedByEb(series, seriesTitle) {
   const apiStatus = String(series?.status ?? "").toLowerCase();
-  if (apiStatus === "approved" || series?.is_public === true) return true;
+  if (
+    apiStatus === "approved_by_eb"
+    || apiStatus === "approved"
+    || apiStatus === "published"
+    || series?.is_public === true
+  ) {
+    return true;
+  }
   return isSeriesEbApproved(seriesTitle);
 }
 
-function resolveTePipeline(series, seriesTitle) {
-  return isSeriesApprovedByEb(series, seriesTitle) ? "recurring" : "debut";
-}
-
-function submissionNeedsEbSeriesSubmit(submission, seriesTitle) {
-  if (submission?.pipeline === "recurring") return false;
-  if (submission?.seriesMeta?.ebApproved) return false;
-  return !isSeriesApprovedByEb(null, seriesTitle);
-}
-
-function mapTeChapterStatus(status) {
-  const value = String(status ?? "").toLowerCase();
-  if (value.includes("eb") || value === "pending_eb") return "forwarded_eb";
-  if (value.includes("revision") || value.includes("reject")) return "revision";
-  if (value.includes("publish") || value.includes("approved")) return "approved_publish";
-  return "pending";
-}
-
-function mapTeQueueItem(item, preview) {
-  const chapterId = String(item?._id ?? "");
-  const series = item?.series_id && typeof item.series_id === "object"
-    ? item.series_id
-    : {};
-  const seriesId = series?._id ? String(series._id) : null;
-  const seriesTitle = series?.name ?? "Series";
-  const authorObj = series?.author_id;
-  const authorId =
-    authorObj && typeof authorObj === "object" ? authorObj._id : authorObj;
-  const submittedBy = item?.submitted_by ?? {};
-  const previewPage = resolveTePreviewPage(preview, 0);
-  const mangakaName = submittedBy.full_name ?? submittedBy.username ?? "Mangaka";
-
-  return {
-    id: chapterId,
-    chapterId,
-    seriesId,
-    seriesTitle,
-    chapterNum: String(item?.chapter_number ?? ""),
-    chapterTitle: String(item?.title ?? ""),
-    pageIndex: 0,
-    pageLabel: previewPage?.page_number
-      ? `Trang ${previewPage.page_number}`
-      : "Trang 1",
-    mangakaImageUrl: resolveTePageImageUrl(previewPage),
-    mangakaName,
-    pipeline: resolveTePipeline(series, seriesTitle),
-    status: mapTeChapterStatus(item?.status),
-    sentAt: item?.updatedAt ?? item?.createdAt ?? null,
-    pagesMeta: Array.isArray(preview?.pages) ? preview.pages : [],
-    seriesMeta: {
-      genres: parseSeriesGenres(series),
-      tags: Array.isArray(series?.tags) ? series.tags : [],
-      synopsis: String(series?.synopsis ?? series?.description ?? "").trim(),
-      coverImageUrl: resolveMediaUrl(series?.cover_image_url ?? null),
-      authorId: authorId ? String(authorId) : "",
-      authorName:
-        authorObj && typeof authorObj === "object"
-          ? (authorObj.full_name ?? authorObj.username ?? "")
-          : mangakaName,
-    },
-  };
+function submissionIsSeriesLevel(submission) {
+  return isTeSeriesLevelSubmission(submission);
 }
 
 async function enrichTeQueueItemWithSeriesDetail(mapped) {
   if (!mapped?.seriesId) return mapped;
 
+  const seriesLevel = submissionIsSeriesLevel(mapped);
+
   try {
+    if (seriesLevel) {
+      const profile = await teReviewsService.getSeriesProfile(mapped.seriesId);
+      const series = profile?.series ?? profile ?? {};
+      const tabType =
+        mapped.tabType
+        ?? resolveTePhase({
+          phase: mapped.phase,
+          seriesStatus: series?.status ?? mapped.seriesMeta?.seriesApiStatus,
+        });
+      const authorObj = series?.author_id ?? series?.author;
+      const authorId =
+        authorObj && typeof authorObj === "object" ? authorObj._id : authorObj;
+      return {
+        ...mapped,
+        tabType,
+        phase: tabType,
+        pipeline: phaseToPipeline(tabType),
+        seriesTitle: series?.name || mapped.seriesTitle,
+        seriesMeta: {
+          ...mapped.seriesMeta,
+          genres: parseSeriesGenres(series).length
+            ? parseSeriesGenres(series)
+            : mapped.seriesMeta.genres,
+          tags: Array.isArray(series?.tags) ? series.tags : mapped.seriesMeta.tags,
+          synopsis:
+            String(series?.synopsis ?? series?.description ?? "").trim()
+            || mapped.seriesMeta.synopsis,
+          coverImageUrl:
+            resolveMediaUrl(series?.cover_image_url ?? null)
+            || mapped.seriesMeta.coverImageUrl,
+          authorId: authorId ? String(authorId) : mapped.seriesMeta.authorId,
+          authorName:
+            authorObj && typeof authorObj === "object"
+              ? (authorObj.full_name ?? authorObj.username ?? "")
+              : mapped.seriesMeta.authorName,
+          seriesApiStatus: series?.status ?? mapped.seriesMeta.seriesApiStatus,
+          ebApproved: tabType === "chapter_level",
+        },
+      };
+    }
+
     const raw = await seriesService.getById(mapped.seriesId);
     const series = apiSeriesToUi(raw);
-    const ebApproved = isSeriesApprovedByEb(raw, mapped.seriesTitle);
+    const tabType =
+      mapped.tabType
+      ?? resolveTePhase({
+        phase: mapped.phase,
+        seriesStatus: raw?.status,
+      });
     return {
       ...mapped,
-      pipeline: resolveTePipeline(raw, mapped.seriesTitle),
+      tabType,
+      phase: tabType,
+      pipeline: phaseToPipeline(tabType),
       seriesTitle: series.title || mapped.seriesTitle,
       seriesMeta: {
         ...mapped.seriesMeta,
@@ -346,7 +441,7 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
           : mapped.seriesMeta.authorId,
         authorName: series.authorName || mapped.seriesMeta.authorName,
         seriesApiStatus: raw?.status ?? null,
-        ebApproved,
+        ebApproved: tabType === "chapter_level",
       },
     };
   } catch {
@@ -398,9 +493,18 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
   async function handleSaveReview(reviewData, options = {}) {
     if (!selected) return;
 
+    if (!options.saveDraftOnly && selected.canReview === false) {
+      toast.error(
+        selected.teAssignmentLabel ?? "Chapter này đã được gán cho TE khác.",
+      );
+      return;
+    }
+
     const nextStatus =
       options.submitAction ?? reviewData.reviewStatus ?? "publish";
     const nextText = String(reviewData.reviewText ?? "").trim();
+    const nextQuickNotes = String(reviewData.quickNotes ?? "").trim();
+    const nextRevisionFeedback = String(reviewData.revisionFeedback ?? "").trim();
     const nextAverage = Number(reviewData.averageScore ?? 0);
     const nextChapterId = String(
       reviewData.chapter_id ?? selected.chapterId ?? selected.id ?? "",
@@ -426,7 +530,27 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
       selected.pagesMeta ??
       [];
 
-    if (nextStatus === "reject" && !nextText) {
+    if (options.saveDraftOnly) {
+      if (!nextSeriesId) {
+        toast.error("Thiếu series_id để lưu nháp.");
+        return;
+      }
+      setSaving(true);
+      try {
+        await teReviewsService.saveSeriesReviewDraft(nextSeriesId, {
+          feedback: nextText,
+          quick_notes: nextQuickNotes || nextText,
+        });
+        toast.success("Đã lưu nháp Series Review.");
+      } catch (err) {
+        toast.error(getApiErrorMessage(err, "Không lưu được nháp."));
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
+    if (nextStatus === "reject" && !nextText && !nextRevisionFeedback) {
       toast.error("Nhập lý do trước khi gửi Mangaka chỉnh.");
       return;
     }
@@ -438,43 +562,70 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
 
     setSaving(true);
     try {
-      await syncChapterAnnotations(selected);
+      await syncChapterAnnotations({
+        chapterId: nextChapterId,
+      });
       await createChapterAnnotations(
-        selected,
+        { chapterId: nextChapterId },
         editorialNotesByPage,
         pagesMeta,
       );
 
       if (nextStatus === "publish" || nextStatus === "reject") {
-        if (nextStatus === "reject") {
-          await teReviewsService.teAction(nextChapterId, {
-            action: "reject",
-            notes: [nextText],
-          });
-          toast.success("Đã gửi về Mangaka.");
-        } else if (submissionNeedsEbSeriesSubmit(selected, nextSeriesName)) {
-          if (!nextSeriesId) {
-            toast.error(`Thiếu series_id để gửi ${LABEL_EDITOR_BOARD}.`);
-            return;
-          }
-          const res = await teReviewsService.submitSeriesReview(nextSeriesId, {
-            action: "approve",
-            ...(nextText ? { feedback: nextText, quick_notes: nextText } : {}),
-          });
-          const count = Array.isArray(res?.chapters_to_eb)
-            ? res.chapters_to_eb.length
-            : null;
+        const seriesLevel = submissionIsSeriesLevel(selected);
+        const action = nextStatus === "reject" ? "reject" : "approve";
+        const rejectNotes = [nextText, nextRevisionFeedback]
+          .filter(Boolean)
+          .flatMap((t) => t.split("\n").map((l) => l.trim()).filter(Boolean));
+        const noteLines = rejectNotes.length
+          ? rejectNotes
+          : (nextText ? [nextText] : []);
+
+        if (!nextSeriesId) {
+          toast.error("Thiếu series_id để gửi review.");
+          return;
+        }
+
+        if (seriesLevel && (nextText || nextQuickNotes) && action === "approve") {
+          await teReviewsService
+            .saveSeriesReviewDraft(nextSeriesId, {
+              feedback: nextText,
+              quick_notes: nextQuickNotes || nextText,
+            })
+            .catch(() => null);
+        }
+
+        const reviewBody = {
+          chapter_id: nextChapterId,
+          action,
+          ...(nextText || nextRevisionFeedback
+            ? { feedback: nextText || nextRevisionFeedback }
+            : {}),
+          ...(noteLines.length ? { notes: noteLines } : {}),
+          ...(action === "reject"
+            ? {
+                revision_notes:
+                  nextRevisionFeedback || nextText || noteLines.join("\n"),
+              }
+            : {}),
+        };
+
+        const res = await teReviewsService.reviewChapter(
+          nextSeriesId,
+          reviewBody,
+        );
+
+        if (action === "approve") {
           toast.success(
-            count != null
-              ? `Đã gửi ${count} chapter sang ${LABEL_EDITOR_BOARD} để chấm điểm series.`
-              : `Đã gửi series sang ${LABEL_EDITOR_BOARD} để chấm điểm.`,
+            res?.message
+              ?? (seriesLevel
+                ? `Chapter → pending_EB, đã duyệt series.`
+                : "Chapter đã được publish."),
           );
         } else {
-          await teReviewsService.teAction(nextChapterId, {
-            action: "approve",
-            ...(nextText ? { notes: [nextText] } : {}),
-          });
-          toast.success("Đã duyệt chapter — series đã được EB phê duyệt trước đó.");
+          toast.success(
+            res?.message ?? "Đã yêu cầu Mangaka sửa chapter.",
+          );
         }
       }
 
@@ -493,7 +644,11 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
       setReviewOpen(false);
       refresh();
     } catch (err) {
-      toast.error(getApiErrorMessage(err, "Không lưu được review."));
+      const fallback =
+        err?.response?.status === 403
+          ? "Chapter này đã được gán cho TE khác."
+          : "Không lưu được review.";
+      toast.error(getApiErrorMessage(err, fallback));
     } finally {
       setSaving(false);
     }
@@ -513,12 +668,15 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
           <TantouPageReview
             submission={selected}
             relatedSubmissions={submissions.filter(
-              (s) => s.seriesTitle === selected.seriesTitle,
+              (s) =>
+                (selected.seriesId && s.seriesId === selected.seriesId)
+                || s.seriesTitle === selected.seriesTitle,
             )}
             allSubmissions={submissions}
             onCancel={closeReview}
             onSaveReview={handleSaveReview}
             onSelectChapter={(submissionId) => setSelectedId(submissionId)}
+            saving={saving}
           />
         </main>
         <Footer />
@@ -543,11 +701,14 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Sparkles className="size-5 text-amber-500" />
-                Duyệt series riêng
+                {pendingSections?.seriesLevel?.label ?? "Duyệt series (giai đoạn 1)"}
+                <Badge variant="secondary" className="font-normal">
+                  {debutQueue.length || pendingSections?.seriesLevel?.count || 0}
+                </Badge>
               </CardTitle>
               <CardDescription>
-                Xét chuyển {LABEL_EDITOR_BOARD} hoặc gửi Mangaka chỉnh (kèm nhận
-                xét).
+                {pendingSections?.seriesLevel?.description
+                  ?? `Series chưa EB-approved — duyệt series + chapter, gửi ${LABEL_EDITOR_BOARD} hoặc yêu cầu Mangaka sửa.`}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -583,10 +744,14 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <FileText className="size-5 text-sky-500" />
-                Duyệt chapter riêng
+                {pendingSections?.chapterLevel?.label ?? "Duyệt chapter (giai đoạn 2)"}
+                <Badge variant="secondary" className="font-normal">
+                  {recurringQueue.length || pendingSections?.chapterLevel?.count || 0}
+                </Badge>
               </CardTitle>
               <CardDescription>
-                Series đã qua EB — chỉ cần Tantou duyệt chapter để phát hành.
+                {pendingSections?.chapterLevel?.description
+                  ?? "Series đã EB-approved — TE duyệt chapter để publish ngay."}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -602,7 +767,7 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
                     key={sub.id}
                     sub={sub}
                     onReview={openReview}
-                    onQuickApprove={() => {}}
+                    onQuickApprove={(id) => void handleQuickApprove(id)}
                     showQuickApprove
                   />
                 ))

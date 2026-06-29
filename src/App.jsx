@@ -16,7 +16,11 @@ import SeriesUploadDetail from '@/pages/User/Mangaka/SeriesUploadDetail.jsx'
 import Assistant from '@/pages/User/Assistant/Assistant.jsx'
 import UserProfile from '@/pages/User/Profile/Profile.jsx'
 import Eb from '@/pages/User/Eb/Eb.jsx'
+import EbSeriesDetail from '@/pages/User/Eb/EbSeriesDetail.jsx'
+import EbPublish from '@/pages/User/Eb/EbPublish.jsx'
 import MangakaTeRevision from '@/pages/User/Mangaka/MangakaTeRevision.jsx'
+import MangakaAssistantReview from '@/pages/User/Mangaka/MangakaAssistantReview.jsx'
+import MangakaAssistantReviewDetail from '@/pages/User/Mangaka/MangakaAssistantReviewDetail.jsx'
 import TantouEditor from '@/pages/User/Tantou/TantouEditor.jsx'
 import SessionBootstrap from '@/components/auth/SessionBootstrap.jsx'
 
@@ -42,11 +46,15 @@ export default function App() {
         <Route path="/register" element={<Register />} />
         <Route path="/register/verify-otp" element={<RegisterVerifyOtp />} />
         <Route path="/mangaka" element={<Mangaka />} />
+        <Route path="/mangaka/review" element={<MangakaAssistantReview />} />
+        <Route path="/mangaka/review/chapter/:chapterId" element={<MangakaAssistantReviewDetail />} />
         <Route path="/mangaka/series/:seriesSlug" element={<SeriesUploadDetail />} />
         <Route path="/mangaka/series/:seriesSlug/chapter/:chapterId" element={<SeriesUploadDetail />} />
         <Route path="/assistant" element={<Assistant />} />
         <Route path="/eb" element={<Eb />} />
+        <Route path="/eb/series/:seriesId" element={<EbSeriesDetail />} />
         <Route path="/eb/chapter/:chapterId" element={<Eb />} />
+        <Route path="/eb/chapter/:chapterId/publish" element={<EbPublish />} />
         <Route path="/mangaka/chapter/:chapterId/te-revision" element={<MangakaTeRevision />} />
         <Route path="/tantou" element={<TantouEditor />} />
         <Route path="/profile" element={<UserProfile />} />

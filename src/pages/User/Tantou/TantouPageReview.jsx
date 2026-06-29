@@ -12,6 +12,7 @@ export default function TantouPageReview({
   onCancel,
   onSaveReview,
   onSelectChapter,
+  saving = false,
 }) {
   if (!submission) return null;
 
@@ -23,6 +24,7 @@ export default function TantouPageReview({
       onCancel={onCancel}
       onSaveReview={onSaveReview}
       onSelectChapter={onSelectChapter}
+      saving={saving}
     />
   );
 }

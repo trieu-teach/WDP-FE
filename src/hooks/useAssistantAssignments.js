@@ -167,6 +167,34 @@ function parseRevisionNotes(revisionNotes, revisionAnnotations, pageCount) {
   return notes
 }
 
+function chapterAssignmentToUi(chapter) {
+  const c = chapter ?? {}
+  const series = c.series_id ?? {}
+  const seriesName =
+    typeof series === 'string'
+      ? ''
+      : (series.name ?? series.title ?? c.seriesName ?? c.series_name ?? '')
+  const seriesId =
+    typeof series === 'string'
+      ? series
+      : (series._id ?? series.id ?? c.series_id ?? null)
+
+  return {
+    id: c._id ?? c.id,
+    chapterId: c._id ?? c.id,
+    taskId: null,
+    seriesTitle: seriesName || '(Không tìm thấy series)',
+    seriesId,
+    chapterNum: c.chapter_number ?? c.chapterNum ?? 0,
+    title: c.title ?? '',
+    status: c.status ?? 'pending_assistant',
+    pageCount: c.page_count ?? c.pages?.length ?? 0,
+    pages: Array.isArray(c.pages) ? c.pages.map(rawPageToUi) : [],
+    taskStats: c.tasks ?? null,
+    _task: null,
+  }
+}
+
 export function useAssistantAssignments() {
   const [assignments, setAssignments] = useState([])
   const [loading, setLoading] = useState(true)
@@ -176,13 +204,27 @@ export function useAssistantAssignments() {
     setLoading(true)
     setError(null)
     try {
+      let results = []
+
+      try {
+        const chapterRes = await chaptersService.getMyAssignments({
+          status: 'pending_assistant',
+          limit: 100,
+        })
+        const chapterItems = chapterRes?.items ?? []
+        if (chapterItems.length > 0) {
+          results = chapterItems.map(chapterAssignmentToUi)
+        }
+      } catch {
+        results = []
+      }
+
+      if (results.length === 0) {
       const res = await tasksService.getMyAssignments({ limit: 100 })
       const rawItems = res?.data ?? res?.items ?? []
       const list = Array.isArray(rawItems) ? rawItems : []
       // seriesName nằm ở response root (cùng cấp data), không phải trong từng task
       const seriesNameRoot = res?.seriesName ?? null
-      if (list.length > 0) {
-      }
       const tasks = list.map(apiTaskToUi)
 
       // Gọi song song getById cho tất cả chapters
@@ -201,7 +243,6 @@ export function useAssistantAssignments() {
 
       // Filter trùng chapterId
       const seen = new Set()
-      const results = []
       for (let i = 0; i < tasks.length; i++) {
         const task = tasks[i]
         if (seen.has(task.chapterId)) continue
@@ -249,6 +290,7 @@ export function useAssistantAssignments() {
                 : [],
           _task: task,
         })
+      }
       }
 
       setAssignments(results)

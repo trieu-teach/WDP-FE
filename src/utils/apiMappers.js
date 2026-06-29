@@ -4,20 +4,24 @@ import { normalizeSeries, slugifySeriesTitle } from './seriesModel.js'
 const API_STATUS_TO_UI = {
   draft: 'draft',
   pending_assistant: 'assistant',
-  pending_TE: 'review',
+  submitted_by_assistant: 'review',
+  approved_by_mangaka: 'approved',
+  pending_TE: 'tantou',
   TE_revision: 'assistant',
   pending_EB: 'review',
   EB_revision: 'assistant',
   assigned: 'assistant',
   in_progress: 'assistant',
   submitted: 'review',
+  review: 'review',
   published: 'done',
 }
 
 const UI_STATUS_TO_API = {
   draft: 'draft',
   assistant: 'pending_assistant',
-  review: 'pending_TE',
+  approved: 'approved_by_mangaka',
+  review: 'review',
   tantou: 'pending_TE',
   done: 'published',
 }
@@ -143,27 +147,62 @@ export function apiChapterToAnnotator(chapter, pages = [], seriesTitle) {
 
 export function apiPageToUi(page, index = 0) {
   const p = page ?? {}
-  const rawUrl =
-    (p.result_image_url && p.result_image_url !== '' ? p.result_image_url : null)
-    ?? (p.original_image_url && p.original_image_url !== '' ? p.original_image_url : null)
+  const pickUrl = (...candidates) => {
+    for (const v of candidates) {
+      if (v != null && String(v).trim() !== '') return v
+    }
+    return null
+  }
+  const originalRaw = pickUrl(
+    p.original_image_url,
+    p.originalImageUrl,
+    p.original_url,
+  )
+  const resultRaw = pickUrl(
+    p.result_image_url,
+    p.resultImageUrl,
+    p.result_url,
+    p.final_image_url,
+    p.finalImageUrl,
+  )
+  const fallbackRaw =
+    originalRaw
+    ?? resultRaw
     ?? p.image_url
     ?? p.url
     ?? p.imageUrl
     ?? null
   const pageNum = p.page_number ?? index + 1
-  // Ưu tiên _id từ BE (24-char ObjectId). Nếu BE tạo page trong 1 request
-  // mà không trả _id, dùng page_number. Luôn dùng index làm fallback cuối
-  // để đảm bảo key DUY NHẤT trong danh sách.
   const stableId = p._id ?? p.id ?? (p.page_number != null ? `p-${String(p.page_number)}` : null)
   const id = stableId ? `${stableId}` : `fallback-${index}`
   return {
     id,
     name: p.name ?? p.filename ?? `Trang ${pageNum}`,
-    url: resolveMediaUrl(rawUrl),
+    url: resolveMediaUrl(resultRaw ?? fallbackRaw),
+    originalUrl: resolveMediaUrl(originalRaw),
+    resultUrl: resolveMediaUrl(resultRaw),
     pageNumber: pageNum,
     width: p.width ?? 800,
     height: p.height ?? 1100,
   }
+}
+
+/**
+ * Luồng pages: ảnh gốc và kết quả Assistant lấy từ từng Page record.
+ * @param {Array<{ originalUrl?, resultUrl?, pageNumber? }>} pages
+ */
+export function chapterPagesToCompareUrls(pages) {
+  const sorted = [...(pages ?? [])].sort(
+    (a, b) => (a.pageNumber ?? 0) - (b.pageNumber ?? 0),
+  )
+  const originals = []
+  const results = []
+  for (const p of sorted) {
+    originals.push(p?.originalUrl || null)
+    results.push(p?.resultUrl || null)
+  }
+  const resultCount = results.filter(Boolean).length
+  return { originals, results, resultCount, pageCount: sorted.length }
 }
 
 export function apiRankingToUi(item, index) {
@@ -354,6 +393,11 @@ export function apiTaskToUi(raw) {
   return {
     id: t._id ?? t.id,
     pageId: t.page_id?._id ?? t.page_id ?? null,
+    pageNumber:
+      t.page_number
+      ?? t.page_id?.page_number
+      ?? t.page_id?.pageNumber
+      ?? null,
     chapterId: t.chapter_id?._id ?? t.chapter_id ?? null,
     seriesName: t.seriesName ?? t.series_name ?? t.chapter_id?.seriesName ?? t.chapter_id?.series_name ?? t.chapter_id?.series?.name ?? null,
     assignedBy: t.assigned_by?._id ?? t.assigned_by ?? null,
@@ -423,9 +467,21 @@ export function apiSubmissionChapterToUi(raw, index = 0) {
     seriesName,
     status: c.status ?? '',
     chapterNumber: c.chapter_number ?? c.num ?? index + 1,
+    title: c.title ?? '',
+    te_id: c.te_id ?? null,
+    te_assigned_at: c.te_assigned_at ?? null,
+    revision_notes: c.revision_notes ?? '',
+    revision_history: Array.isArray(c.revision_history) ? c.revision_history : [],
     createdAt: c.createdAt ?? c.created_at,
     updatedAt: c.updatedAt ?? c.updated_at,
   }
+}
+
+/** Chapter statuses cho phép Mangaka gửi sang TE (Bước 7). */
+export const MANGAKA_TE_SENDABLE_STATUSES = ['approved_by_mangaka', 'TE_revision', 'review']
+
+export function canMangakaSendToTe(apiStatus) {
+  return MANGAKA_TE_SENDABLE_STATUSES.includes(String(apiStatus ?? ''))
 }
 
 function formatRelativeDate(iso) {

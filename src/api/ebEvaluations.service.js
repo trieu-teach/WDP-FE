@@ -1,4 +1,8 @@
 import { http } from './http.js'
+import { chaptersService } from './chapters.service.js'
+import { ebScoresService } from './ebScores.service.js'
+import { buildEbChapterDetailPayload } from '@/utils/ebEvaluationMappers.js'
+import { resolveEntityId } from '@/utils/notificationTarget.js'
 
 function unwrap(res) {
   if (res && typeof res === 'object' && res.success !== undefined && res.data !== undefined) {
@@ -42,14 +46,63 @@ export const ebEvaluationsService = {
       })
   },
 
+  /** GET /eb-evaluations/series/:seriesId/detail — series + first_chapter.pages + pending_chapters */
+  getSeriesDetail(seriesId) {
+    return http.get(`/eb-evaluations/series/${seriesId}/detail`).then(unwrapData)
+  },
+
   /** @deprecated Dùng getChapterPending */
   getPending() {
     return this.getChapterPending().then((res) => res.items)
   },
 
-  /** GET /eb-evaluations/chapter/:chapterId — chi tiết chapter + series + evaluation_history */
-  getChapterDetail(chapterId) {
-    return http.get(`/eb-evaluations/chapter/${chapterId}`).then(unwrapData)
+  /**
+   * Load context chấm chapter EB.
+   * BE không có GET /eb-evaluations/chapter/:id — dùng:
+   * 1. GET /eb-scores/chapter/:id/preview
+   * 2. GET /eb-evaluations/series/:seriesId/detail
+   */
+  async getChapterDetail(chapterId) {
+    const id = String(chapterId ?? '').trim()
+    if (!id) throw new Error('chapterId required')
+
+    let preview = null
+    let seriesId = ''
+
+    try {
+      preview = await ebScoresService.getChapterPreview(id)
+      seriesId = resolveEntityId(preview?.series?._id ?? preview?.series?.id)
+    } catch {
+      preview = null
+    }
+
+    if (!seriesId) {
+      try {
+        const ch = await chaptersService.getById(id)
+        const raw = ch?.chapter ?? ch
+        seriesId = resolveEntityId(
+          raw?.series_id?._id ?? raw?.series_id ?? raw?.seriesId,
+        )
+        if (!preview && raw) {
+          preview = { chapter: raw, series: raw.series_id }
+        }
+      } catch {
+        /* fallback below */
+      }
+    }
+
+    if (!seriesId) {
+      const err = new Error('Không xác định được series cho chapter.')
+      err.response = { status: 404 }
+      throw err
+    }
+
+    const seriesDetail = await this.getSeriesDetail(seriesId)
+    return buildEbChapterDetailPayload({
+      preview,
+      seriesDetail,
+      chapterId: id,
+    })
   },
 
   /**
@@ -63,15 +116,19 @@ export const ebEvaluationsService = {
   },
 
   /**
-   * POST /eb-evaluations/chapter/:chapterId/confirm-publish
+   * POST /eb-evaluations/series/:seriesId/confirm-publish
    * Body: { publication_schedule?: "weekly"|"monthly", scheduled_publish_at?: "YYYY-MM-DD" }
    */
-  confirmPublish(chapterId, { publication_schedule, scheduled_publish_at } = {}) {
+  confirmPublish(seriesId, { publication_schedule, scheduled_publish_at } = {}) {
+    const id = String(seriesId ?? '').trim()
+    if (!id) {
+      return Promise.reject(new Error('seriesId required'))
+    }
     const body = {}
     if (publication_schedule) body.publication_schedule = publication_schedule
     if (scheduled_publish_at) body.scheduled_publish_at = scheduled_publish_at
     return http
-      .post(`/eb-evaluations/chapter/${chapterId}/confirm-publish`, body)
+      .post(`/eb-evaluations/series/${id}/confirm-publish`, body)
       .then(unwrapData)
   },
 }

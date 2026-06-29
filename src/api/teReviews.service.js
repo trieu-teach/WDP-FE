@@ -217,6 +217,24 @@ export const teReviewsService = {
     return http.get('/te-reviews/pending').then(unwrap)
   },
 
+  /** GET /te-reviews/series/:seriesId/profile — TE xem profile series (giai đoạn 1) */
+  getSeriesProfile(seriesId) {
+    return http.get(`/te-reviews/series/${seriesId}/profile`).then(unwrap)
+  },
+
+  /** GET /te-reviews/series-review/:seriesId — nháp review series hiện tại */
+  getSeriesReview(seriesId) {
+    return http.get(`/te-reviews/series-review/${seriesId}`).then(unwrap)
+  },
+
+  /** POST /te-reviews/series-review/:seriesId — lưu nháp series review */
+  saveSeriesReviewDraft(seriesId, { feedback, quick_notes } = {}) {
+    const body = {}
+    if (feedback != null) body.feedback = String(feedback).trim()
+    if (quick_notes != null) body.quick_notes = String(quick_notes).trim()
+    return http.post(`/te-reviews/series-review/${seriesId}`, body).then(unwrap)
+  },
+
   /** GET /te-reviews/chapter/:chapterId/pages?all=true — toàn bộ pages[] kèm URL ảnh Mangaka */
   getAllChapterPages(chapterId) {
     return http
@@ -264,9 +282,39 @@ export const teReviewsService = {
   },
 
   /**
-   * POST /te-reviews/chapter/:chapterId/te-action
-   * action: approve (gửi EB) | reject (yêu cầu Mangaka sửa)
+   * POST /te-reviews/series-review/:seriesId/review-chapter
+   * - chapter.te_id null → BE auto gán TE hiện tại rồi review
+   * - chapter.te_id = TE hiện tại → review bình thường
+   * - chapter.te_id = TE khác → 403
    */
+  reviewChapter(seriesId, {
+    chapter_id,
+    action,
+    feedback,
+    notes,
+    revision_notes,
+  } = {}) {
+    const body = {
+      chapter_id: String(chapter_id ?? ''),
+      action,
+    }
+    if (feedback != null && String(feedback).trim()) {
+      body.feedback = String(feedback).trim()
+    }
+    if (revision_notes != null && String(revision_notes).trim()) {
+      body.revision_notes = String(revision_notes).trim()
+    }
+    if (notes != null) {
+      const list = Array.isArray(notes) ? notes : [notes]
+      const cleaned = list.map((n) => String(n ?? '').trim()).filter(Boolean)
+      if (cleaned.length) body.notes = cleaned
+    }
+    return http
+      .post(`/te-reviews/series-review/${seriesId}/review-chapter`, body)
+      .then(unwrap)
+  },
+
+  /** @deprecated Dùng reviewChapter */
   teAction(chapterId, { action, notes } = {}) {
     const mappedAction =
       action === 'approve' || action === 'forward_eb' || action === 'publish'
@@ -279,6 +327,14 @@ export const teReviewsService = {
       body.notes = notes.map((n) => String(n ?? '').trim()).filter(Boolean)
     }
     return http.post(`/te-reviews/chapter/${chapterId}/te-action`, body).then(unwrap)
+  },
+
+  /**
+   * POST /te-reviews/chapter/:chapterId/publish
+   * Giai đoạn 2 — chapter approved_by_EB, TE publish thủ công.
+   */
+  publishChapter(chapterId) {
+    return http.post(`/te-reviews/chapter/${chapterId}/publish`, {}).then(unwrap)
   },
 
   /**
