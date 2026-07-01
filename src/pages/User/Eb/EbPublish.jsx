@@ -31,6 +31,8 @@ import {
   formatEbClassification,
   formatEbScheduledPublishDateTime,
   formatEbScheduledPublishDisplay,
+  getEbVietnamDateNow,
+  getEbVietnamTimeNow,
   mapEbChapterDetailResponse,
   mapEbChapterPendingItem,
   normalizeEbEvaluateResponse,
@@ -53,8 +55,22 @@ export default function EbPublish() {
   const [submitting, setSubmitting] = useState(false);
   const [publicationSchedule, setPublicationSchedule] = useState("");
   const [scheduledPublishAt, setScheduledPublishAt] = useState("");
-  const [scheduledPublishTime, setScheduledPublishTime] = useState("09:00");
+  const [scheduledPublishTime, setScheduledPublishTime] = useState(getEbVietnamTimeNow);
+  const [vietnamNowLabel, setVietnamNowLabel] = useState(() =>
+    formatEbScheduledPublishDisplay(new Date().toISOString()),
+  );
   const [lastEvaluation, setLastEvaluation] = useState(null);
+
+  useEffect(() => {
+    function syncVietnamClock() {
+      setVietnamNowLabel(
+        formatEbScheduledPublishDisplay(new Date().toISOString()),
+      );
+    }
+
+    const timer = window.setInterval(syncVietnamClock, 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const loadChapter = useCallback(async () => {
     if (!chapterId) return;
@@ -283,21 +299,29 @@ export default function EbPublish() {
                   </Select>
                 </div>
 
+                <p className="text-xs text-muted-foreground">
+                  Giờ hiện tại tại Việt Nam:{" "}
+                  <strong className="text-foreground">{vietnamNowLabel}</strong>
+                  {" "}
+                  (GMT+7)
+                </p>
+
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label htmlFor="eb-scheduled-publish">
-                      Ngày publish (YYYY-MM-DD)
+                      Ngày publish (giờ Việt Nam)
                     </Label>
                     <Input
                       id="eb-scheduled-publish"
                       type="date"
+                      min={getEbVietnamDateNow()}
                       value={scheduledPublishAt}
                       onChange={(event) => setScheduledPublishAt(event.target.value)}
                     />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="eb-scheduled-publish-time">
-                      Giờ publish (giờ : phút)
+                      Giờ publish (giờ Việt Nam, HH:mm)
                     </Label>
                     <Input
                       id="eb-scheduled-publish-time"
@@ -306,7 +330,9 @@ export default function EbPublish() {
                       value={scheduledPublishTime}
                       disabled={!scheduledPublishAt}
                       onChange={(event) =>
-                        setScheduledPublishTime(event.target.value || "09:00")
+                        setScheduledPublishTime(
+                          event.target.value || getEbVietnamTimeNow(),
+                        )
                       }
                     />
                   </div>
@@ -323,7 +349,7 @@ export default function EbPublish() {
                       )}
                     </strong>
                     {" "}
-                    (BE job quét mỗi phút theo{" "}
+                    (giờ Việt Nam · BE job quét mỗi phút theo{" "}
                     <code className="text-[10px]">scheduled_publish_at</code> ISO)
                   </p>
                 ) : null}

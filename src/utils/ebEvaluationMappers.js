@@ -281,18 +281,54 @@ export function validateEbScore(value) {
   return ''
 }
 
-/** Chuẩn hóa ngày publish (chỉ ngày): "YYYY-MM-DD" */
+/** Múi giờ publish EB — Việt Nam (không DST). */
+export const EB_PUBLISH_TIMEZONE = 'Asia/Ho_Chi_Minh'
+const EB_PUBLISH_UTC_OFFSET = '+07:00'
+
+const ebVietnamDateFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: EB_PUBLISH_TIMEZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
+
+/** Ngày hiện tại theo giờ Việt Nam (YYYY-MM-DD). */
+export function getEbVietnamDateNow(referenceDate = new Date()) {
+  return ebVietnamDateFormatter.format(referenceDate)
+}
+
+/** Giờ:phút hiện tại theo giờ Việt Nam (HH:mm). */
+export function getEbVietnamTimeNow(referenceDate = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: EB_PUBLISH_TIMEZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(referenceDate)
+  const hour = parts.find((part) => part.type === 'hour')?.value ?? '09'
+  const minute = parts.find((part) => part.type === 'minute')?.value ?? '00'
+  return `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`
+}
+
+function formatEbVietnamDateFromInstant(value) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return ebVietnamDateFormatter.format(date)
+}
+
+/** Chuẩn hóa ngày publish (chỉ ngày): "YYYY-MM-DD" theo giờ Việt Nam. */
 export function formatEbScheduledPublishDate(value) {
   const text = String(value ?? '').trim()
   if (!text) return ''
   if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text
   const date = new Date(text)
   if (Number.isNaN(date.getTime())) return text.slice(0, 10)
-  return date.toISOString().slice(0, 10)
+  return formatEbVietnamDateFromInstant(date)
 }
 
 /**
  * Gộp ngày + giờ → ISO 8601 cho BE (scheduled_publish_at).
+ * Ngày/giờ nhập được hiểu là giờ Việt Nam (UTC+7).
  * BE job quét mỗi phút — cần đủ giờ/phút, không chỉ ngày.
  */
 export function formatEbScheduledPublishDateTime(dateValue, timeValue = '09:00') {
@@ -310,7 +346,7 @@ export function formatEbScheduledPublishDateTime(dateValue, timeValue = '09:00')
   } else {
     const parsed = new Date(dateText)
     if (Number.isNaN(parsed.getTime())) return ''
-    datePart = parsed.toISOString().slice(0, 10)
+    datePart = formatEbVietnamDateFromInstant(parsed)
   }
 
   const timeText = String(timeValue ?? '09:00').trim() || '09:00'
@@ -318,13 +354,15 @@ export function formatEbScheduledPublishDateTime(dateValue, timeValue = '09:00')
   const hours = match ? Math.min(23, Math.max(0, Number(match[1]))) : 9
   const minutes = match ? Math.min(59, Math.max(0, Number(match[2]))) : 0
 
-  const [year, month, day] = datePart.split('-').map(Number)
-  const local = new Date(year, month - 1, day, hours, minutes, 0, 0)
-  if (Number.isNaN(local.getTime())) return ''
-  return local.toISOString()
+  const hourText = String(hours).padStart(2, '0')
+  const minuteText = String(minutes).padStart(2, '0')
+  const withOffset = `${datePart}T${hourText}:${minuteText}:00${EB_PUBLISH_UTC_OFFSET}`
+  const parsed = new Date(withOffset)
+  if (Number.isNaN(parsed.getTime())) return ''
+  return parsed.toISOString()
 }
 
-/** Hiển thị scheduled_publish_at (ISO) cho người dùng. */
+/** Hiển thị scheduled_publish_at (ISO) theo giờ Việt Nam. */
 export function formatEbScheduledPublishDisplay(isoValue) {
   if (!isoValue) return ''
   const date = new Date(isoValue)
@@ -332,6 +370,7 @@ export function formatEbScheduledPublishDisplay(isoValue) {
   return new Intl.DateTimeFormat('vi-VN', {
     dateStyle: 'medium',
     timeStyle: 'short',
+    timeZone: EB_PUBLISH_TIMEZONE,
   }).format(date)
 }
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
+  ChevronRight,
   Eraser,
   Image as ImageIcon,
   Maximize2,
@@ -1067,11 +1068,11 @@ export default function ChapterAnnotator({
     const assistantReady = hiredAssistants.length > 0 && sendAssistantId
     return (
       <Card className={cn(
-        'border-violet-200 bg-violet-50/50 dark:border-violet-500/30 dark:bg-violet-500/5',
+        'border-violet-200 bg-gradient-to-br from-violet-50/80 to-background dark:border-violet-500/30 dark:from-violet-500/5',
       )}>
         <CardHeader className="pb-3">
           <div className="flex items-center gap-2">
-            <Badge variant="outline" className="size-6 justify-center p-0">0</Badge>
+            <Badge variant="outline" className="size-6 justify-center p-0 font-semibold">1</Badge>
             <CardTitle className="text-base">Chọn Assistant nhận chapter</CardTitle>
           </div>
           <CardDescription>
@@ -1119,29 +1120,45 @@ export default function ChapterAnnotator({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="mk-annotate space-y-6">
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+        <span className={cn(
+          'rounded-full px-2.5 py-1 font-medium transition-colors',
+          sendAssistantId ? 'bg-violet-100 text-violet-800 dark:bg-violet-500/15 dark:text-violet-300' : 'bg-background text-foreground shadow-sm',
+        )}>
+          1 · Assistant
+        </span>
+        <ChevronRight className="size-3.5 opacity-40" aria-hidden />
+        <span className={cn(
+          'rounded-full px-2.5 py-1 font-medium',
+          activeChapterId ? 'bg-background text-foreground shadow-sm' : 'opacity-60',
+        )}>
+          2 · Upload
+        </span>
+        <ChevronRight className="size-3.5 opacity-40" aria-hidden />
+        <span className={cn(
+          'rounded-full px-2.5 py-1 font-medium',
+          totalNotes > 0 ? 'bg-background text-foreground shadow-sm' : 'opacity-60',
+        )}>
+          3 · Ghi chú & gửi
+        </span>
+      </div>
+
       <AssistantPicker />
 
-      {!sendAssistantId && hiredAssistants.length > 0 ? (
-        <Alert className="border-amber-200 bg-amber-50/50 dark:border-amber-500/30 dark:bg-amber-500/5">
-          <AlertDescription className="text-xs">
-            Chọn Assistant trước khi upload ảnh, tạo ghi chú hoặc gửi chapter.
-          </AlertDescription>
-        </Alert>
-      ) : null}
-      <Card>
-        <CardHeader>
+      <Card className="overflow-hidden border-border/80 shadow-sm">
+        <CardHeader className="border-b bg-muted/20">
           <div className="flex items-center gap-2">
-            <Badge variant="outline" className="size-6 justify-center p-0">1</Badge>
+            <Badge variant="outline" className="size-6 justify-center p-0 font-semibold">2</Badge>
             <CardTitle className="text-base">Chapter & upload ảnh</CardTitle>
           </div>
           <CardDescription>
             Chọn chapter, nhập số trang — upload đúng bấy nhiêu ảnh (1 ảnh = 1 trang).
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-5">
+        <CardContent className="space-y-5 pt-5">
           <div className="space-y-2">
-            <Label>Series (draft)</Label>
+            <Label>Series</Label>
             <Select
               value={seriesOptions.some(s => s.title === selectedSeriesTitle) ? selectedSeriesTitle : ''}
               onValueChange={(v) => onSelectedSeriesTitleChange(v)}
@@ -1378,11 +1395,11 @@ export default function ChapterAnnotator({
       </Card>
 
       {activeChapter ? (
-        <Card>
-          <CardHeader>
+        <Card className="overflow-hidden border-border/80 shadow-sm">
+          <CardHeader className="border-b bg-muted/20">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2">
-                <Badge variant="outline" className="size-6 justify-center p-0">2</Badge>
+                <Badge variant="outline" className="size-6 justify-center p-0 font-semibold">3</Badge>
                 <div>
                   <CardTitle className="text-base">Ghi chú trên trang truyện</CardTitle>
                   <CardDescription>

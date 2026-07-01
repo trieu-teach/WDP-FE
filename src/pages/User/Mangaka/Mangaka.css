@@ -4396,6 +4396,48 @@
   text-align: center;
 }
 
+/* ===== Mangaka dashboard (Tailwind bridge) ===== */
+.ws-page--mangaka .mk-main {
+  position: relative;
+}
+
+.ws-page--mangaka .mk-action-bar {
+  animation: mk-fade-in 0.35s ease;
+}
+
+@keyframes mk-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ws-page--mangaka .mk-tabs [data-slot="tabs-trigger"][data-state="active"] {
+  background: linear-gradient(135deg, #e63946, #c1121f);
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(230, 57, 70, 0.28);
+}
+
+.ws-page--mangaka .mk-panel {
+  border-radius: var(--mk-radius, 16px);
+}
+
+.ws-page--mangaka .mk-sidebar {
+  position: sticky;
+  top: 1.25rem;
+  align-self: start;
+}
+
+@media (max-width: 1024px) {
+  .ws-page--mangaka .mk-sidebar {
+    position: static;
+  }
+}
+
 @media (max-width: 560px) {
   .mk-series-form__grid--2 {
     grid-template-columns: 1fr;
