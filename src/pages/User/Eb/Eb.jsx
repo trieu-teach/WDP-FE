@@ -1195,27 +1195,35 @@ export default function Eb() {
 
         {!isChapterDetail ? (
         <section className="space-y-4">
-          <div>
-            <h2 className="flex items-center gap-2 text-xl font-semibold">
-              <Gavel className="size-5 text-primary" />
-              Hàng chờ duyệt
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              Đồng bộ từ{" "}
-              <Link
-                to="/mangaka"
-                className="font-medium text-primary hover:underline"
-              >
-                Mangaka
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="flex items-center gap-2 text-xl font-semibold">
+                <Gavel className="size-5 text-primary" />
+                Hàng chờ duyệt
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Đồng bộ từ{" "}
+                <Link
+                  to="/mangaka"
+                  className="font-medium text-primary hover:underline"
+                >
+                  Mangaka
+                </Link>
+                {" / "}
+                <Link
+                  to="/tantou"
+                  className="font-medium text-primary hover:underline"
+                >
+                  Tantou
+                </Link>
+              </p>
+            </div>
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/eb/schedule">
+                <Calendar className="size-4" />
+                Lịch publish
               </Link>
-              {" / "}
-              <Link
-                to="/tantou"
-                className="font-medium text-primary hover:underline"
-              >
-                Tantou
-              </Link>
-            </p>
+            </Button>
           </div>
 
           {apiLoading ? (

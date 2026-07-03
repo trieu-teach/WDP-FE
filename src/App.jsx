@@ -18,6 +18,7 @@ import UserProfile from '@/pages/User/Profile/Profile.jsx'
 import Eb from '@/pages/User/Eb/Eb.jsx'
 import EbSeriesDetail from '@/pages/User/Eb/EbSeriesDetail.jsx'
 import EbPublish from '@/pages/User/Eb/EbPublish.jsx'
+import EbPublicationSchedule from '@/pages/User/Eb/EbPublicationSchedule.jsx'
 import MangakaTeRevision from '@/pages/User/Mangaka/MangakaTeRevision.jsx'
 import MangakaAssistantReview from '@/pages/User/Mangaka/MangakaAssistantReview.jsx'
 import MangakaAssistantReviewDetail from '@/pages/User/Mangaka/MangakaAssistantReviewDetail.jsx'
@@ -55,6 +56,7 @@ export default function App() {
         <Route path="/eb/series/:seriesId" element={<EbSeriesDetail />} />
         <Route path="/eb/chapter/:chapterId" element={<Eb />} />
         <Route path="/eb/chapter/:chapterId/publish" element={<EbPublish />} />
+        <Route path="/eb/schedule" element={<EbPublicationSchedule />} />
         <Route path="/mangaka/chapter/:chapterId/te-revision" element={<MangakaTeRevision />} />
         <Route path="/tantou" element={<TantouEditor />} />
         <Route path="/profile" element={<UserProfile />} />

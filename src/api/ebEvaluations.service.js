@@ -134,4 +134,14 @@ export const ebEvaluationsService = {
       .post(`/eb-evaluations/series/${id}/confirm-publish`, body)
       .then(unwrapData)
   },
+
+  /**
+   * GET /eb-evaluations/publication-schedule
+   * Query: from, to, publication_schedule, view, include_overdue
+   */
+  getPublicationSchedule(params = {}) {
+    return http
+      .get('/eb-evaluations/publication-schedule', { params })
+      .then(unwrap)
+  },
 }

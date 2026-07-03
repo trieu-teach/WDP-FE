@@ -6,6 +6,7 @@ import {
   Image as ImageIcon,
   Maximize2,
   MousePointer2,
+  PenSquare,
   Plus,
   Send,
   Square,
@@ -669,12 +670,21 @@ export default function ChapterAnnotator({
 
   const selectedSeriesPipeline = seriesOptions.find(s => s.title === selectedSeriesTitle.trim())
 
-  function ToolButtons() {
+  function ToolButtons({ onDark = false }) {
+    const outlineOnDark =
+      'border-white/15 bg-zinc-800/90 text-zinc-100 shadow-none hover:border-white/25 hover:bg-zinc-700 hover:text-white'
+
     return (
-      <div className="flex flex-wrap gap-1.5">
+      <div
+        className={cn(
+          'flex flex-wrap items-center gap-1.5',
+          onDark && 'rounded-lg border border-white/10 bg-black/30 p-1',
+        )}
+      >
         <Button
           size="sm"
           variant={tool === 'draw' ? 'default' : 'outline'}
+          className={cn(tool !== 'draw' && onDark && outlineOnDark)}
           onClick={() => setTool('draw')}
         >
           <Square className="size-3.5" />
@@ -683,6 +693,7 @@ export default function ChapterAnnotator({
         <Button
           size="sm"
           variant={tool === 'select' ? 'default' : 'outline'}
+          className={cn(tool !== 'select' && onDark && outlineOnDark)}
           onClick={() => setTool('select')}
         >
           <MousePointer2 className="size-3.5" />
@@ -691,6 +702,7 @@ export default function ChapterAnnotator({
         <Button
           size="sm"
           variant={tool === 'delete' ? 'destructive' : 'outline'}
+          className={cn(tool !== 'delete' && onDark && outlineOnDark)}
           onClick={() => setTool('delete')}
           title="Bấm vào ô trên trang để gỡ. Không xóa ảnh trang."
         >
@@ -701,24 +713,49 @@ export default function ChapterAnnotator({
     )
   }
 
-  function PageNav({ compact = false }) {
+  function PageNav({ compact = false, onDark = false }) {
     const canRemovePage = !!(activeChapter && pages.length > 0)
+    const navBtnCls = onDark
+      ? 'border-white/15 bg-zinc-800/90 text-zinc-100 shadow-none hover:bg-zinc-700 hover:text-white disabled:opacity-35'
+      : undefined
+
     return (
-      <div className="flex items-center gap-2">
-        <Button size="icon-sm" variant="outline" disabled={pageIndex === 0} onClick={() => goPage(-1)}>
+      <div
+        className={cn(
+          'flex items-center gap-2',
+          onDark && 'rounded-lg border border-white/10 bg-black/30 px-2 py-1',
+        )}
+      >
+        <Button
+          size="icon-sm"
+          variant="outline"
+          className={navBtnCls}
+          disabled={pageIndex === 0}
+          onClick={() => goPage(-1)}
+        >
           ‹
         </Button>
-        <span className="text-xs text-muted-foreground tabular-nums">
-          <strong className="text-foreground">{pageIndex + 1}</strong> / {pages.length}
+        <span className={cn('text-xs tabular-nums', onDark ? 'text-zinc-400' : 'text-muted-foreground')}>
+          <strong className={onDark ? 'text-white' : 'text-foreground'}>{pageIndex + 1}</strong> / {pages.length}
         </span>
-        <Button size="icon-sm" variant="outline" disabled={pageIndex >= pages.length - 1} onClick={() => goPage(1)}>
+        <Button
+          size="icon-sm"
+          variant="outline"
+          className={navBtnCls}
+          disabled={pageIndex >= pages.length - 1}
+          onClick={() => goPage(1)}
+        >
           ›
         </Button>
         {canRemovePage ? (
           <Button
             size="sm"
             variant="ghost"
-            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+            className={cn(
+              onDark
+                ? 'text-amber-300 hover:bg-amber-500/15 hover:text-amber-200'
+                : 'text-destructive hover:bg-destructive/10 hover:text-destructive',
+            )}
             onClick={removeCurrentPage}
             title="Gỡ ảnh trang đang xem"
           >
@@ -851,7 +888,7 @@ export default function ChapterAnnotator({
   function NotesPanel({ inFullscreen = false, embedded = false }) {
     const panelContent = (
       <>
-        {!embedded && (
+        {!embedded && !inFullscreen && (
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between gap-2">
               <CardTitle className="text-base">Ô ghi chú — Trang {pageIndex + 1}</CardTitle>
@@ -863,7 +900,24 @@ export default function ChapterAnnotator({
             </div>
           </CardHeader>
         )}
-        <div className={cn('flex flex-col gap-3', embedded ? 'flex-1 min-h-0' : '')}>
+        {embedded || inFullscreen ? (
+          <div className="mb-3 flex shrink-0 items-center justify-between gap-2 border-b border-white/10 pb-3">
+            <p className="text-sm font-semibold text-zinc-100">
+              Ô ghi chú · Trang {pageIndex + 1}
+            </p>
+            {selectedNoteId ? (
+              <Button
+                size="xs"
+                variant="ghost"
+                className="h-7 shrink-0 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200"
+                onClick={() => deleteNote(selectedNoteId)}
+              >
+                Gỡ ô
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+        <div className={cn('flex min-w-0 flex-col gap-3', (embedded || inFullscreen) ? 'min-h-0 flex-1' : '')}>
           {hiredAssistants.length === 0 ? (
             <Alert className="border-violet-200 bg-violet-50/50 dark:border-violet-500/30 dark:bg-violet-500/5">
               <AlertDescription className="text-xs">
@@ -890,14 +944,28 @@ export default function ChapterAnnotator({
           ) : null}
 
           {pageNotes.length === 0 ? (
-            <p className="text-xs text-muted-foreground">
-              Chưa có ô nào. Chọn <strong>Tạo ô</strong>, kéo vùng trên trang và mô tả việc cần làm. Gửi Assistant ở cuối — cả chapter giao cho 1 người.
-            </p>
+            <div className={cn(
+              'rounded-lg border border-dashed px-3 py-5 text-center',
+              embedded || inFullscreen
+                ? 'border-white/15 bg-zinc-950/50'
+                : 'border-muted-foreground/25 bg-muted/20',
+            )}>
+              <PenSquare className={cn('mx-auto mb-2 size-5', embedded || inFullscreen ? 'text-zinc-500' : 'text-muted-foreground')} />
+              <p className={cn('text-xs leading-relaxed', embedded || inFullscreen ? 'text-zinc-400' : 'text-muted-foreground')}>
+                Chưa có ô trên trang này.
+              </p>
+              <p className={cn(
+                'mt-2 break-words text-[11px] leading-relaxed',
+                embedded || inFullscreen ? 'text-zinc-500' : 'text-muted-foreground',
+              )}>
+                Chọn <strong className={embedded || inFullscreen ? 'text-zinc-300' : 'text-foreground'}>Tạo ô</strong>, kéo vùng trên trang và mô tả việc cần làm.
+              </p>
+            </div>
           ) : (
             <div
               className={cn(
-                'min-h-0 overflow-y-auto overscroll-contain pr-1',
-                inFullscreen ? 'flex-1' : 'max-h-[calc(100vh-480px)]',
+                'min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain pr-1',
+                inFullscreen || embedded ? 'flex-1' : 'max-h-[calc(100vh-480px)]',
               )}
             >
               <ul className="space-y-3">
@@ -907,8 +975,14 @@ export default function ChapterAnnotator({
                   <li
                     key={stableKey}
                     className={cn(
-                      'rounded-lg border p-3 transition-colors',
-                      selectedNoteId === stableKey ? 'border-primary bg-primary/5' : 'bg-background',
+                      'min-w-0 rounded-lg border p-3 transition-colors',
+                      embedded || inFullscreen
+                        ? selectedNoteId === stableKey
+                          ? 'border-rose-400/50 bg-rose-500/10'
+                          : 'border-white/10 bg-zinc-950/60'
+                        : selectedNoteId === stableKey
+                          ? 'border-primary bg-primary/5'
+                          : 'bg-background',
                     )}
                   >
                     <div className="mb-2 flex items-center justify-between">
@@ -959,16 +1033,28 @@ export default function ChapterAnnotator({
       </>
     )
 
+    if (inFullscreen) {
+      return (
+        <div className="flex h-full min-h-0 w-full flex-col overflow-hidden text-zinc-100">
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
+            {panelContent}
+          </div>
+        </div>
+      )
+    }
+
     if (embedded) {
       return (
-        <div className="flex min-h-0 flex-1 flex-col rounded-lg border bg-card p-4">
-          {panelContent}
+        <div className="flex h-full min-h-0 w-full min-w-0 max-w-full flex-col overflow-hidden rounded-lg border border-white/10 bg-zinc-900/95 text-zinc-100">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden p-4">
+            {panelContent}
+          </div>
         </div>
       )
     }
 
     return (
-      <Card className={cn('flex flex-col', inFullscreen && 'h-full overflow-hidden')}>
+      <Card className="flex flex-col">
         <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
           {panelContent}
         </CardContent>
@@ -976,7 +1062,7 @@ export default function ChapterAnnotator({
     )
   }
 
-  function SendActionsBar({ compact = false, embedded = false }) {
+  function SendActionsBar({ compact = false, embedded = false, inline = false }) {
     const handleAssistant = () => {
       if (!activeChapter || !onSendToAssistant) return
       onSendToAssistant({
@@ -998,26 +1084,49 @@ export default function ChapterAnnotator({
     }
 
     const innerContent = (
-      <div className={cn('space-y-2', compact ? 'p-3' : 'p-4')}>
-        <div className="min-w-0">
-          <p className={cn('text-sm font-semibold', compact && 'text-white')}>
-            Gửi cả chapter {activeChapter ? `Ch. ${activeChapter.num}` : ''} cho Assistant
+      <div className={cn('min-w-0 space-y-3', compact ? 'p-3' : !inline && 'p-4')}>
+        <div className="min-w-0 space-y-1">
+          <p className={cn(
+            'break-words text-sm font-semibold leading-snug',
+            compact && 'text-white',
+            inline && 'text-zinc-50',
+            embedded && !inline && 'text-zinc-50',
+          )}>
+            Gửi cả chapter{activeChapter ? ` Ch. ${activeChapter.num}` : ''} cho Assistant
           </p>
-          <p className={cn('text-xs', compact ? 'text-zinc-300' : 'text-muted-foreground')}>
+          <p className={cn(
+            'break-words text-xs leading-relaxed',
+            compact ? 'text-zinc-300' : 'text-muted-foreground',
+            inline && 'text-zinc-400',
+            embedded && !inline && 'text-zinc-400',
+          )}>
             {pages.length} trang · {totalNotes} ô ghi chú · 1 task = cả chapter
             {totalNotes > 0 ? ' · các ghi chú sẽ gộp vào mô tả' : ''}
           </p>
         </div>
         {hiredAssistants.length > 0 && sendAssistantId ? (
-          <p className="text-xs text-muted-foreground">
-            Assistant: <strong>{hiredAssistants.find(a => String(a.assistantId) === String(sendAssistantId))?.label ?? sendAssistantId}</strong>
+          <p className={cn(
+            'truncate text-xs',
+            compact ? 'text-zinc-300' : 'text-muted-foreground',
+            inline && 'text-zinc-400',
+            embedded && !inline && 'text-zinc-400',
+          )}>
+            Assistant:{' '}
+            <strong className={inline || embedded ? 'text-zinc-100' : 'text-foreground'}>
+              {hiredAssistants.find(a => String(a.assistantId) === String(sendAssistantId))?.label ?? sendAssistantId}
+            </strong>
           </p>
         ) : hiredAssistants.length === 0 ? (
-          <p className={cn('text-xs', compact ? 'text-zinc-400' : 'text-muted-foreground')}>
-            Thuê Assistant ở tab <strong>Thuê Assistant</strong> trước khi gửi chapter.
+          <p className={cn(
+            'break-words text-xs leading-relaxed',
+            compact ? 'text-zinc-400' : 'text-muted-foreground',
+            inline && 'text-zinc-500',
+            embedded && !inline && 'text-zinc-500',
+          )}>
+            Thuê Assistant ở tab <strong className="text-zinc-300">Thuê Assistant</strong> trước khi gửi chapter.
           </p>
         ) : null}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex w-full min-w-0 flex-col gap-2">
           {onSendToTantou ? (
             <Button
               size="sm"
@@ -1025,7 +1134,11 @@ export default function ChapterAnnotator({
               disabled={!activeChapter || pages.length === 0 || !sendAssistantId}
               title={`Gửi bản thảo sang ${LABEL_TANTOU_EDITOR}`}
               onClick={handleTantou}
-              className={cn(compact && 'border-white/20 bg-transparent text-white hover:bg-white/10')}
+              className={cn(
+                'h-9 w-full min-w-0',
+                (inline || embedded) && 'border-white/15 bg-zinc-950/50 text-zinc-200 hover:bg-zinc-800',
+                compact && 'border-white/20 bg-transparent text-white hover:bg-white/10',
+              )}
             >
               Gửi {LABEL_TANTOU_EDITOR}
             </Button>
@@ -1034,19 +1147,22 @@ export default function ChapterAnnotator({
             size="sm"
             disabled={!activeChapter || pages.length === 0 || !sendAssistantId}
             onClick={handleAssistant}
+            className="h-9 w-full min-w-0"
           >
-            <Send className="size-3.5" />
+            <Send className="size-3.5 shrink-0" />
             Gửi cả chapter
           </Button>
         </div>
       </div>
     )
 
+    if (embedded && inline) {
+      return innerContent
+    }
+
     if (embedded) {
       return (
-        <div className={cn(
-          'rounded-lg border border-primary/20 bg-gradient-to-br from-primary/5 via-background to-background',
-        )}>
+        <div className="w-full min-w-0 overflow-hidden rounded-lg border border-rose-500/30 bg-zinc-900/90 p-4 shadow-sm">
           {innerContent}
         </div>
       )
@@ -1427,21 +1543,21 @@ export default function ChapterAnnotator({
               </div>
             </div>
             <div
-              className="flex gap-3 overflow-hidden rounded-lg border bg-zinc-950 p-3"
-              style={{ maxHeight: 'calc(100vh - 300px)' }}
+              className="flex h-[min(720px,calc(100vh-280px))] min-h-[480px] gap-3 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 p-3"
             >
-              <div className="flex shrink-0 justify-center overflow-hidden">
-                <CanvasBoard refEl={boardRef} />
-              </div>
-              <div
-                className="min-w-0 flex flex-1 flex-col overflow-y-auto"
-                style={{ maxHeight: 'calc(100vh - 340px)' }}
-              >
-                <NotesPanel embedded />
-                <div className="mt-3 shrink-0">
-                  <SendActionsBar embedded />
+              <div className="min-h-0 min-w-0 flex-1 overflow-auto">
+                <div className="flex justify-center p-1">
+                  <CanvasBoard refEl={boardRef} />
                 </div>
               </div>
+              <aside className="flex h-full w-[min(300px,100%)] min-w-[260px] max-w-[300px] shrink-0 flex-col gap-3 overflow-hidden">
+                <div className="min-h-0 flex-1 overflow-hidden">
+                  <NotesPanel embedded />
+                </div>
+                <div className="shrink-0">
+                  <SendActionsBar embedded />
+                </div>
+              </aside>
             </div>
           </CardContent>
         </Card>
@@ -1454,35 +1570,39 @@ export default function ChapterAnnotator({
       )}
 
       {isFullscreen && activeChapter ? (
-        <div className="fixed inset-0 z-50 flex flex-col bg-zinc-950" role="dialog" aria-modal="true">
-          <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-zinc-900 px-5 py-3 text-white">
-            <div>
+        <div className="mk-fullscreen" role="dialog" aria-modal="true">
+          <header className="mk-fullscreen__header">
+            <div className="mk-fullscreen__title">
               <strong>{activeChapter.series} — Ch.{activeChapter.num}</strong>
-              <span className="ml-2 text-sm text-zinc-400">· Trang {pageIndex + 1}/{pages.length}</span>
+              <span>· Trang {pageIndex + 1}/{pages.length}</span>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <ToolButtons />
-              <PageNav compact />
-              <Button size="sm" variant="outline" className="border-white/20 bg-transparent text-white hover:bg-white/10" onClick={() => setIsFullscreen(false)}>
-                <X className="size-4" />
+            <div className="mk-fullscreen__tools">
+              <ToolButtons onDark />
+              <PageNav compact onDark />
+              <button type="button" className="mk-fullscreen__close" onClick={() => setIsFullscreen(false)}>
+                <X className="size-4" aria-hidden />
                 Thu nhỏ
-              </Button>
+              </button>
             </div>
           </header>
 
-          <div className="grid min-h-0 flex-1 grid-cols-[1fr_360px] gap-4 overflow-hidden p-4">
-            <div className="flex items-center justify-center overflow-hidden">
+          <div className="mk-fullscreen__body">
+            <div className="mk-fullscreen__stage">
               <CanvasBoard refEl={fsBoardRef} fs />
             </div>
-            <div className="flex min-h-0 flex-col gap-3 overflow-hidden">
-              <div className="min-h-0 flex-1 overflow-hidden">
-                <NotesPanel inFullscreen />
+            <div className="mk-fullscreen__panel">
+              <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
+                <div className="min-h-0 flex-1 overflow-hidden">
+                  <NotesPanel inFullscreen />
+                </div>
+                <div className="shrink-0">
+                  <SendActionsBar compact />
+                </div>
               </div>
-              <SendActionsBar compact />
             </div>
           </div>
 
-          <div className="flex shrink-0 gap-2 overflow-x-auto border-t border-white/10 bg-zinc-900 p-2">
+          <div className="mk-fullscreen__thumbs">
             {pages.map((pg, i) => (
               <button
                 key={pg.id ?? i}
@@ -1490,7 +1610,7 @@ export default function ChapterAnnotator({
                 onClick={() => { setPageIndex(i); setSelectedNoteId(null) }}
                 title={pg.name}
                 className={cn(
-                  'shrink-0 overflow-hidden rounded border-2 transition-colors',
+                  'mk-page-thumb shrink-0 overflow-hidden rounded border-2 transition-colors',
                   i === pageIndex ? 'border-primary' : 'border-transparent',
                 )}
               >

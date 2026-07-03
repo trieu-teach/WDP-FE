@@ -498,6 +498,91 @@ export const EB_PUBLICATION_SCHEDULES = [
   { value: 'monthly', label: 'Hàng tháng (monthly)' },
 ]
 
+/** Khoảng mặc định: 30 ngày trước → 90 ngày tới (khớp BE). */
+export function getEbDefaultPublicationScheduleRange(referenceDate = new Date()) {
+  const from = new Date(referenceDate)
+  from.setDate(from.getDate() - 30)
+  const to = new Date(referenceDate)
+  to.setDate(to.getDate() + 90)
+  return {
+    from: ebVietnamDateFormatter.format(from),
+    to: ebVietnamDateFormatter.format(to),
+  }
+}
+
+export function mapEbPublicationScheduleEvent(raw = {}) {
+  return {
+    type: raw.type === 'chapter' ? 'chapter' : 'series',
+    seriesId: raw.series_id ?? raw.seriesId ?? null,
+    seriesName: raw.series_name ?? raw.seriesName ?? '',
+    chapterId: raw.chapter_id ?? raw.chapterId ?? null,
+    chapterNumber: raw.chapter_number ?? raw.chapterNumber ?? null,
+    chapterTitle: raw.chapter_title ?? raw.chapterTitle ?? '',
+    publicationSchedule: raw.publication_schedule ?? raw.publicationSchedule ?? null,
+    scheduledPublishAt: raw.scheduled_publish_at ?? raw.scheduledPublishAt ?? null,
+    isOverdue: Boolean(raw.is_overdue ?? raw.isOverdue),
+    raw,
+  }
+}
+
+export function mapEbPublicationScheduleResponse(body) {
+  const data = body?.data ?? body ?? {}
+  const view = data.view === 'list' ? 'list' : 'calendar'
+  const range = data.range ?? null
+
+  if (view === 'list') {
+    return {
+      view: 'list',
+      range,
+      total: Number(data.total ?? 0),
+      seriesCount: Number(data.series_count ?? 0),
+      chapterCount: Number(data.chapter_count ?? 0),
+      groups: (Array.isArray(data.events) ? data.events : []).map((group) => ({
+        seriesId: group.series_id ?? group.seriesId ?? null,
+        seriesName: group.series_name ?? group.seriesName ?? 'Series',
+        publicationSchedule: group.publication_schedule ?? group.publicationSchedule ?? null,
+        events: (Array.isArray(group.events) ? group.events : []).map(mapEbPublicationScheduleEvent),
+      })),
+      days: [],
+    }
+  }
+
+  return {
+    view: 'calendar',
+    range,
+    total: Number(data.total ?? 0),
+    seriesCount: Number(data.series_count ?? 0),
+    chapterCount: Number(data.chapter_count ?? 0),
+    days: (Array.isArray(data.events) ? data.events : []).map((day) => ({
+      date: day.date ?? '',
+      events: (Array.isArray(day.events) ? day.events : []).map(mapEbPublicationScheduleEvent),
+    })),
+    groups: [],
+  }
+}
+
+export function resolveEbPublicationEventHref(event) {
+  if (!event) return null
+  if (event.type === 'chapter' && event.chapterId) {
+    return `/eb/chapter/${encodeURIComponent(event.chapterId)}`
+  }
+  if (event.seriesId) {
+    return `/eb/series/${encodeURIComponent(event.seriesId)}`
+  }
+  return null
+}
+
+export function formatEbPublicationScheduleDayLabel(dateText) {
+  if (!dateText) return ''
+  const date = new Date(`${dateText}T12:00:00`)
+  if (Number.isNaN(date.getTime())) return dateText
+  return new Intl.DateTimeFormat('vi-VN', {
+    weekday: 'long',
+    dateStyle: 'medium',
+    timeZone: EB_PUBLISH_TIMEZONE,
+  }).format(date)
+}
+
 export const EB_CLASSIFICATION_LABELS = {
   khong_dat: 'KHÔNG ĐẠT',
   dat: 'ĐẠT',
