@@ -49,6 +49,7 @@ import {
   mapTePendingChapterToSubmission,
   parseTePendingResponse,
   resolveTeEntityId,
+  sortTePendingSubmissionsNewestFirst,
 } from "@/utils/teReviewPending.js";
 import {
   applyScheduleForEbApprovedSeries,
@@ -252,16 +253,21 @@ export default function TantouEditor() {
   );
 
   const debutQueue = useMemo(
-    () => submissions.filter((s) => isTeSeriesLevelSubmission(s)),
+    () =>
+      sortTePendingSubmissionsNewestFirst(
+        submissions.filter((s) => isTeSeriesLevelSubmission(s)),
+      ),
     [submissions],
   );
 
   const recurringQueue = useMemo(
     () =>
-      submissions.filter(
-        (s) =>
-          isTeChapterLevelSubmission(s)
-          && (s.status === "pending" || s.status === "revision"),
+      sortTePendingSubmissionsNewestFirst(
+        submissions.filter(
+          (s) =>
+            isTeChapterLevelSubmission(s)
+            && (s.status === "pending" || s.status === "revision"),
+        ),
       ),
     [submissions],
   );
@@ -696,9 +702,9 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
       />
 
       <main className="page-container flex-1 space-y-8 py-8">
-        <section className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
-          <Card>
-            <CardHeader>
+        <section className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
+          <Card className="flex max-h-[min(640px,calc(100vh-280px))] flex-col overflow-hidden">
+            <CardHeader className="shrink-0">
               <CardTitle className="flex items-center gap-2">
                 <Sparkles className="size-5 text-amber-500" />
                 {pendingSections?.seriesLevel?.label ?? "Duyệt series (giai đoạn 1)"}
@@ -711,7 +717,7 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
                   ?? `Series chưa EB-approved — duyệt series + chapter, gửi ${LABEL_EDITOR_BOARD} hoặc yêu cầu Mangaka sửa.`}
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
               {debutQueue.length === 0 ? (
                 <Card>
                   <CardContent className="py-12 text-center text-muted-foreground">

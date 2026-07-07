@@ -167,6 +167,30 @@ function parseRevisionNotes(revisionNotes, revisionAnnotations, pageCount) {
   return notes
 }
 
+const TASK_STATUS_RANK = {
+  revision: 50,
+  in_progress: 40,
+  submitted: 30,
+  pending: 20,
+  approved: 10,
+}
+
+function pickPrimaryTaskForChapter(tasks, chapterId) {
+  const cid = String(chapterId ?? '')
+  if (!cid) return null
+  let best = null
+  let bestRank = -1
+  for (const t of tasks) {
+    if (String(t.chapterId) !== cid) continue
+    const rank = TASK_STATUS_RANK[t.status] ?? 0
+    if (rank > bestRank) {
+      best = t
+      bestRank = rank
+    }
+  }
+  return best
+}
+
 function chapterAssignmentToUi(chapter) {
   const c = chapter ?? {}
   const series = c.series_id ?? {}
@@ -206,26 +230,45 @@ export function useAssistantAssignments() {
     try {
       let results = []
 
-      try {
-        const chapterRes = await chaptersService.getMyAssignments({
-          status: 'pending_assistant',
-          limit: 100,
-        })
-        const chapterItems = chapterRes?.items ?? []
+      const [chapterSettled, taskSettled] = await Promise.allSettled([
+        // Không truyền status — BE trả mọi chapter của assistant (is_current_round: true).
+        chaptersService.getMyAssignments({ limit: 100 }),
+        tasksService.getMyAssignments({ limit: 100 }),
+      ])
+
+      const taskList = taskSettled.status === 'fulfilled'
+        ? (() => {
+            const res = taskSettled.value
+            const rawItems = res?.data ?? res?.items ?? []
+            return Array.isArray(rawItems) ? rawItems.map(apiTaskToUi) : []
+          })()
+        : []
+
+      if (chapterSettled.status === 'fulfilled') {
+        const chapterItems = chapterSettled.value?.items ?? []
         if (chapterItems.length > 0) {
-          results = chapterItems.map(chapterAssignmentToUi)
+          results = chapterItems.map((ch) => {
+            const ui = chapterAssignmentToUi(ch)
+            const task = pickPrimaryTaskForChapter(taskList, ui.chapterId)
+            if (!task) return ui
+            return { ...ui, taskId: task.id, _task: task }
+          })
         }
-      } catch {
-        results = []
       }
 
       if (results.length === 0) {
-      const res = await tasksService.getMyAssignments({ limit: 100 })
-      const rawItems = res?.data ?? res?.items ?? []
-      const list = Array.isArray(rawItems) ? rawItems : []
-      // seriesName nằm ở response root (cùng cấp data), không phải trong từng task
-      const seriesNameRoot = res?.seriesName ?? null
-      const tasks = list.map(apiTaskToUi)
+        let tasks = taskList
+        let seriesNameRoot = null
+
+        if (tasks.length === 0) {
+          const res = await tasksService.getMyAssignments({ limit: 100 })
+          const rawItems = res?.data ?? res?.items ?? []
+          const list = Array.isArray(rawItems) ? rawItems : []
+          seriesNameRoot = res?.seriesName ?? null
+          tasks = list.map(apiTaskToUi)
+        } else if (taskSettled.status === 'fulfilled') {
+          seriesNameRoot = taskSettled.value?.seriesName ?? null
+        }
 
       // Gọi song song getById cho tất cả chapters
       const chapterResults = await Promise.allSettled(

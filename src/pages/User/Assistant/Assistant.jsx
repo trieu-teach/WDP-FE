@@ -12,7 +12,6 @@ import {
   Inbox,
   Layers as LayersIcon,
   Lightbulb,
-  Maximize2,
   RefreshCw,
   Sparkles,
   TrendingUp,
@@ -84,6 +83,14 @@ const STATUS_BADGE = {
   revision: {
     label: 'Cần sửa',
     className: 'bg-red-100 text-red-700 hover:bg-red-100 dark:bg-red-500/15 dark:text-red-400',
+  },
+  TE_revision: {
+    label: 'TE sửa',
+    className: 'bg-orange-100 text-orange-700 hover:bg-orange-100 dark:bg-orange-500/15 dark:text-orange-400',
+  },
+  submitted_by_assistant: {
+    label: 'Chờ Mangaka',
+    className: 'bg-sky-100 text-sky-700 hover:bg-sky-100 dark:bg-sky-500/15 dark:text-sky-400',
   },
 }
 
@@ -803,7 +810,7 @@ export default function Assistant() {
           <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border bg-card shadow-sm">
             {selectedWithTask ? (
               <>
-                <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b bg-muted/20 px-4 py-3">
+                <div className="flex shrink-0 flex-wrap items-center gap-3 border-b bg-muted/20 px-4 py-3">
                   <div className="min-w-0">
                     <p className="truncate font-semibold">
                       {selectedWithTask.seriesTitle || 'Chapter'}
@@ -822,15 +829,6 @@ export default function Assistant() {
                       ) : null}
                     </p>
                   </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setIsFullscreen(true)}
-                    className="shrink-0 gap-1.5"
-                  >
-                    <Maximize2 className="size-3.5" />
-                    Phóng to
-                  </Button>
                 </div>
 
                 <div className="min-h-0 flex-1 overflow-hidden">
@@ -854,6 +852,7 @@ export default function Assistant() {
                         pages={selectedWithTask.pages ?? []}
                         task={selectedWithTask._task}
                         pageId={selectedWithTask._task?.pageId ?? null}
+                        onEnterFullscreen={() => setIsFullscreen(true)}
                         onSubmitted={() => { void refreshTasks(); void refresh() }}
                       />
                     )

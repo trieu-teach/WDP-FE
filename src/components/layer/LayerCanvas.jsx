@@ -486,7 +486,7 @@ export default function LayerCanvas({
           size="icon-sm"
           className="size-7 text-white/80 hover:bg-white/10 hover:text-white"
           onClick={handleZoomIn}
-          title="Phóng to (Ctrl + Wheel)"
+          title="Thu phóng (Ctrl + Wheel)"
         >
           <ZoomIn className="size-3.5" />
         </Button>

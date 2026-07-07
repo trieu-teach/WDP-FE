@@ -47,7 +47,7 @@ const CANVAS_W = 960
 const CANVAS_H = 1360
 const PADDING = 12
 
-export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskProp, onSubmitted, pages: pagesProp, fullscreen = false }) {
+export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskProp, onSubmitted, pages: pagesProp, fullscreen = false, onEnterFullscreen }) {
   const chapterPages = chapter?.pages ?? []
   const pages = pagesProp ?? chapterPages
   const [pageIdx, setPageIdx] = useState(0)
@@ -443,6 +443,7 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
       }
 
       let uploadedCount = 0
+      let alreadyDoneCount = 0
       for (const pageTask of tasksToSubmit) {
         const pid = pageTask.pageId ? String(pageTask.pageId) : null
         const page = pid
@@ -464,6 +465,7 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
           && alreadyOnServer
         ) {
           uploadedCount += 1
+          alreadyDoneCount += 1
           if (pid) setSubmittedPages((prev) => ({ ...prev, [pid]: true }))
           continue
         }
@@ -479,6 +481,13 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
           setSubmittedPages((prev) => ({ ...prev, [pid]: true }))
         }
         uploadedCount += 1
+      }
+
+      const freshlySubmitted = tasksToSubmit.length - alreadyDoneCount
+      if (freshlySubmitted === 0) {
+        toast.info('Chapter này đã được nộp trước đó — không cần gửi lại.')
+        onSubmitted?.()
+        return
       }
 
       toast.info('Đang nộp chapter cho Mangaka…')
@@ -497,7 +506,12 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
       onSubmitted?.()
     } catch (err) {
       console.error('[handleSubmitChapter] submit failed:', err)
-      toast.error(getApiErrorMessage(err, 'Gửi chapter thất bại.'))
+      const apiMsg = err?.response?.data?.message ?? ''
+      if (err?.response?.status === 400 && apiMsg.includes('approved')) {
+        toast.error('Một số trang đã được Mangaka duyệt nên không thể nộp lại. Hãy tải lại trang để cập nhật trạng thái mới nhất.')
+      } else {
+        toast.error(getApiErrorMessage(err, 'Gửi chapter thất bại.'))
+      }
     } finally {
       setSubmittingAll(false)
     }
@@ -715,6 +729,18 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
             <RefreshCw className="size-4" />
           </Button>
 
+          {!fullscreen && onEnterFullscreen ? (
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              className="size-8 text-white/50 hover:bg-white/10 hover:text-white"
+              onClick={onEnterFullscreen}
+              title="Toàn màn hình"
+            >
+              <Maximize2 className="size-4" />
+            </Button>
+          ) : null}
+
           <Button
             size="icon-sm"
             variant="ghost"
@@ -724,9 +750,9 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
               setLightboxTitle(`Trang ${safeIdx + 1} · ${layers.length} layer`)
             }}
             disabled={!baseImage && !finalImage}
-            title="Phóng to ảnh"
+            title="Xem ảnh"
           >
-            <Maximize2 className="size-4" />
+            <ImageIcon className="size-4" />
           </Button>
         </div>
       </header>
@@ -752,22 +778,6 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Canvas side — scrollable if canvas is taller than available space */}
         <div className="flex min-h-0 flex-1 flex-col overflow-auto bg-[#0f0f0f]">
-          {/* Lightbox trigger */}
-          {(baseImage || finalImage) && (
-            <button
-              type="button"
-              className="absolute right-4 top-4 z-20 inline-flex size-9 items-center justify-center rounded-2xl border border-white/10 bg-black/60 text-white/60 shadow-xl backdrop-blur-md transition-all hover:scale-105 hover:bg-black/80 hover:text-white"
-              style={{ top: layerNoteInfo ? '72px' : '16px' }}
-              onClick={() => {
-                setLightboxImage(finalImage || baseImage)
-                setLightboxTitle(`Trang ${safeIdx + 1} · ${layers.length} layer`)
-              }}
-              title="Phóng to"
-            >
-              <Maximize2 className="size-4" />
-            </button>
-          )}
-
           {/* Canvas container — fills available space, canvas scales to fit */}
           <div
             className="relative flex min-h-0 flex-1 items-center justify-center overflow-auto p-3"
@@ -874,29 +884,18 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
                     </div>
                     <span className="text-xs font-semibold text-white/80">Ảnh gộp</span>
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="rounded-full border border-emerald-500/30 bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">
-                      sẵn sàng
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setLightboxImage(finalImagesByPage[activePageId] || finalImage)
-                        setLightboxTitle(`Ảnh gộp trang ${safeIdx + 1}`)
-                      }}
-                      className="inline-flex size-6 items-center justify-center rounded-md text-white/40 transition-colors hover:bg-white/10 hover:text-white"
-                      title="Phóng to"
-                    >
-                      <Maximize2 className="size-3" />
-                    </button>
-                  </div>
+                  <span className="rounded-full border border-emerald-500/30 bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">
+                    sẵn sàng
+                  </span>
                 </div>
-                <div
-                  className="group/final relative cursor-pointer overflow-hidden rounded-xl border border-white/10 bg-white/5 transition-shadow hover:shadow-lg hover:shadow-violet-500/10"
+                <button
+                  type="button"
+                  className="group/final relative w-full cursor-pointer overflow-hidden rounded-xl border border-white/10 bg-white/5 text-left transition-shadow hover:shadow-lg hover:shadow-violet-500/10"
                   onClick={() => {
                     setLightboxImage(finalImagesByPage[activePageId] || finalImage)
                     setLightboxTitle(`Ảnh gộp trang ${safeIdx + 1}`)
                   }}
+                  title="Xem ảnh gộp"
                 >
                   <img
                     src={finalImagesByPage[activePageId] || finalImage}
@@ -904,13 +903,7 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
                     className="block h-28 w-full object-contain transition-transform duration-300 group-hover/final:scale-[1.03]"
                     style={{ background: 'rgba(255,255,255,0.03)' }}
                   />
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors group-hover/final:bg-black/20">
-                    <div className="flex items-center gap-1 rounded-full border border-white/20 bg-black/60 px-2 py-1 text-[10px] font-medium text-white opacity-0 backdrop-blur transition-opacity group-hover/final:opacity-100">
-                      <Maximize2 className="size-3" />
-                      Xem phóng to
-                    </div>
-                  </div>
-                </div>
+                </button>
               </div>
             )}
 

@@ -8,6 +8,10 @@ import {
   uiLayerPatchToApi,
 } from '@/utils/layersMappers.js'
 
+function isValidLayerId(layerId) {
+  return Boolean(layerId) && layerId !== 'null' && layerId !== 'undefined'
+}
+
 export function usePageLayers(pageId) {
   const [layers, setLayers] = useState([])
   const [versions, setVersions] = useState({})
@@ -58,7 +62,7 @@ export function usePageLayers(pageId) {
 
   const loadVersions = useCallback(
     async (layerId) => {
-      if (!pageId || !layerId) return []
+      if (!pageId || !isValidLayerId(layerId)) return []
       const list = await layersService.listVersions(pageId, layerId)
       const mapped = (Array.isArray(list) ? list : []).map(apiVersionToUi)
       setVersions((cur) => ({ ...cur, [layerId]: mapped }))
@@ -93,7 +97,7 @@ export function usePageLayers(pageId) {
 
   const updateLayer = useCallback(
     async (layerId, patch) => {
-      if (!pageId) return
+      if (!pageId || !isValidLayerId(layerId)) return
       const apiPatch = uiLayerPatchToApi(patch)
       setLayers((cur) =>
         cur.map((l) => (l.id === layerId ? { ...l, ...patch } : l)),
@@ -110,7 +114,7 @@ export function usePageLayers(pageId) {
 
   const deleteLayer = useCallback(
     async (layerId) => {
-      if (!pageId) return
+      if (!pageId || !isValidLayerId(layerId)) return
       const target = layers.find((l) => l.id === layerId)
       const ok = window.confirm(`Xóa layer #${target?.index ?? '?'}? Lịch sử version cũng mất.`)
       if (!ok) return
@@ -132,7 +136,7 @@ export function usePageLayers(pageId) {
 
   const uploadNewVersion = useCallback(
     async (layerId, { file, note, changeSummary, onUploadProgress }) => {
-      if (!pageId) return null
+      if (!pageId || !isValidLayerId(layerId)) return null
       setUploading(true)
       try {
         const created = await layersService.uploadVersion(pageId, layerId, {
@@ -173,7 +177,7 @@ export function usePageLayers(pageId) {
 
   const rollback = useCallback(
     async (layerId, versionId) => {
-      if (!pageId) return
+      if (!pageId || !isValidLayerId(layerId)) return
       try {
         const res = await layersService.rollback(pageId, layerId, versionId)
         const version = apiVersionToUi(res?.version ?? res)
@@ -208,8 +212,10 @@ export function usePageLayers(pageId) {
       setLayers(reordered)
       try {
         await Promise.all(
-          orderedIds.map((id, idx) =>
-            layersService.updateLayer(pageId, id, { index: idx }),
+          orderedIds.flatMap((id, idx) =>
+            isValidLayerId(id)
+              ? [layersService.updateLayer(pageId, id, { index: idx })]
+              : [],
           ),
         )
       } catch (err) {

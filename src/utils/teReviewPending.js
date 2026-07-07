@@ -329,3 +329,57 @@ export function isTeSeriesLevelSubmission(submission) {
 export function isTeChapterLevelSubmission(submission) {
   return submissionTeTabType(submission) === 'chapter_level'
 }
+
+function resolveTeSubmissionSortTime(submission) {
+  const raw =
+    submission?.sentAt
+    ?? submission?.teAssignedAt
+    ?? submission?.updatedAt
+    ?? null
+  if (!raw) return 0
+  const time = new Date(raw).getTime()
+  return Number.isNaN(time) ? 0 : time
+}
+
+function resolveTeSubmissionSeriesKey(submission) {
+  return (
+    submission?.seriesId
+    ?? submission?.seriesTitle
+    ?? String(submission?.id ?? '')
+  )
+}
+
+/**
+ * Series / chapter mới hoặc vừa cập nhật lên đầu hàng chờ.
+ * Cùng series: chapter gửi gần nhất trước.
+ */
+export function sortTePendingSubmissionsNewestFirst(submissions) {
+  const list = Array.isArray(submissions) ? submissions : []
+  if (list.length <= 1) return list
+
+  const seriesLatestAt = new Map()
+  for (const sub of list) {
+    const key = resolveTeSubmissionSeriesKey(sub)
+    const t = resolveTeSubmissionSortTime(sub)
+    seriesLatestAt.set(key, Math.max(seriesLatestAt.get(key) ?? 0, t))
+  }
+
+  return [...list].sort((a, b) => {
+    const keyA = resolveTeSubmissionSeriesKey(a)
+    const keyB = resolveTeSubmissionSeriesKey(b)
+    const bySeries =
+      (seriesLatestAt.get(keyB) ?? 0) - (seriesLatestAt.get(keyA) ?? 0)
+    if (bySeries !== 0) return bySeries
+
+    const byTime = resolveTeSubmissionSortTime(b) - resolveTeSubmissionSortTime(a)
+    if (byTime !== 0) return byTime
+
+    const chA = Number(a.chapterNum)
+    const chB = Number(b.chapterNum)
+    if (!Number.isNaN(chA) && !Number.isNaN(chB) && chA !== chB) {
+      return chB - chA
+    }
+
+    return String(b.id ?? '').localeCompare(String(a.id ?? ''))
+  })
+}
