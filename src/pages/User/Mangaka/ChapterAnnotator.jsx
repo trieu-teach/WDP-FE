@@ -116,6 +116,7 @@ export default function ChapterAnnotator({
   const [uploadUi, setUploadUi] = useState(null)
   const [uploadRejectMessage, setUploadRejectMessage] = useState(null)
   const [sendAssistantId, setSendAssistantId] = useState('')
+  const [sendingToAssistant, setSendingToAssistant] = useState(false)
 
   const activeChapter = chapters.find(c => c.id === activeChapterId)
   const pages = activeChapter?.pages ?? []
@@ -216,6 +217,27 @@ export default function ChapterAnnotator({
       /* giữ bản local, thử lại lần sau */
     }
   }, [pageIndex, pageKey, pages, workspaceApi, setNotes])
+
+  const flushNotesBeforeSend = useCallback(async () => {
+    for (const timerId of Object.values(noteSaveTimersRef.current)) {
+      window.clearTimeout(timerId)
+    }
+    noteSaveTimersRef.current = {}
+
+    for (const stableKey of [...draftTextRef.current.keys()]) {
+      await persistNoteById(stableKey)
+    }
+
+    const snapshot = {}
+    for (const [pk, list] of Object.entries(notes)) {
+      snapshot[pk] = (list ?? []).map((n) => {
+        const key = noteStableKey(n)
+        const draft = draftTextRef.current.get(key)
+        return draft !== undefined ? { ...n, text: draft } : n
+      })
+    }
+    return snapshot
+  }, [notes, persistNoteById])
 
   const scheduleNoteSave = useCallback((stableKey, currentText) => {
     if (!stableKey) return
@@ -1113,13 +1135,20 @@ export default function ChapterAnnotator({
   }
 
   function SendActionsBar({ compact = false, embedded = false, inline = false }) {
-    const handleAssistant = () => {
-      if (!activeChapter || !onSendToAssistant) return
-      onSendToAssistant({
-        chapter: activeChapter,
-        pages,
-        assistantId: sendAssistantId,
-      })
+    const handleAssistant = async () => {
+      if (!activeChapter || !onSendToAssistant || sendingToAssistant) return
+      setSendingToAssistant(true)
+      try {
+        const syncedNotes = await flushNotesBeforeSend()
+        await onSendToAssistant({
+          chapter: activeChapter,
+          pages,
+          assistantId: sendAssistantId,
+          notesByPage: syncedNotes,
+        })
+      } finally {
+        setSendingToAssistant(false)
+      }
     }
     const handleTantou = () => {
       if (!activeChapter || !onSendToTantou) return
@@ -1180,12 +1209,12 @@ export default function ChapterAnnotator({
           ) : null}
           <Button
             size="sm"
-            disabled={!activeChapter || pages.length === 0 || !sendAssistantId}
-            onClick={handleAssistant}
+            disabled={!activeChapter || pages.length === 0 || !sendAssistantId || sendingToAssistant}
+            onClick={() => { void handleAssistant() }}
             className="h-8 w-full min-w-0 text-xs"
           >
             <Send className="size-3 shrink-0" />
-            Gửi Assistant
+            {sendingToAssistant ? 'Đang gửi…' : 'Gửi Assistant'}
           </Button>
         </div>
       </div>

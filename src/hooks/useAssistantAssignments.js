@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 import { tasksService } from '@/api/tasks.service.js'
 import { chaptersService } from '@/api/chapters.service.js'
 import { resolveMediaUrl } from '@/api/http.js'
-import { apiTaskToUi, apiPageToUi } from '@/utils/apiMappers.js'
+import { apiTaskToUi, apiPageToUi, apiNoteToUi, parsePageNotesResponse } from '@/utils/apiMappers.js'
 
 function rawPageToUi(p) {
   const rawUrl =
@@ -23,6 +23,7 @@ function rawPageToUi(p) {
     width: p.width ?? p.w ?? 800,
     height: p.height ?? p.h ?? 1100,
     pageNumber: p.page_number ?? p.pageNumber ?? p.index ?? 0,
+    tasks: Array.isArray(p.tasks) ? p.tasks : [],
   }
 }
 
@@ -399,8 +400,20 @@ export function useAssistantAssignments() {
     const pagesArray = Array.isArray(pagesRes)
       ? pagesRes
       : (pagesRes?.data && Array.isArray(pagesRes.data) ? pagesRes.data : null)
+
+    const chapterPagesRaw = chapter?.pages ?? chapter?.data?.pages ?? []
+    const chapterPageById = new Map(
+      (Array.isArray(chapterPagesRaw) ? chapterPagesRaw : []).map((p) => [
+        String(p._id ?? p.id ?? ''),
+        p,
+      ]),
+    )
+
     if (pagesArray?.length > 0) {
-      pages = pagesArray.map(rawPageToUi)
+      pages = pagesArray.map((p) => {
+        const rich = chapterPageById.get(String(p._id ?? p.id ?? ''))
+        return rawPageToUi(rich ? { ...p, tasks: rich.tasks ?? p.tasks } : p)
+      })
     }
 
     // Lấy notes từ task.noteIds (BE populate vào task object)
@@ -417,9 +430,16 @@ export function useAssistantAssignments() {
       ''
 
     // Parse revision_notes string → structured notes (dùng revision_annotations array nếu có)
+    const annotationsSource =
+      chapter?.revision_annotations_by_page
+      ?? chapter?.data?.revision_annotations_by_page
+      ?? chapter?.revision_annotations
+      ?? chapter?.data?.revision_annotations
+      ?? null
+
     const revisionNotesParsed = parseRevisionNotes(
       chapter?.revision_notes ?? chapter?.data?.revision_notes ?? null,
-      chapter?.revision_annotations ?? chapter?.data?.revision_annotations ?? null,
+      annotationsSource,
       pages.length,
     )
 
@@ -442,8 +462,13 @@ export function useAssistantAssignments() {
       title: chapter?.title ?? chapter?.data?.title ?? '',
       status: chapter?.status ?? 'pending_assistant',
       revision_annotations: chapter?.revision_annotations ?? chapter?.data?.revision_annotations ?? null,
+      revision_annotations_by_page:
+        chapter?.revision_annotations_by_page
+        ?? chapter?.data?.revision_annotations_by_page
+        ?? null,
       revision_notes: chapter?.revision_notes ?? chapter?.data?.revision_notes ?? null,
       revision_notes_parsed: revisionNotesParsed,
+      pages: chapter?.pages ?? chapter?.data?.pages ?? pages,
     }
 
     return { chapter: safeChapter, pages, taskNotes, revisionNotesParsed: resolvedNotes }
@@ -458,9 +483,7 @@ export function useAssistantAssignments() {
         ? Promise.resolve(taskNotes)
         : chaptersService.getPageNotes(pageId).catch(() => []),
     ])
-    const resolvedNotes = Array.isArray(notes) ? notes.map(n =>
-      typeof n === 'object' && n !== null ? n : { id: n },
-    ) : []
+    const resolvedNotes = parsePageNotesResponse(notes).notes
     const tasks = detail?.tasks ?? []
     return { page: detail, tasks, notes: resolvedNotes }
   }, [])

@@ -250,9 +250,205 @@ export function uiNoteToApi(note) {
 /** @deprecated Dùng uiNoteToApi */
 export const uiNoteToApiContent = uiNoteToApi
 
+/** Chuẩn hoá response GET /chapters/pages/:id/notes → mảng note. */
+export function extractPageNotesList(res) {
+  if (!res) return []
+  if (Array.isArray(res)) return res
+  if (Array.isArray(res.notes)) return res.notes
+  if (res.data) {
+    if (Array.isArray(res.data)) return res.data
+    if (Array.isArray(res.data.notes)) return res.data.notes
+  }
+  return []
+}
+
+/** Lấy page meta từ response GET /chapters/pages/:id/notes. */
+export function extractPageNotesPage(res) {
+  if (!res || typeof res !== 'object') return null
+  if (res.page && typeof res.page === 'object') return res.page
+  if (res.data?.page && typeof res.data.page === 'object') return res.data.page
+  return null
+}
+
+/**
+ * Parse đầy đủ GET /chapters/pages/:id/notes
+ * → { page, notes[] } với notes đã map sang UI shape (x, y, w, h %).
+ */
+export function parsePageNotesResponse(res) {
+  const page = extractPageNotesPage(res)
+  const notes = extractPageNotesList(res).map((n) => ({
+    ...apiNoteToUi(n),
+    source: 'api',
+  }))
+  return { page, notes }
+}
+
+export function sortPagesByNumber(pages) {
+  return [...(pages ?? [])].sort(
+    (a, b) =>
+      (a.pageNumber ?? a.page_number ?? 0) - (b.pageNumber ?? b.page_number ?? 0),
+  )
+}
+
+function mapAnnotationNoteToUi(n, pageIdx, noteIdx, source = 'chapterAnnotations') {
+  const region = n?.region ?? {}
+  const id = n?._id ?? n?.id ?? `${source}-${pageIdx}-${noteIdx}`
+  return {
+    id,
+    clientKey: String(id),
+    text: n?.text ?? n?.content ?? '',
+    x: Number(n?.x ?? region.x ?? 0),
+    y: Number(n?.y ?? region.y ?? 0),
+    w: Number(n?.w ?? n?.width ?? region.width ?? region.w ?? 0),
+    h: Number(n?.h ?? n?.height ?? region.height ?? region.h ?? 0),
+    taskType: n?.taskType ?? n?.error_type ?? 'other',
+    status: n?.status ?? 'open',
+    source,
+  }
+}
+
+/** Note có vùng % thật do Mangaka khoanh — loại placeholder full-canvas từ revision_notes text. */
+export function isSpatialRegionNote(note) {
+  const x = Number(note?.x ?? 0)
+  const y = Number(note?.y ?? 0)
+  const w = Number(note?.w ?? note?.width ?? 0)
+  const h = Number(note?.h ?? note?.height ?? 0)
+  if (w <= 0 || h <= 0) return false
+  // Chỉ là text parse từ revision_notes string — không có toạ độ vùng
+  if (note?.source === 'parsed') return false
+  // Placeholder full-canvas (0,0,100,100) khi không có vùng cụ thể
+  if (w >= 90 && h >= 90 && x <= 5 && y <= 5) return false
+  return true
+}
+
+export function filterSpatialMangakaNotes(notes) {
+  const spatial = (notes ?? []).filter(isSpatialRegionNote)
+  if (!spatial.length) return []
+
+  // Ưu tiên nguồn có toạ độ chính xác từ DB / BE
+  const priority = ['api', 'taskNotes', 'chapterPageTasks', 'byPage', 'revisionMap', 'revisionArray', 'revisionParsed']
+  const sorted = [...spatial].sort((a, b) => {
+    const pa = priority.indexOf(a.source ?? '')
+    const pb = priority.indexOf(b.source ?? '')
+    return (pa === -1 ? 99 : pa) - (pb === -1 ? 99 : pb)
+  })
+
+  const seen = new Set()
+  const out = []
+  for (const n of sorted) {
+    const key = n.clientKey ?? n.id ?? `${n.x}-${n.y}-${n.w}-${n.h}-${n.text}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(n)
+  }
+  return out
+}
+
+const NOTE_SOURCE_PRIORITY = ['api', 'taskNotes', 'chapterPageTasks', 'byPage', 'revisionMap', 'revisionArray', 'revisionParsed']
+
+function noteMergeScore(note) {
+  let s = NOTE_SOURCE_PRIORITY.indexOf(note?.source ?? '')
+  if (s === -1) s = 99
+  if (isSpatialRegionNote(note)) s -= 20
+  return s
+}
+
+/** Gộp notes từ nhiều nguồn — ưu tiên API + toạ độ hợp lệ khi trùng id. */
+export function mergeMangakaNoteLists(...lists) {
+  const byKey = new Map()
+  for (const list of lists) {
+    for (const note of list ?? []) {
+      let key = note?.clientKey ?? note?.id
+      if (key == null && note?._id != null) key = String(note._id)
+      if (key == null && isSpatialRegionNote(note)) {
+        key = `spatial-${note.x}-${note.y}-${note.w}-${note.h}-${note.text ?? ''}`
+      }
+      if (!key) continue
+      const prev = byKey.get(key)
+      if (!prev || noteMergeScore(note) < noteMergeScore(prev)) {
+        byKey.set(key, note)
+      }
+    }
+  }
+  return Array.from(byKey.values())
+}
+
+/** Gom ghi chú Mangaka cho 1 trang (pageIdx 0-based, pages đã sort). */
+export function buildChapterPageAnnotations(chapter, pageIdx, sortedPages = []) {
+  const result = []
+  const activePageId = sortedPages[pageIdx]?.id ?? sortedPages[pageIdx]?._id ?? null
+
+  const byPage =
+    chapter?.revision_annotations_by_page
+    ?? chapter?.data?.revision_annotations_by_page
+  if (byPage && typeof byPage === 'object' && !Array.isArray(byPage)) {
+    const arr = byPage[`page_${pageIdx}`] ?? byPage[pageIdx]
+    if (Array.isArray(arr)) {
+      arr.forEach((n, i) => result.push(mapAnnotationNoteToUi(n, pageIdx, i, 'byPage')))
+    }
+  }
+
+  const raw = chapter?.revision_annotations ?? chapter?.data?.revision_annotations
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    const arr = raw[`page_${pageIdx}`] ?? raw[pageIdx]
+    if (Array.isArray(arr)) {
+      arr.forEach((n, i) => result.push(mapAnnotationNoteToUi(n, pageIdx, i, 'revisionMap')))
+    }
+  }
+
+  if (Array.isArray(raw)) {
+    raw.forEach((n, i) => {
+      const notePageId = n?.page_id?._id ?? n?.page_id ?? n?.pageId
+      if (notePageId && activePageId && String(notePageId) !== String(activePageId)) return
+      if (!notePageId && n?.pageIndex != null && Number(n.pageIndex) !== pageIdx) return
+      result.push(mapAnnotationNoteToUi(n, pageIdx, `arr-${i}`, 'revisionArray'))
+    })
+  }
+
+  // revision_notes_parsed — ghi chú có toạ độ từ revision_annotations (flatten)
+  const parsedList = chapter?.revision_notes_parsed ?? chapter?.data?.revision_notes_parsed ?? []
+  if (Array.isArray(parsedList)) {
+    parsedList.forEach((n, i) => {
+      if (n?.pageIndex != null && Number(n.pageIndex) !== pageIdx) return
+      if (n?.pageId && activePageId && String(n.pageId) !== String(activePageId)) return
+      result.push(mapAnnotationNoteToUi(n, pageIdx, i, 'revisionParsed'))
+    })
+  }
+
+  const pageData = sortedPages[pageIdx]
+  for (const task of pageData?.tasks ?? []) {
+    const noteIds = task?.note_ids ?? task?.noteIds ?? []
+    if (!Array.isArray(noteIds)) continue
+    noteIds.forEach((n, i) => {
+      const ui = typeof n === 'object' ? apiNoteToUi(n) : { text: '' }
+      const id = ui.id ?? `ptask-${pageIdx}-${i}`
+      result.push({
+        ...ui,
+        id,
+        clientKey: ui.clientKey ?? String(id),
+        source: 'chapterPageTasks',
+      })
+    })
+  }
+
+  return result
+}
+
+export function normalizeNoteCoords(note) {
+  const n = note ?? {}
+  const region = n.region ?? {}
+  return {
+    x: Number(n.x ?? region.x ?? 0),
+    y: Number(n.y ?? region.y ?? 0),
+    w: Number(n.w ?? n.width ?? region.width ?? region.w ?? 0),
+    h: Number(n.h ?? n.height ?? region.height ?? region.h ?? 0),
+  }
+}
+
 export function apiNoteToUi(raw) {
   const n = raw ?? {}
   const id = n._id ?? n.id
+  const coords = normalizeNoteCoords(n)
   const base = {
     clientKey: id ? String(id) : undefined,
     assignee: n.assignee ?? '',
@@ -262,16 +458,14 @@ export function apiNoteToUi(raw) {
       ...base,
       id,
       text: n.text ?? '',
-      x: n.x ?? 0,
-      y: n.y ?? 0,
-      w: n.w ?? 0,
-      h: n.h ?? 0,
+      ...coords,
       taskType: n.taskType ?? 'other',
       layerIndex: n.layerIndex ?? n.layer_index ?? null,
-      noteKind: n.noteKind ?? n.note_kind ?? 'paint',
+      noteKind: n.noteKind ?? n.note_kind ?? 'brief',
       status: n.status ?? 'open',
       pageId: n.pageId ?? n.page_id ?? null,
-      authorRole: n.authorRole ?? n.author_role ?? null,
+      authorRole: n.authorRole ?? n.author_role ?? 'mangaka',
+      revisionRound: n.revisionRound ?? n.revision_round ?? 1,
     }
   }
 
@@ -281,21 +475,20 @@ export function apiNoteToUi(raw) {
   } catch {
     parsed = { text: n.content ?? '' }
   }
+  const parsedCoords = normalizeNoteCoords({ ...n, ...parsed })
   return {
     ...base,
     id,
     text: parsed.text ?? n.content ?? '',
-    x: parsed.x ?? 0,
-    y: parsed.y ?? 0,
-    w: parsed.w ?? 0,
-    h: parsed.h ?? 0,
+    ...parsedCoords,
     taskType: parsed.taskType ?? 'other',
     assignee: parsed.assignee ?? '',
     layerIndex: parsed.layerIndex ?? parsed.layer_index ?? null,
-    noteKind: parsed.noteKind ?? parsed.note_kind ?? 'paint',
+    noteKind: parsed.noteKind ?? parsed.note_kind ?? 'brief',
     status: parsed.status ?? n.status ?? 'open',
     pageId: parsed.pageId ?? parsed.page_id ?? n.pageId ?? n.page_id ?? null,
-    authorRole: parsed.authorRole ?? parsed.author_role ?? n.authorRole ?? n.author_role ?? null,
+    authorRole: parsed.authorRole ?? parsed.author_role ?? n.authorRole ?? n.author_role ?? 'mangaka',
+    revisionRound: parsed.revisionRound ?? parsed.revision_round ?? n.revision_round ?? 1,
   }
 }
 
@@ -416,17 +609,14 @@ export function apiTaskToUi(raw) {
      * FE nên dùng mảng này thay vì gọi riêng GET /pages/:id/notes.
      */
     noteIds: Array.isArray(t.note_ids)
-      ? t.note_ids.map(n => ({
-          id: n._id ?? n.id,
-          text: n.text ?? '',
-          x: n.x ?? 0,
-          y: n.y ?? 0,
-          w: n.w ?? n.width ?? 0,
-          h: n.h ?? n.height ?? 0,
-          taskType: n.taskType ?? 'other',
-          status: n.status ?? 'open',
-          createdAt: n.createdAt ?? n.created_at ?? null,
-        }))
+      ? t.note_ids.map((n, i) => {
+          const ui = apiNoteToUi(n)
+          return {
+            ...ui,
+            id: ui.id ?? `note-${i}`,
+            clientKey: ui.clientKey ?? String(ui.id ?? `note-${i}`),
+          }
+        })
       : [],
     /**
      * Lịch sử các lần Mangaka yêu cầu chỉnh sửa.

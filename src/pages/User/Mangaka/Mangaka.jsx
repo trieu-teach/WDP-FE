@@ -447,6 +447,7 @@ export default function Mangaka() {
     loadPageNotes,
     loadChapterPages,
     savePageNote,
+    syncChapterNotes,
     deletePageNote,
     refresh: refreshWorkspace,
   } = useMangakaWorkspace(user);
@@ -729,6 +730,7 @@ export default function Mangaka() {
       loadChapterPages,
       loadPageNotes,
       savePageNote,
+      syncChapterNotes,
       deletePageNote,
       refresh: refreshWorkspace,
     }),
@@ -740,6 +742,7 @@ export default function Mangaka() {
       loadChapterPages,
       loadPageNotes,
       savePageNote,
+      syncChapterNotes,
       deletePageNote,
       refreshWorkspace,
     ],
@@ -757,6 +760,7 @@ export default function Mangaka() {
     chapter,
     pages,
     assistantId,
+    notesByPage,
   }) {
     if (!chapter?.id) return
     if (!pages?.length) {
@@ -773,6 +777,11 @@ export default function Mangaka() {
     const currentAssistantId = chapterRow?.assistantId ? String(chapterRow.assistantId) : null
 
     try {
+      const notesSource = notesByPage ?? annotatorNotes
+
+      // Đồng bộ note lên BE trước khi gom payload (Assistant đọc GET /pages/:id/notes)
+      const syncedNotes = await syncChapterNotes(chapter.id, pages, notesSource)
+
       // Gom ghi chú để đính kèm revision_notes (string) + revision_annotations (array có toạ độ)
       const allNotes = []
       const annotationMap = {}  // pageIndex → array of annotation objects with coords
@@ -781,8 +790,8 @@ export default function Mangaka() {
         const page = pages[pageIndex]
         if (!page?.id) continue
         const pageKey = `${chapter.id}-${pageIndex}`
-        const pageNotes = annotatorNotes[pageKey]?.length
-          ? annotatorNotes[pageKey]
+        const pageNotes = syncedNotes[pageKey]?.length
+          ? syncedNotes[pageKey]
           : await loadPageNotes(page.id, pageKey)
 
         const annotations = []
@@ -798,6 +807,7 @@ export default function Mangaka() {
               y: Number(note.y) || 0,
               w: Number(note.w) || 0,
               h: Number(note.h) || 0,
+              taskType: note.taskType ?? 'other',
               error_type: uiTaskTypeToErrorType(note.taskType),
             })
           }
@@ -834,35 +844,17 @@ export default function Mangaka() {
         }
       }
 
-      // Bước 2 — gửi chapter cho Assistant.
-      // LUỒNG 2: POST /chapters đã tạo 1 task/trang — không gọi action:submit (tránh tạo task trùng).
-      const existingRaw = await tasksService.getByChapter(chapter.id).catch(() => [])
-      const existingTasks = dedupeTasksByPage(
-        (Array.isArray(existingRaw) ? existingRaw : []).map(apiTaskToUi),
-      )
-      const pageIds = new Set(
-        pages.map((p) => String(p.id)).filter(Boolean),
-      )
-      const taskPageIds = new Set(
-        existingTasks.map((t) => String(t.pageId)).filter(Boolean),
-      )
-      const tasksAlreadyCoverPages =
-        pageIds.size > 0 && [...pageIds].every((id) => taskPageIds.has(id))
-
+      // Bước 2 — PATCH action:submit (BE gắn PageNote → task.note_ids + xử lý revision_annotations)
       const submitPayload = {
         assigned_to: targetAssistantId,
         revision_notes: revisionNotes,
         ...(Object.keys(annotationMap).length > 0 ? { revision_annotations: annotationMap } : {}),
       }
 
-      if (tasksAlreadyCoverPages) {
-        await chaptersService.update(chapter.id, submitPayload)
-      } else {
-        await chaptersService.update(chapter.id, {
-          action: 'submit',
-          ...submitPayload,
-        })
-      }
+      await chaptersService.update(chapter.id, {
+        action: 'submit',
+        ...submitPayload,
+      })
 
       // Bước 3 — cập nhật UI
       await updateChapterStatus(chapter.id, 'assistant')

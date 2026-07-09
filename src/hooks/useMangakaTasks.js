@@ -8,6 +8,7 @@ import {
 } from '@/utils/apiMappers.js'
 import {
   dedupeTasksByPage,
+  dedupeTasksForMangakaReview,
   getTasksForMangakaRevision,
 } from '@/utils/chapterTaskFlow.js'
 
@@ -61,15 +62,16 @@ export function useMangakaTasks(chapterRows) {
             apiStatus: submission.status,
           }
           let tasks = []
+          let allTasks = []
           try {
             const raw = await tasksService.getByChapter(submission.id)
-            tasks = dedupeTasksByPage(
-              (Array.isArray(raw) ? raw : []).map(apiTaskToUi),
-            )
+            allTasks = (Array.isArray(raw) ? raw : []).map(apiTaskToUi)
+            tasks = dedupeTasksForMangakaReview(allTasks)
           } catch {
             tasks = []
+            allTasks = []
           }
-          return { chapter: row, submission, tasks }
+          return { chapter: row, submission, tasks, allTasks }
         }),
       )
       setPendingReviews(reviews)
@@ -111,7 +113,7 @@ export function useMangakaTasks(chapterRows) {
       if (!tasks.length && chapterId) {
         const raw = await tasksService.getByChapter(chapterId)
         tasks = getTasksForMangakaRevision(
-          dedupeTasksByPage((Array.isArray(raw) ? raw : []).map(apiTaskToUi)),
+          dedupeTasksForMangakaReview((Array.isArray(raw) ? raw : []).map(apiTaskToUi)),
         )
       }
 

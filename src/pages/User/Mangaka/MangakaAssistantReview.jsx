@@ -16,7 +16,7 @@ import { getSession, logout } from "@/lib/auth.js";
 import { resolveMediaUrl } from "@/api/http.js";
 import { useMangakaWorkspace } from "@/hooks/useMangakaWorkspace.js";
 import { useMangakaTasks } from "@/hooks/useMangakaTasks.js";
-import { buildReviewPageCompare, countUnapprovedTasks, dedupeTasksByPage } from "@/utils/chapterTaskFlow.js";
+import { buildReviewPageCompare, countUnapprovedTasks, dedupeTasksForMangakaReview } from "@/utils/chapterTaskFlow.js";
 import { resolveAnnotatorChapter } from "@/utils/mangakaWorkspaceReader.js";
 
 const NAV_LINKS = [
@@ -219,7 +219,9 @@ export default function MangakaAssistantReview() {
                         resultUrls[0] ??
                         annot?.pages?.find((p) => p?.url)?.url ??
                         null;
-                      const tasks = dedupeTasksByPage(review.tasks ?? []);
+                      const tasks = dedupeTasksForMangakaReview(
+                        review.allTasks ?? review.tasks ?? [],
+                      );
                       const approvedTasks = tasks.filter(
                         (t) => t.status === "approved",
                       ).length;

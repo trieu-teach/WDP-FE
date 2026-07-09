@@ -21,7 +21,8 @@ import {
   buildReviewPageCompare,
   canMangakaApproveChapterReview,
   countUnapprovedTasks,
-  dedupeTasksByPage,
+  dedupeTasksForMangakaReview,
+  formatApproveByMangakaError,
   isChapterSubmittedByAssistant,
 } from "@/utils/chapterTaskFlow.js";
 import { cn } from "@/lib/utils";
@@ -85,10 +86,13 @@ export function AssistantReviewChapterCard({
   onApproveTask,
   onRequestRevision,
   revisionSending = false,
+  highlightPageNumbers = [],
 }) {
   const chapter = review?.chapter;
   const submission = review?.submission ?? null;
-  const submittedTasks = dedupeTasksByPage(review?.tasks ?? []);
+  const submittedTasks = dedupeTasksForMangakaReview(
+    review?.allTasks ?? review?.tasks ?? [],
+  );
   const pageCompare = buildReviewPageCompare(pages, submittedTasks);
   const chapterView = buildChapterView(submission);
   const chapterSubmitted = isChapterSubmittedByAssistant(review);
@@ -97,6 +101,9 @@ export function AssistantReviewChapterCard({
   const loading = pagesLoading || (tasksLoading && !hasImages);
 
   const canSend = canApprove;
+  const highlightSet = new Set(
+    (highlightPageNumbers ?? []).map((n) => Number(n)).filter((n) => !Number.isNaN(n)),
+  );
   const selectedTe = (teUsers ?? []).find(
     (te) => String(te._id) === String(selectedTeId),
   );
@@ -188,10 +195,15 @@ export function AssistantReviewChapterCard({
             <ul className="space-y-1.5">
               {submittedTasks.map((task) => {
                 const hint = taskStatusHint(task, chapterSubmitted);
+                const pageNum = task.pageNumber;
+                const isHighlighted = pageNum != null && highlightSet.has(Number(pageNum));
                 return (
                   <li
                     key={task.id}
-                    className="flex items-center justify-between gap-2 rounded-md border bg-card px-2.5 py-2 text-xs"
+                    className={cn(
+                      "flex items-center justify-between gap-2 rounded-md border bg-card px-2.5 py-2 text-xs",
+                      isHighlighted && "border-amber-500/70 bg-amber-50/50 ring-1 ring-amber-400/40 dark:bg-amber-500/10",
+                    )}
                   >
                     <span className="min-w-0 truncate">
                       {task.pageNumber != null
@@ -236,6 +248,15 @@ export function AssistantReviewChapterCard({
                 );
               })}
             </ul>
+          </div>
+        ) : null}
+
+        {highlightSet.size > 0 ? (
+          <div className="rounded-lg border border-amber-500/50 bg-amber-50/60 px-3 py-2 text-xs text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">
+            Còn task chưa duyệt tại{" "}
+            {[...highlightSet].sort((a, b) => a - b).map((n) => `Trang ${n}`).join(", ")}
+            . Bấm <strong>Nhận</strong> rồi <strong>Duyệt</strong> trước khi gửi{" "}
+            {LABEL_TANTOU_EDITOR}.
           </div>
         ) : null}
 

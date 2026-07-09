@@ -56,6 +56,7 @@ export default function LayerCanvas({
   showRegion = true,
   showNotes = true,
   fullscreen = false,
+  overlay = null,
 }) {
   const containerRef = useRef(null)
   const canvasRef = useRef(null)
@@ -413,8 +414,10 @@ export default function LayerCanvas({
           className="block"
         />
 
-        {/* Empty state */}
-        {sorted.length === 0 && (
+        {overlay}
+
+        {/* Empty state — không che ảnh gốc Mangaka khi đã có baseImage */}
+        {sorted.length === 0 && !baseImage && (
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white/90 backdrop-blur-sm">
             <div className="flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-slate-100 to-slate-200 shadow-inner">
               <ImagePlus className="size-7 text-slate-400" />

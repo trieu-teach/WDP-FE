@@ -10,6 +10,8 @@ import {
   apiPageToUi,
   apiRankingToUi,
   apiSeriesToUi,
+  extractPageNotesList,
+  parsePageNotesResponse,
   uiChapterStatusToApi,
   uiNoteToApi,
   uiSeriesFormToApi,
@@ -379,19 +381,9 @@ export function useMangakaWorkspace(user) {
     ))
   }, [])
 
-  const loadPageNotes = useCallback(async (pageId, pageKey) => {
-    const notes = await chaptersService.getPageNotes(pageId)
-    const unwrapped = (() => {
-      if (Array.isArray(notes)) return notes
-      if (notes && typeof notes === 'object' && 'data' in notes) {
-        const inner = notes.data
-        if (Array.isArray(inner)) return inner
-        if (inner && typeof inner === 'object' && 'data' in inner) return inner.data ?? []
-        return [inner].filter(Boolean)
-      }
-      return []
-    })()
-    const list = unwrapped.map(apiNoteToUi)
+  const loadPageNotes = useCallback(async (pageId, pageKey, params) => {
+    const res = await chaptersService.getPageNotes(pageId, params)
+    const list = parsePageNotesResponse(res).notes
     // Deduplicate theo id/clientKey để tránh React key collision khi BE trả duplicate
     const seen = new Set()
     const deduped = list.filter(n => {
@@ -433,6 +425,23 @@ export function useMangakaWorkspace(user) {
     return { ...note, id: serverId, clientKey: note.clientKey ?? clientKey }
   }, [])
 
+  /** Đồng bộ toàn bộ note chapter lên BE trước khi gửi Assistant (tránh lần 1 thiếu toạ độ). */
+  const syncChapterNotes = useCallback(async (chapterId, pages, notesByPage) => {
+    const synced = { ...(notesByPage ?? {}) }
+    for (let pageIndex = 0; pageIndex < (pages ?? []).length; pageIndex += 1) {
+      const page = pages[pageIndex]
+      if (!page?.id) continue
+      const pageKey = `${chapterId}-${pageIndex}`
+      const list = notesByPage?.[pageKey] ?? []
+      const saved = []
+      for (const note of list) {
+        saved.push(await savePageNote(page.id, pageKey, note))
+      }
+      synced[pageKey] = saved
+    }
+    return synced
+  }, [savePageNote])
+
   const deletePageNote = useCallback(async (pageId, pageKey, noteId) => {
     if (!String(noteId).startsWith('note-')) {
       await chaptersService.deletePageNote(pageId, noteId)
@@ -469,6 +478,7 @@ export function useMangakaWorkspace(user) {
     unassignChapter,
     loadPageNotes,
     savePageNote,
+    syncChapterNotes,
     deletePageNote,
   }
 }

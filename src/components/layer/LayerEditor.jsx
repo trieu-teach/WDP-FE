@@ -19,13 +19,14 @@ import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { usePageLayers } from '@/hooks/usePageLayers.js'
 import { layersService } from '@/api/layers.service.js'
-import { apiNoteToUi, apiTaskToUi } from '@/utils/apiMappers.js'
+import { apiNoteToUi, apiTaskToUi, buildChapterPageAnnotations, mergeMangakaNoteLists, parsePageNotesResponse, filterSpatialMangakaNotes, sortPagesByNumber } from '@/utils/apiMappers.js'
 import { chaptersService } from '@/api/chapters.service.js'
 import { tasksService } from '@/api/tasks.service.js'
 import { getApiErrorMessage, resolveMediaUrl } from '@/api/http.js'
-import { normalizeResultImageUrl, dedupeTasksByPage, sortTasksByPage } from '@/utils/chapterTaskFlow.js'
+import { normalizeResultImageUrl, dedupeTasksByPage, sortTasksByPage, listTasksMissingResultImage, formatSubmitAllAssistantError } from '@/utils/chapterTaskFlow.js'
 import { cn } from '@/lib/utils'
 import LayerCanvas from './LayerCanvas.jsx'
+import MangakaNoteOverlay from './MangakaNoteOverlay.jsx'
 import LayerStackPanel from './LayerStackPanel.jsx'
 import { ImageLightbox } from './ImageLightbox.jsx'
 
@@ -50,6 +51,7 @@ const PADDING = 12
 export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskProp, onSubmitted, pages: pagesProp, fullscreen = false, onEnterFullscreen }) {
   const chapterPages = chapter?.pages ?? []
   const pages = pagesProp ?? chapterPages
+  const sortedPages = useMemo(() => sortPagesByNumber(pages), [pages])
   const [pageIdx, setPageIdx] = useState(0)
   const [submittingAll, setSubmittingAll] = useState(false)
   const [showOriginal, setShowOriginal] = useState(true)
@@ -68,8 +70,8 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
   const taskFromProp = taskProp ? (typeof taskProp === 'object' ? apiTaskToUi(taskProp) : null) : null
   const chapterId = chapter?.chapterId ?? chapter?.id ?? chapter?._id ?? null
 
-  const safeIdx = Math.min(Math.max(0, pageIdx), Math.max(0, pages.length - 1))
-  const safePage = pages[safeIdx] ?? null
+  const safeIdx = Math.min(Math.max(0, pageIdx), Math.max(0, sortedPages.length - 1))
+  const safePage = sortedPages[safeIdx] ?? null
   const activePageId = safePage?.id ?? safePage?._id ?? pageIdProp ?? null
 
   const fallbackTask = chapter?._task ?? taskFromProp
@@ -183,63 +185,13 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
   }, [pages])
 
   const [pageNotes, setPageNotes] = useState([])
+  const [notesPageMeta, setNotesPageMeta] = useState(null)
   const [notesLoading, setNotesLoading] = useState(false)
 
-  // Build notes for the active page from revision_annotations (per-page structured notes from Mangaka)
-  const chapterPageAnnotations = useMemo(() => {
-    const result = []
-
-    // 1. revision_annotations (structured array, per-page key)
-    const raw = chapter?.revision_annotations
-    if (raw && typeof raw === 'object') {
-      const keyIndex = String(pageIdx)
-      const arr = raw[`page_${keyIndex}`] ?? raw[keyIndex] ?? null
-      if (Array.isArray(arr)) {
-        for (const n of arr) {
-          result.push({
-            id: n._id ?? n.id ?? `ra-${pageIdx}`,
-            clientKey: n._id ?? n.id ?? `ra-${pageIdx}`,
-            text: n.text ?? '',
-            x: n.x ?? 0,
-            y: n.y ?? 0,
-            w: n.w ?? 0,
-            h: n.h ?? 0,
-            taskType: n.taskType ?? 'other',
-            status: n.status ?? 'open',
-            assignee: n.assignee ?? '',
-            layerIndex: n.layerIndex ?? null,
-            source: 'chapterAnnotations',
-          })
-        }
-      }
-    }
-
-    // 2. revision_notes_parsed (parsed from string, includes pageIndex)
-    const parsed = chapter?.revision_notes_parsed ?? []
-    if (Array.isArray(parsed)) {
-      for (const note of parsed) {
-        // pageIndex === pageIdx HOẶC pageIndex === undefined (áp dụng cho mọi page)
-        if (note.pageIndex === undefined || note.pageIndex === pageIdx) {
-          result.push({
-            id: note.id ?? `rn-${pageIdx}`,
-            clientKey: note.id ?? `rn-${pageIdx}`,
-            text: note.text ?? '',
-            x: note.x ?? 0,
-            y: note.y ?? 0,
-            w: note.w ?? 100,
-            h: note.h ?? 100,
-            taskType: note.taskType ?? 'paint',
-            status: 'open',
-            assignee: '',
-            layerIndex: null,
-            source: 'chapterAnnotations',
-          })
-        }
-      }
-    }
-
-    return result
-  }, [chapter?.revision_annotations, chapter?.revision_notes_parsed, pageIdx])
+  const chapterPageAnnotations = useMemo(
+    () => buildChapterPageAnnotations(chapter, safeIdx, sortedPages),
+    [chapter, safeIdx, sortedPages],
+  )
 
   async function loadNotes() {
     // Luôn kết hợp: task.noteIds + chapterPageAnnotations + API fallback
@@ -270,58 +222,86 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
     if (activePageId) {
       setNotesLoading(true)
       try {
-        const res = await chaptersService.getPageNotes(activePageId).catch(() => [])
-        const raw = Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : [])
-        const mapped = raw.map(n => ({ ...apiNoteToUi(n), source: 'api' }))
-        if (import.meta.env.DEV) {
-          console.debug('[LayerEditor.loadNotes] /pages/:id/notes returned', mapped.length, 'notes for pageId', activePageId, mapped)
+        const revisionRound =
+          safePage?.current_version
+          ?? safePage?.currentVersion
+          ?? notesPageMeta?.current_version
+          ?? 1
+        const isRevisionFlow = activeTask?.status === 'revision'
+        const notesQuery = isRevisionFlow
+          ? { note_kind: 'revision', revision_round: revisionRound }
+          : { note_kind: 'brief' }
+        let res = await chaptersService.getPageNotes(activePageId, notesQuery).catch((err) => {
+          if (import.meta.env.DEV) {
+            console.warn('[LayerEditor.loadNotes] GET notes failed', { pageId: activePageId, notesQuery, err })
+          }
+          return null
+        })
+        let { page: notesPage, notes: apiNotes } = parsePageNotesResponse(res)
+        if (!apiNotes.length && notesQuery.note_kind) {
+          res = await chaptersService.getPageNotes(activePageId).catch((err) => {
+            if (import.meta.env.DEV) {
+              console.warn('[LayerEditor.loadNotes] GET notes fallback failed', { pageId: activePageId, err })
+            }
+            return null
+          })
+          const fallback = parsePageNotesResponse(res)
+          notesPage = fallback.page ?? notesPage
+          apiNotes = fallback.notes
         }
-        results.push(...mapped)
+        setNotesPageMeta(notesPage)
+        if (import.meta.env.DEV) {
+          console.debug('[LayerEditor.loadNotes] /pages/:id/notes', {
+            pageId: activePageId,
+            count: apiNotes.length,
+            sample: apiNotes[0],
+            originalUrl: notesPage?.original_image_url,
+          })
+        }
+        results.push(...apiNotes)
       } finally {
         setNotesLoading(false)
       }
     }
 
-    // Deduplicate theo id/clientKey trước khi set — phòng trường hợp 2 nguồn trả cùng 1 note
-    const seenKeys = new Set()
-    const deduped = []
-    for (const n of results) {
-      const key = n.clientKey ?? n.id ?? String(n._id ?? '')
-      if (!key || seenKeys.has(key)) continue
-      seenKeys.add(key)
-      deduped.push(n)
-    }
-    setPageNotes(deduped)
+    setPageNotes(mergeMangakaNoteLists(results))
   }
 
-  useEffect(() => { void loadNotes() }, [activePageId, taskNotes.length, chapterPageAnnotations.length])
+  useEffect(() => {
+    setNotesPageMeta(null)
+  }, [activePageId])
 
-  // Gộp notes từ mọi nguồn: task.noteIds + chapter.revision_annotations + API getPageNotes
+  useEffect(() => {
+    void loadNotes()
+  }, [
+    activePageId,
+    safeIdx,
+    taskNotes.length,
+    chapterPageAnnotations.length,
+    activeTask?.status,
+    activeTask?.id,
+    chapter?.revision_annotations,
+    chapter?.revision_notes_parsed,
+  ])
+
+  // Gộp notes — ưu tiên GET /pages/:id/notes (source: api) khi trùng id
   const allNotes = useMemo(() => {
-    const seen = new Set()
-    const merged = []
-
-    for (const note of taskNotes) {
-      const key = note.clientKey ?? note.id ?? String(note._id ?? '')
-      if (!key || seen.has(key)) continue
-      seen.add(key)
-      merged.push(note)
-    }
-    for (const note of chapterPageAnnotations) {
-      const key = note.clientKey ?? note.id ?? String(note._id ?? '')
-      if (!key || seen.has(key)) continue
-      seen.add(key)
-      merged.push(note)
-    }
-    for (const note of pageNotes) {
-      const key = note.clientKey ?? note.id ?? String(note._id ?? '')
-      if (!key || seen.has(key)) continue
-      seen.add(key)
-      merged.push(note)
-    }
-    // Giữ lại tất cả notes, kể cả text rỗng/whitespace, để LayerCanvas vẫn hiển thị badge
-    return merged
+    const taskList = taskNotes.map(n => ({
+      ...n,
+      source: n.source ?? 'taskNotes',
+      clientKey: n.clientKey ?? (n.id ? String(n.id) : undefined),
+    }))
+    const chapterList = chapterPageAnnotations.map(n => ({
+      ...n,
+      source: n.source ?? 'chapterAnnotations',
+    }))
+    return mergeMangakaNoteLists(pageNotes, taskList, chapterList)
   }, [taskNotes, chapterPageAnnotations, pageNotes])
+
+  const overlayNotes = useMemo(
+    () => filterSpatialMangakaNotes(allNotes),
+    [allNotes],
+  )
 
   // DEBUG: theo dõi note đến từ đâu, có toạ độ không
   useEffect(() => {
@@ -329,13 +309,25 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
     console.debug('[NOTE-DEBUG] chapter.revision_annotations raw =', chapter?.revision_annotations)
     console.debug('[NOTE-DEBUG] chapter.revision_notes_parsed =', chapter?.revision_notes_parsed)
     console.debug('[NOTE-DEBUG] allNotes =', allNotes.map(n => ({ id: n.id, source: n.source, x: n.x, y: n.y, w: n.w, h: n.h, taskType: n.taskType, text: n.text?.slice(0, 30) })))
-  }, [pageIdx, taskNotes, chapterPageAnnotations, pageNotes, allNotes, chapter?.revision_annotations, chapter?.revision_notes_parsed])
+    console.debug('[NOTE-DEBUG] overlayNotes =', overlayNotes.map(n => ({ id: n.id, source: n.source, x: n.x, y: n.y, w: n.w, h: n.h })))
+  }, [pageIdx, taskNotes, chapterPageAnnotations, pageNotes, allNotes, overlayNotes, chapter?.revision_annotations, chapter?.revision_notes_parsed])
 
   const layerNoteInfo = useMemo(() => buildLayerNote(layers, allNotes), [layers, allNotes])
 
-  // Ưu tiên: URL từ chapter pages (loadChapterPages đã gọi sẵn).
-  // Fallback: originalImage từ usePageLayers (chỉ khi page chưa có URL — trường hợp BE không trả URL trong page).
-  const baseImage = safePage?.url ?? originalImage ?? null
+  const notesOriginalUrl = notesPageMeta?.original_image_url
+    ? resolveMediaUrl(notesPageMeta.original_image_url)
+    : null
+
+  // Ảnh gốc Mangaka — luôn hiện làm nền (khớp toạ độ % khi có note overlay)
+  const mangakaReferenceImage = useMemo(() => (
+    notesOriginalUrl
+    || safePage?.originalUrl
+    || safePage?.url
+    || (originalImage ? resolveMediaUrl(originalImage) : null)
+    || null
+  ), [notesOriginalUrl, safePage, originalImage])
+
+  const baseImage = showOriginal ? mangakaReferenceImage : null
 
   if (import.meta.env.DEV) {
     console.debug('[LayerEditor]', {
@@ -444,34 +436,42 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
     try {
       toast.info('Đang lưu kết quả từng task…')
       const raw = await tasksService.getAssignmentsByChapter(chapterId)
-      const allTasks = dedupeTasksByPage(
-        (Array.isArray(raw) ? raw : []).map(apiTaskToUi),
-      )
-      const pageTasks = allTasks.filter((t) => t.pageId)
-      const tasksToSubmit = sortTasksByPage(
-        pageTasks.length ? pageTasks : allTasks,
-      )
+      const allTasks = (Array.isArray(raw) ? raw : []).map(apiTaskToUi)
+      const tasksToSubmit = sortTasksByPage(allTasks)
 
       if (!tasksToSubmit.length) {
         toast.error('Không tìm thấy task nào cho chapter này.')
         return
       }
 
+      const imageUrlByPageId = new Map()
       let uploadedCount = 0
       let alreadyDoneCount = 0
+
       for (const pageTask of tasksToSubmit) {
         const pid = pageTask.pageId ? String(pageTask.pageId) : null
         const page = pid
           ? pages.find((p) => String(p?.id ?? p?._id) === pid)
-          : pages[uploadedCount] ?? null
-        const pageLabel = pageTask.pageNumber ?? page?.pageNumber ?? (uploadedCount + 1)
+          : null
+        const pageLabel = pageTask.pageNumber ?? page?.pageNumber ?? pageTask.id
 
-        const imageUrl = resolvePageTaskImageUrl(page, pageTask)
+        let imageUrl = pid ? imageUrlByPageId.get(pid) : null
         if (!imageUrl) {
-          toast.error(
-            `Trang ${pageLabel} chưa gộp layer — hãy bấm "Gộp layer" trước khi gửi Mangaka.`,
-          )
-          return
+          imageUrl = resolvePageTaskImageUrl(page, pageTask)
+          if (!imageUrl) {
+            const missing = listTasksMissingResultImage(tasksToSubmit, pages)
+            const label = missing.length
+              ? missing
+                .filter((m) => m.pageNumber != null)
+                .map((m) => `Trang ${m.pageNumber}`)
+                .join(', ') || `Trang ${pageLabel}`
+              : `Trang ${pageLabel}`
+            toast.error(
+              `${label} chưa gộp layer — hãy bấm "Gộp layer" trước khi gửi Mangaka.`,
+            )
+            return
+          }
+          if (pid) imageUrlByPageId.set(pid, imageUrl)
         }
 
         const alreadyOnServer = normalizeResultImageUrl(pageTask.resultImageUrl)
@@ -481,6 +481,12 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
         ) {
           uploadedCount += 1
           alreadyDoneCount += 1
+          if (pid) setSubmittedPages((prev) => ({ ...prev, [pid]: true }))
+          continue
+        }
+
+        if (alreadyOnServer) {
+          uploadedCount += 1
           if (pid) setSubmittedPages((prev) => ({ ...prev, [pid]: true }))
           continue
         }
@@ -496,6 +502,23 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
           setSubmittedPages((prev) => ({ ...prev, [pid]: true }))
         }
         uploadedCount += 1
+      }
+
+      const refreshedRaw = await tasksService.getAssignmentsByChapter(chapterId)
+      const refreshedTasks = (Array.isArray(refreshedRaw) ? refreshedRaw : []).map(apiTaskToUi)
+      const stillMissing = listTasksMissingResultImage(refreshedTasks, pages)
+      if (stillMissing.length) {
+        const pageLabels = [...new Set(
+          stillMissing.map((m) => m.pageNumber).filter((n) => n != null),
+        )].sort((a, b) => Number(a) - Number(b))
+        const pagesText = pageLabels.length
+          ? pageLabels.map((n) => `Trang ${n}`).join(', ')
+          : `${stillMissing.length} task`
+        toast.error(
+          `${stillMissing.length} task chưa có ảnh trên server (${pagesText}). `
+          + 'Vào từng trang còn thiếu, bấm "Gộp layer" rồi thử lại.',
+        )
+        return
       }
 
       const freshlySubmitted = tasksToSubmit.length - alreadyDoneCount
@@ -521,12 +544,7 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
       onSubmitted?.()
     } catch (err) {
       console.error('[handleSubmitChapter] submit failed:', err)
-      const apiMsg = err?.response?.data?.message ?? ''
-      if (err?.response?.status === 400 && apiMsg.includes('approved')) {
-        toast.error('Một số trang đã được Mangaka duyệt nên không thể nộp lại. Hãy tải lại trang để cập nhật trạng thái mới nhất.')
-      } else {
-        toast.error(getApiErrorMessage(err, 'Gửi chapter thất bại.'))
-      }
+      toast.error(formatSubmitAllAssistantError(err, pages))
     } finally {
       setSubmittingAll(false)
     }
@@ -820,12 +838,15 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
                 height={CANVAS_H}
                 mode="edit"
                 fullscreen={fullscreen}
-                baseImage={showOriginal ? baseImage : null}
-                className="absolute inset-0 h-full w-full"
+                baseImage={showOriginal ? mangakaReferenceImage : null}
+                className="absolute inset-0 z-0 h-full w-full"
                 region={activeTask?.region ?? null}
-                notes={allNotes}
+                notes={[]}
                 showRegion={showRegionOverlay}
-                showNotes={showNoteOverlay}
+                showNotes={false}
+                overlay={
+                  <MangakaNoteOverlay notes={overlayNotes} visible={showNoteOverlay} />
+                }
               />
             </div>
           </div>

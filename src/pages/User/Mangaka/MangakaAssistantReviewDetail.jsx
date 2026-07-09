@@ -23,6 +23,8 @@ import {
   buildReviewPageCompare,
   canMangakaApproveChapterReview,
   countUnapprovedTasks,
+  formatApproveByMangakaError,
+  parseApproveChapterErrorData,
 } from "@/utils/chapterTaskFlow.js";
 import { LABEL_TANTOU_EDITOR } from "@/constants/roleTerminology.js";
 
@@ -65,6 +67,7 @@ export default function MangakaAssistantReviewDetail() {
 
   const [taskActionBusy, setTaskActionBusy] = useState(null);
   const [revisionSending, setRevisionSending] = useState(false);
+  const [highlightPageNumbers, setHighlightPageNumbers] = useState([]);
 
   const [teUsers, setTeUsers] = useState([]);
   const [teLoading, setTeLoading] = useState(false);
@@ -152,6 +155,14 @@ export default function MangakaAssistantReviewDetail() {
     try {
       await acknowledgeTask(taskId);
       toast.success("Đã nhận task — có thể duyệt.");
+      setHighlightPageNumbers((prev) => {
+        const task = (review?.allTasks ?? review?.tasks ?? []).find(
+          (t) => String(t.id) === String(taskId),
+        );
+        const pn = task?.pageNumber;
+        if (pn == null) return prev;
+        return prev.filter((n) => Number(n) !== Number(pn));
+      });
     } catch (err) {
       toast.error(getApiErrorMessage(err, "Nhận task thất bại."));
     } finally {
@@ -165,6 +176,14 @@ export default function MangakaAssistantReviewDetail() {
     try {
       await approveTask(taskId);
       toast.success("Đã duyệt task.");
+      setHighlightPageNumbers((prev) => {
+        const task = (review?.allTasks ?? review?.tasks ?? []).find(
+          (t) => String(t.id) === String(taskId),
+        );
+        const pn = task?.pageNumber;
+        if (pn == null) return prev;
+        return prev.filter((n) => Number(n) !== Number(pn));
+      });
     } catch (err) {
       toast.error(getApiErrorMessage(err, "Duyệt task thất bại."));
     } finally {
@@ -197,6 +216,7 @@ export default function MangakaAssistantReviewDetail() {
       ?? chapter.status;
 
     setTeSending(true);
+    setHighlightPageNumbers([]);
     try {
       if (!canMangakaSendToTe(apiStatus)) {
         const id = review.submission?.id ?? chapter.id;
@@ -228,9 +248,13 @@ export default function MangakaAssistantReviewDetail() {
       await refreshMangakaTasks();
       navigate("/mangaka/review");
     } catch (err) {
-      toast.error(
-        getApiErrorMessage(err, `Gửi sang ${LABEL_TANTOU_EDITOR} thất bại.`),
-      );
+      const parsed = parseApproveChapterErrorData(err);
+      const pageNums = [...new Set(
+        parsed.missingTasks.map((t) => t.pageNumber).filter((n) => n != null),
+      )];
+      if (pageNums.length) setHighlightPageNumbers(pageNums);
+      toast.error(formatApproveByMangakaError(err));
+      await refreshMangakaTasks();
     } finally {
       setTeSending(false);
     }
@@ -332,6 +356,7 @@ export default function MangakaAssistantReviewDetail() {
             onApproveTask={handleApproveTask}
             onRequestRevision={handleRequestRevision}
             revisionSending={revisionSending}
+            highlightPageNumbers={highlightPageNumbers}
           />
         )}
       </main>

@@ -160,7 +160,10 @@ export const chaptersService = {
     })
   },
 
-  getPageNotes(pageId) {
+  getPageNotes(pageId, params) {
+    if (params && Object.keys(params).length > 0) {
+      return http.get(`/chapters/pages/${pageId}/notes`, { params }).then(unwrap)
+    }
     return notesRequest(pageId, 'get')
   },
 

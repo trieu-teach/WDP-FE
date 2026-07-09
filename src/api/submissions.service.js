@@ -42,7 +42,8 @@ export const submissionsService = {
   /**
    * POST /submissions/chapters/:chapterId/approve-by-mangaka
    * Mangaka duyệt chapter từ Assistant — status → approved_by_mangaka.
-   * Yêu cầu: chapter.status === submitted_by_assistant, tất cả tasks đã approved.
+   * Yêu cầu: chapter.status === submitted_by_assistant, mọi trang (dedupe page_id) đã approved.
+   * 400 data: { total_unfinished, affected_pages, missing_tasks[] }
    */
   approveChapterByMangaka(chapterId) {
     return http.post(`/submissions/chapters/${chapterId}/approve-by-mangaka`).then((res) => ({
