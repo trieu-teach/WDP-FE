@@ -1659,6 +1659,18 @@
   padding-left: 8px;
 }
 
+/* Ẩn thanh cuộn danh sách ô ghi chú (vẫn cuộn được) */
+.mk-notes-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.mk-notes-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
 /* Editor workspace — large canvas layout */
 .mk-editor.ws-panel {
   padding: 0;

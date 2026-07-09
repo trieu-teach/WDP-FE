@@ -77,7 +77,13 @@ export function usePageLayers(pageId) {
       setUploading(true)
       try {
         const created = await layersService.uploadLayer(pageId, { file, index, onUploadProgress })
-        const ui = apiLayerToUi(created)
+        const ui = apiLayerToUi(created?.layer ?? created)
+        if (!ui.id) {
+          // Response không có id hợp lệ → đồng bộ lại từ BE để hiển thị đúng.
+          await refresh()
+          toast.success('Đã thêm layer.')
+          return ui
+        }
         setLayers((cur) => {
           const next = [...cur.filter((l) => l.id !== ui.id), ui]
           next.sort((a, b) => a.index - b.index)
@@ -92,7 +98,7 @@ export function usePageLayers(pageId) {
         setUploading(false)
       }
     },
-    [pageId],
+    [pageId, refresh],
   )
 
   const updateLayer = useCallback(
@@ -115,9 +121,6 @@ export function usePageLayers(pageId) {
   const deleteLayer = useCallback(
     async (layerId) => {
       if (!pageId || !isValidLayerId(layerId)) return
-      const target = layers.find((l) => l.id === layerId)
-      const ok = window.confirm(`Xóa layer #${target?.index ?? '?'}? Lịch sử version cũng mất.`)
-      if (!ok) return
       try {
         await layersService.deleteLayer(pageId, layerId)
         setLayers((cur) => cur.filter((l) => l.id !== layerId))
@@ -131,7 +134,7 @@ export function usePageLayers(pageId) {
         toast.error(getApiErrorMessage(err, 'Không xóa được layer.'))
       }
     },
-    [pageId, layers],
+    [pageId],
   )
 
   const uploadNewVersion = useCallback(

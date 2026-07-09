@@ -869,6 +869,15 @@ export default function Mangaka() {
       await refreshMangakaTasks()
       await refreshWorkspace()
 
+      // Ẩn các ô ghi chú của chapter sau khi đã gửi cho Assistant
+      setAnnotatorNotes((prev) => {
+        const next = {}
+        for (const [key, value] of Object.entries(prev)) {
+          if (!key.startsWith(`${chapter.id}-`)) next[key] = value
+        }
+        return next
+      })
+
       toast.success(
         `Đã gửi chapter ${chapter.num} (${pages.length} trang) cho Assistant.`,
       )
@@ -900,6 +909,13 @@ export default function Mangaka() {
             : r,
         ),
       );
+      setAnnotatorNotes((prev) => {
+        const next = {};
+        for (const [key, value] of Object.entries(prev)) {
+          if (!key.startsWith(`${chapter.id}-`)) next[key] = value;
+        }
+        return next;
+      });
       toast.success(
         res.message || `Đã gửi Ch. ${chapter.num} sang ${LABEL_TANTOU_EDITOR}.`,
       );

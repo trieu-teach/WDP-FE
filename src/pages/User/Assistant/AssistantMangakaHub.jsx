@@ -62,7 +62,7 @@ function MangakaAvatar({ id, name, size = 'lg' }) {
 }
 
 function ChapterWorkCard({ chapter, onSelect, highlight }) {
-  const cover = chapter.pages?.find(p => p.url) ?? chapter.pages?.[0]
+  const coverUrl = chapter.coverUrl ?? chapter.pages?.find(p => p.url)?.url ?? null
   const pageCount = chapter.pageCount ?? chapter.pages?.length ?? 0
   const status = chapter._task?.status
 
@@ -77,8 +77,8 @@ function ChapterWorkCard({ chapter, onSelect, highlight }) {
       )}
     >
       <span className="manga-page manga-page--thumb-md shrink-0 overflow-hidden rounded-md border bg-muted">
-        {cover?.url ? (
-          <img src={cover.url} alt="" className="manga-page__media" />
+        {coverUrl ? (
+          <img src={coverUrl} alt="" className="manga-page__media" />
         ) : (
           <span className="flex h-full items-center justify-center">
             <ImageIcon className="size-4 text-muted-foreground/50" />

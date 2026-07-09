@@ -57,6 +57,7 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
   const [showNoteOverlay, setShowNoteOverlay] = useState(true)
   const [lightboxImage, setLightboxImage] = useState(null)
   const [lightboxTitle, setLightboxTitle] = useState('')
+  const [downloadingImage, setDownloadingImage] = useState(null) // 'original' | 'merged' | null
   // Track trang nào đã có ảnh gộp (finalized) và đã gửi cho Mangaka
   const [finalizedPages, setFinalizedPages] = useState({})   // pageId → true
   const [submittedPages, setSubmittedPages] = useState({})  // pageId → true
@@ -372,6 +373,18 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
     }
     const nextIdx = layers.length
     await addLayer({ file, index: nextIdx })
+    // Có chỉnh sửa tiếp → cho phép gộp & gửi lại
+    clearSubmittedForActivePage()
+  }
+
+  function clearSubmittedForActivePage() {
+    if (!activePageId) return
+    setSubmittedPages((prev) => {
+      if (!prev[activePageId]) return prev
+      const next = { ...prev }
+      delete next[activePageId]
+      return next
+    })
   }
 
   async function handleUploadVersion(layerId, file) {
@@ -380,6 +393,8 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
       ? layerNoteInfo.note?.content ?? layerNoteInfo.note?.text ?? ''
       : ''
     await uploadNewVersion(layerId, { file, note })
+    // Có chỉnh sửa tiếp → cho phép gộp & gửi lại
+    clearSubmittedForActivePage()
   }
 
   /**
@@ -518,6 +533,26 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
   }
 
   const baseFileName = `${chapter?.seriesTitle ?? ''}-Ch${chapter?.chapterNum ?? ''}`
+
+  const handleDownloadImage = useCallback(async (type) => {
+    if (!activePageId) return
+    setDownloadingImage(type)
+    try {
+      const suffix = type === 'merged' ? '-final' : ''
+      const fallbackFilename = `${baseFileName}-p${safeIdx + 1}${suffix}.png`
+      await layersService.downloadPageImage(activePageId, type, fallbackFilename)
+      toast.success(type === 'merged' ? 'Đã tải ảnh gộp.' : 'Đã tải ảnh gốc.')
+    } catch (err) {
+      toast.error(getApiErrorMessage(
+        err,
+        type === 'merged'
+          ? 'Chưa có ảnh gộp — hãy bấm "Gộp layer" trước.'
+          : 'Không tải được ảnh gốc.',
+      ))
+    } finally {
+      setDownloadingImage(null)
+    }
+  }, [activePageId, baseFileName, safeIdx])
 
   return (
     <div className={cn(
@@ -678,41 +713,32 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
           <Button
             size="icon-sm"
             variant="ghost"
-            className="size-8 text-white/50 hover:bg-white/10 hover:text-white"
-            onClick={() => {
-              const url = safePage?.url
-              if (!url) return
-              const a = document.createElement('a')
-              a.href = url
-              a.download = `${baseFileName}-p${safeIdx + 1}.png`
-              document.body.appendChild(a)
-              a.click()
-              document.body.removeChild(a)
-              toast.success('Đã tải ảnh gốc.')
-            }}
-            disabled={!safePage?.url}
+            className="size-8 text-white/50 transition-all hover:bg-white/10 hover:text-white active:scale-95"
+            onClick={() => void handleDownloadImage('original')}
+            disabled={!activePageId || downloadingImage === 'original'}
             title="Tải ảnh gốc"
           >
-            <ArrowDownToLine className="size-3.5" />
+            {downloadingImage === 'original' ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <ArrowDownToLine className="size-3.5" />
+            )}
           </Button>
 
           {finalImage && (
             <Button
               size="icon-sm"
               variant="ghost"
-              className="size-8 text-white/50 hover:bg-white/10 hover:text-white"
-              onClick={() => {
-                const a = document.createElement('a')
-                a.href = finalImage
-                a.download = `${baseFileName}-p${safeIdx + 1}-final.png`
-                document.body.appendChild(a)
-                a.click()
-                document.body.removeChild(a)
-                toast.success('Đã tải ảnh gộp.')
-              }}
+              className="size-8 text-white/50 transition-all hover:bg-white/10 hover:text-white active:scale-95"
+              onClick={() => void handleDownloadImage('merged')}
+              disabled={downloadingImage === 'merged'}
               title="Tải ảnh gộp"
             >
-              <FileDown className="size-3.5" />
+              {downloadingImage === 'merged' ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <FileDown className="size-3.5" />
+              )}
             </Button>
           )}
 
@@ -777,10 +803,10 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
       {/* ── MAIN AREA: canvas + sidebar ── */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Canvas side — scrollable if canvas is taller than available space */}
-        <div className="flex min-h-0 flex-1 flex-col overflow-auto bg-[#0f0f0f]">
+        <div className="scrollbar-hide flex min-h-0 flex-1 flex-col overflow-auto bg-[#0f0f0f]">
           {/* Canvas container — fills available space, canvas scales to fit */}
           <div
-            className="relative flex min-h-0 flex-1 items-center justify-center overflow-auto p-3"
+            className="scrollbar-hide relative flex min-h-0 flex-1 items-center justify-center overflow-auto p-3"
           >
             {/* Aspect-ratio box so canvas keeps 960×1360 ratio when scaled */}
             <div
@@ -826,20 +852,16 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
                     variant="outline"
                     className={cn(
                       'h-8 gap-1.5 border px-3 text-xs font-medium',
-                      submittedPages[activePageId]
+                      finalImage
                         ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20'
-                        : finalImage
-                          ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20'
-                          : 'border-violet-500/30 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20 hover:border-violet-500/50',
+                        : 'border-violet-500/30 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20 hover:border-violet-500/50',
                     )}
                     onClick={handleFinalize}
-                    disabled={finalizing}
-                    title={submittedPages[activePageId] ? 'Trang đã gửi rồi' : ''}
+                    disabled={finalizing || submittedPages[activePageId]}
+                    title={submittedPages[activePageId] ? 'Đã gửi — thêm layer để chỉnh sửa tiếp' : ''}
                   >
                     {finalizing ? (
                       <><Loader2 className="size-3.5 animate-spin" /> Đang gộp…</>
-                    ) : submittedPages[activePageId] ? (
-                      <><Eye className="size-3.5" /> Đã gửi</>
                     ) : finalImage ? (
                       <><LayersIcon className="size-3.5" /> Gộp lại</>
                     ) : (
@@ -852,17 +874,14 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
                   size="sm"
                   className={cn(
                     'h-8 gap-1.5 px-4 text-xs font-semibold shadow-lg',
-                    submittedPages[activePageId]
-                      ? 'border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 hover:border-emerald-500/50'
-                      : 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-violet-500/20 hover:from-violet-500 hover:to-indigo-500',
+                    'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-violet-500/20 hover:from-violet-500 hover:to-indigo-500',
                   )}
-                  disabled={submittingAll || finalizing || pages.length === 0}
+                  disabled={submittingAll || finalizing || pages.length === 0 || submittedPages[activePageId]}
                   onClick={() => void handleSubmitChapter()}
+                  title={submittedPages[activePageId] ? 'Đã gửi — thêm layer để chỉnh sửa tiếp' : ''}
                 >
                   {submittingAll ? (
                     <><Loader2 className="size-3.5 animate-spin" /> Đang nộp task…</>
-                  ) : Object.keys(submittedPages).length >= pages.length && pages.length > 0 ? (
-                    <><Eye className="size-3.5" /> Đã gửi</>
                   ) : (
                     <><Send className="size-3.5" /> Gửi Mangaka</>
                   )}
@@ -873,7 +892,7 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
 
         {/* Sidebar */}
         <div className="flex w-96 shrink-0 flex-col border-l border-white/5 bg-[#0f0f1a]">
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="scrollbar-hide flex min-h-0 flex-1 flex-col overflow-y-auto">
             {/* Final image preview — dùng URL cache theo pageId, fallback sang finalImage */}
             {(finalImagesByPage[activePageId] || finalImage) && (
               <div className="border-b border-white/5 p-3">
@@ -908,7 +927,7 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
             )}
 
             {/* Layer stack — scrollable */}
-            <div className="self-start w-full">
+            <div className="w-full">
               <LayerStackPanel
                 layers={layers}
                 versions={versions}
@@ -924,6 +943,10 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
                 onLoadVersions={loadVersions}
                 onReorder={reorderLayers}
                 onFinalize={finalize}
+                onViewImage={(url) => {
+                  setLightboxImage(url)
+                  setLightboxTitle(`Ảnh gộp trang ${safeIdx + 1}`)
+                }}
                 canEdit
                 className="rounded-none border-0 bg-transparent p-3"
               />

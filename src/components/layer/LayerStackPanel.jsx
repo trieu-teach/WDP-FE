@@ -14,6 +14,14 @@ import {
   X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { BLEND_MODES } from '@/utils/layersMappers.js'
 
@@ -314,6 +322,7 @@ export default function LayerStackPanel({
   onLoadVersions,
   onReorder,
   onFinalize,
+  onViewImage,
   canEdit,
   className,
 }) {
@@ -321,8 +330,24 @@ export default function LayerStackPanel({
   const [dragId, setDragId] = useState(null)
   const [dragOverId, setDragOverId] = useState(null)
   const [openVersionFor, setOpenVersionFor] = useState(null)
+  const [confirmLayer, setConfirmLayer] = useState(null)
 
   const reversed = [...layers].reverse()
+
+  function requestDelete(layerId) {
+    const target = layers.find((l) => l.id === layerId)
+    setConfirmLayer(target ?? { id: layerId })
+  }
+
+  function confirmDelete() {
+    if (confirmLayer?.id) onDeleteLayer?.(confirmLayer.id)
+    setConfirmLayer(null)
+  }
+
+  // Nhãn hiển thị đúng như trên hàng layer: tên tự đặt, nếu trống thì "Layer {index}".
+  const confirmLayerLabel = confirmLayer
+    ? (confirmLayer.name?.trim() || `Layer ${confirmLayer.index ?? ''}`.trim())
+    : ''
 
   function handleAddFile(e) {
     const file = e.target.files?.[0]
@@ -396,7 +421,7 @@ export default function LayerStackPanel({
       </div>
 
       {/* Layer list */}
-      <div className="max-h-[420px] overflow-y-auto pr-1">
+      <div className="scrollbar-hide max-h-[420px] overflow-y-auto pr-1">
         <div className="space-y-2 pb-2">
           {loading ? (
             <div className="rounded-xl border border-white/10 bg-white/5 py-10 text-center">
@@ -426,7 +451,7 @@ export default function LayerStackPanel({
             reversed.map((layer) => {
               const pos = reversed.findIndex((l) => l.id === layer.id)
               return (
-                <div key={layer.id} className="space-y-2">
+                <div key={layer.id ?? `layer-${layer.index}`} className="space-y-2">
                   <LayerRow
                     layer={layer}
                     isTop={pos === 0}
@@ -437,7 +462,7 @@ export default function LayerStackPanel({
                     onOpacity={(id, opacity) => onUpdateLayer?.(id, { opacity })}
                     onBlend={(id, blendMode) => onUpdateLayer?.(id, { blendMode })}
                     onUploadVersion={(id, file) => onUploadVersion?.(id, file)}
-                    onDelete={onDeleteLayer}
+                    onDelete={requestDelete}
                     onOpenVersions={openVersion}
                     onRename={(id, name) => onUpdateLayer?.(id, { name })}
                     onDragStart={setDragId}
@@ -493,27 +518,47 @@ export default function LayerStackPanel({
             Chưa có ảnh hoàn chỉnh.
           </div>
         )}
-        {canEdit && (
+        {finalImage && (
           <Button
             size="sm"
-            className="mt-2.5 h-8 w-full gap-1.5 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-xs font-semibold text-white shadow-sm hover:from-violet-500 hover:to-fuchsia-500"
-            onClick={onFinalize}
-            disabled={finalizing || layers.length === 0}
+            variant="outline"
+            className="mt-2.5 h-8 w-full gap-1.5 border-white/15 bg-white/5 text-xs font-semibold text-white/80 hover:bg-white/10 hover:text-white"
+            onClick={() => onViewImage?.(finalImage)}
           >
-            {finalizing ? (
-              <>
-                <div className="size-3 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                Đang gộp…
-              </>
-            ) : (
-              <>
-                <LayersIcon className="size-3" />
-                Gộp layer & gửi Mangaka
-              </>
-            )}
+            <ImageIcon className="size-3" />
+            Xem ảnh
           </Button>
         )}
       </div>
+
+      {/* Popup xác nhận xóa layer */}
+      <Dialog open={!!confirmLayer} onOpenChange={(v) => { if (!v) setConfirmLayer(null) }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <span className="flex size-8 items-center justify-center rounded-lg bg-red-500/15 text-red-500">
+                <Trash2 className="size-4" />
+              </span>
+              Xóa {confirmLayerLabel}?
+            </DialogTitle>
+            <DialogDescription>
+              <strong className="text-foreground">{confirmLayerLabel}</strong> và toàn bộ lịch sử version sẽ bị xóa vĩnh viễn. Hành động này không thể hoàn tác.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmLayer(null)}>
+              Hủy
+            </Button>
+            <Button
+              className="bg-red-600 text-white hover:bg-red-500"
+              onClick={confirmDelete}
+            >
+              <Trash2 className="size-4" />
+              Xóa layer
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

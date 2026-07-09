@@ -15,29 +15,37 @@ import { cn } from '@/lib/utils'
  * - `title` hiển thị trên header của dialog.
  * - `trigger` tuỳ chỉnh (mặc định là nút Maximize2 absolute ở góc phải-trên).
  */
-export function ImageLightbox({ src, alt, title, className, trigger }) {
+export function ImageLightbox({ src, alt, title, className, trigger, onClose }) {
   if (!src) return null
 
+  // Chế độ controlled: khi có onClose, dialog tự mở (không cần trigger).
+  const controlled = typeof onClose === 'function'
+  const dialogProps = controlled
+    ? { open: true, onOpenChange: (v) => { if (!v) onClose() } }
+    : {}
+
   return (
-    <Dialog>
-      <DialogTrigger asChild>
-        {trigger ?? (
-          <Button
-            type="button"
-            variant="secondary"
-            size="icon-sm"
-            className={cn(
-              'size-8 rounded-full border border-slate-200/80 bg-white/90 text-slate-700 shadow-sm backdrop-blur transition-all hover:scale-105 hover:bg-white',
-              className,
-            )}
-            title="Xem ảnh phóng to"
-            aria-label="Xem ảnh phóng to"
-            onClick={e => e.stopPropagation()}
-          >
-            <Maximize2 className="size-3.5" />
-          </Button>
-        )}
-      </DialogTrigger>
+    <Dialog {...dialogProps}>
+      {!controlled && (
+        <DialogTrigger asChild>
+          {trigger ?? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="icon-sm"
+              className={cn(
+                'size-8 rounded-full border border-slate-200/80 bg-white/90 text-slate-700 shadow-sm backdrop-blur transition-all hover:scale-105 hover:bg-white',
+                className,
+              )}
+              title="Xem ảnh phóng to"
+              aria-label="Xem ảnh phóng to"
+              onClick={e => e.stopPropagation()}
+            >
+              <Maximize2 className="size-3.5" />
+            </Button>
+          )}
+        </DialogTrigger>
+      )}
       <DialogContent
         showCloseButton={false}
         className="max-w-[96vw] gap-0 overflow-hidden border-none bg-slate-950/95 p-0 shadow-2xl backdrop-blur sm:max-w-[96vw]"

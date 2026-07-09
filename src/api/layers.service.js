@@ -1,4 +1,4 @@
-import { http } from './http.js'
+import { downloadAuthenticatedFile, http } from './http.js'
 
 function unwrap(res) {
   if (res && typeof res === 'object' && res.success !== undefined && res.data !== undefined) {
@@ -76,5 +76,13 @@ export const layersService = {
     return http
       .get(`/chapters/pages/${pageId}/final`)
       .then(unwrap)
+  },
+
+  /** GET /chapters/pages/:pageId/download/:type — type: original | merged */
+  downloadPageImage(pageId, type, fallbackFilename) {
+    return downloadAuthenticatedFile(
+      `/chapters/pages/${pageId}/download/${type}`,
+      fallbackFilename,
+    )
   },
 }

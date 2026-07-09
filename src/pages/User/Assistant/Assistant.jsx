@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
   ArrowLeft,
-  AlertTriangle,
   CheckCircle2,
   ChevronDown,
   Clock,
@@ -364,17 +363,6 @@ export default function Assistant() {
     setSelectedChapterDetail(null)
   }
 
-  function openRevisionBoard() {
-    const rev = enrichedAssignments.find(a => a._task?.status === 'revision')
-    if (rev?._mangakaId) {
-      setSelectedMangakaId(rev._mangakaId)
-      setHubView('board')
-      return
-    }
-    setTaskFilter('revision')
-    setHubView('pick')
-  }
-
   async function handleCooperationAction(req, action) {
     if (!req?.id) {
       toast.error('Thiếu mã yêu cầu hợp tác.')
@@ -435,35 +423,6 @@ export default function Assistant() {
       </WorkspaceHero>
 
       <main className="page-container ws-main--assistant flex-1 py-6">
-        {(() => {
-          const revisionAssignments = (assignments ?? []).filter(a => {
-            const task = chapterTaskMap[String(a.chapterId)]
-            return task?.status === 'revision'
-          })
-          if (revisionAssignments.length === 0) return null
-          return (
-            <div className="mb-4 flex items-center gap-3 rounded-xl border border-red-300 bg-red-50 px-4 py-3 dark:border-red-500/30 dark:bg-red-500/10">
-              <AlertTriangle className="size-5 shrink-0 text-red-500" />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-red-700 dark:text-red-400">
-                  {revisionAssignments.length} chapter bị từ chối — cần sửa lại
-                </p>
-                <p className="text-xs text-red-600/80 dark:text-red-400/70">
-                  Chọn chapter trong danh sách, xem ghi chú trong editor và upload layer sửa lại.
-                </p>
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                className="shrink-0 border-red-300 text-red-600 hover:bg-red-100 dark:border-red-500/40 dark:text-red-400 dark:hover:bg-red-500/20"
-                onClick={openRevisionBoard}
-              >
-                Xem ngay
-              </Button>
-            </div>
-          )
-        })()}
-
         {error ? (
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3">
             <p className="text-sm text-destructive">{getApiErrorMessage(error, 'Không tải được danh sách chapter.')}</p>
@@ -672,7 +631,7 @@ export default function Assistant() {
                             STATUS_BADGE[ch._task?.status] ??
                             STATUS_BADGE[ch.status] ??
                             STATUS_BADGE.pending_assistant
-                          const cover = ch.pages?.find(p => p.url) ?? ch.pages?.[0]
+                          const coverUrl = ch.coverUrl ?? ch.pages?.find(p => p.url)?.url ?? null
                           const pageCount = ch.pageCount ?? ch.pages?.length ?? 0
                           const isSelected = ch.chapterId === selectedChapterId
                           const needsAttention = ch._task?.status === 'revision'
@@ -688,8 +647,8 @@ export default function Assistant() {
                                 )}
                               >
                                 <span className="as-inbox-card__thumb manga-page manga-page--thumb-md overflow-hidden rounded-md">
-                                  {cover?.url ? (
-                                    <img src={cover.url} alt="" className="manga-page__media" />
+                                  {coverUrl ? (
+                                    <img src={coverUrl} alt="" className="manga-page__media" />
                                   ) : (
                                     <ImageIcon className="size-4 text-muted-foreground/50" />
                                   )}

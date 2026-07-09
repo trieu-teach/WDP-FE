@@ -191,6 +191,29 @@ function pickPrimaryTaskForChapter(tasks, chapterId) {
   return best
 }
 
+function resolveChapterCoverUrl(c) {
+  const fromField = resolveMediaUrl(c?.cover_url ?? c?.coverUrl)
+  if (fromField) return fromField
+
+  const pages = Array.isArray(c?.pages)
+    ? c.pages
+    : Array.isArray(c?.data?.pages)
+      ? c.data.pages
+      : []
+  for (const p of pages) {
+    const url = rawPageToUi(p).url
+    if (url) return url
+  }
+
+  const series = c?.series_id ?? c?.series
+  if (series && typeof series === 'object') {
+    const seriesCover = resolveMediaUrl(series.cover_image_url ?? series.coverUrl)
+    if (seriesCover) return seriesCover
+  }
+
+  return null
+}
+
 function chapterAssignmentToUi(chapter) {
   const c = chapter ?? {}
   const series = c.series_id ?? {}
@@ -214,6 +237,7 @@ function chapterAssignmentToUi(chapter) {
     status: c.status ?? 'pending_assistant',
     pageCount: c.page_count ?? c.pages?.length ?? 0,
     pages: Array.isArray(c.pages) ? c.pages.map(rawPageToUi) : [],
+    coverUrl: resolveChapterCoverUrl(c),
     taskStats: c.tasks ?? null,
     _task: null,
   }
@@ -331,6 +355,7 @@ export function useAssistantAssignments() {
               : chapter?.data?.pages?.length > 0
                 ? chapter.data.pages.map(rawPageToUi)
                 : [],
+          coverUrl: resolveChapterCoverUrl(chapter) ?? resolveChapterCoverUrl(chapter?.data),
           _task: task,
         })
       }
