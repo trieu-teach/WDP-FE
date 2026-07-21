@@ -1,18 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
-import { ArrowLeft, Calendar, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, Calendar, CheckCircle2, Clock } from "lucide-react";
 import Header from "@/components/User/Header/Header.jsx";
 import Footer from "@/components/User/Footer/Footer.jsx";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -37,6 +35,7 @@ import {
   mapEbChapterPendingItem,
   normalizeEbEvaluateResponse,
 } from "@/utils/ebEvaluationMappers.js";
+import { cn } from "@/lib/utils";
 import "./Eb.css";
 
 const NAV_LINKS = [
@@ -44,6 +43,126 @@ const NAV_LINKS = [
   { to: "/mangaka", label: "Mangaka" },
   { to: "/tantou", label: "Tantou Editor" },
 ];
+
+const HOUR_OPTIONS = Array.from({ length: 24 }, (_, i) =>
+  String(i).padStart(2, "0"),
+);
+const MINUTE_OPTIONS = Array.from({ length: 60 }, (_, i) =>
+  String(i).padStart(2, "0"),
+);
+
+function parseHhMm(value) {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(String(value ?? "").trim());
+  if (!match) return { hour: "09", minute: "00" };
+  return {
+    hour: String(Math.min(23, Math.max(0, Number(match[1])))).padStart(2, "0"),
+    minute: String(Math.min(59, Math.max(0, Number(match[2])))).padStart(2, "0"),
+  };
+}
+
+function isPastPublishTime(dateValue, hour, minute) {
+  if (!dateValue || dateValue !== getEbVietnamDateNow()) return false;
+  const candidate = `${hour}:${minute}`;
+  return candidate < getEbVietnamTimeNow();
+}
+
+/** Custom time picker — chặn giờ/phút trong quá khứ (native input không bắt được từng ô). */
+function PublishTimePicker({
+  value,
+  onChange,
+  disabled = false,
+  dateValue,
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+  const { hour, minute } = parseHhMm(value);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    function onDocPointerDown(event) {
+      if (!rootRef.current?.contains(event.target)) setOpen(false);
+    }
+    document.addEventListener("pointerdown", onDocPointerDown);
+    return () => document.removeEventListener("pointerdown", onDocPointerDown);
+  }, [open]);
+
+  function pickHour(nextHour) {
+    if (isPastPublishTime(dateValue, nextHour, minute)) return;
+    onChange?.(`${nextHour}:${minute}`);
+  }
+
+  function pickMinute(nextMinute) {
+    if (isPastPublishTime(dateValue, hour, nextMinute)) return;
+    onChange?.(`${hour}:${nextMinute}`);
+  }
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen((v) => !v)}
+        className={cn(
+          "border-input bg-background flex h-9 w-full items-center justify-between rounded-md border px-3 text-sm shadow-xs transition-colors",
+          "hover:bg-accent/40 disabled:cursor-not-allowed disabled:opacity-50",
+          open && "ring-ring ring-1",
+        )}
+      >
+        <span className="tabular-nums">{`${hour}:${minute}`}</span>
+        <Clock className="size-4 text-muted-foreground" />
+      </button>
+
+      {open && !disabled ? (
+        <div className="absolute bottom-full left-0 z-50 mb-2 flex overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-lg">
+          <div className="max-h-48 w-16 overflow-y-auto py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+            {HOUR_OPTIONS.map((h) => {
+              const past = isPastPublishTime(dateValue, h, minute);
+              const selected = h === hour;
+              return (
+                <button
+                  key={h}
+                  type="button"
+                  className={cn(
+                    "flex w-full items-center justify-center px-2 py-1.5 text-sm tabular-nums",
+                    selected && "bg-accent font-medium",
+                    past
+                      ? "cursor-not-allowed text-muted-foreground/50"
+                      : "hover:bg-accent",
+                  )}
+                  onClick={() => pickHour(h)}
+                >
+                  {h}
+                </button>
+              );
+            })}
+          </div>
+          <div className="max-h-48 w-16 overflow-y-auto border-l py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+            {MINUTE_OPTIONS.map((m) => {
+              const past = isPastPublishTime(dateValue, hour, m);
+              const selected = m === minute;
+              return (
+                <button
+                  key={m}
+                  type="button"
+                  className={cn(
+                    "flex w-full items-center justify-center px-2 py-1.5 text-sm tabular-nums",
+                    selected && "bg-accent font-medium ring-1 ring-inset ring-foreground/20",
+                    past
+                      ? "cursor-not-allowed text-muted-foreground/50"
+                      : "hover:bg-accent",
+                  )}
+                  onClick={() => pickMinute(m)}
+                >
+                  {m}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 export default function EbPublish() {
   const navigate = useNavigate();
@@ -147,6 +266,26 @@ export default function EbPublish() {
 
   const hasScores = councilAverage != null;
 
+  const vietnamDateNow = getEbVietnamDateNow();
+
+  function clampPublishTime(dateValue, timeValue) {
+    const nextTime = String(timeValue ?? "").trim() || getEbVietnamTimeNow();
+    if (!dateValue || dateValue !== getEbVietnamDateNow()) return nextTime;
+    const nowTime = getEbVietnamTimeNow();
+    return nextTime < nowTime ? nowTime : nextTime;
+  }
+
+  function applyPublishDate(nextDate) {
+    const today = getEbVietnamDateNow();
+    if (nextDate && nextDate < today) {
+      setScheduledPublishAt(today);
+      setScheduledPublishTime((prev) => clampPublishTime(today, prev));
+      return;
+    }
+    setScheduledPublishAt(nextDate);
+    setScheduledPublishTime((prev) => clampPublishTime(nextDate, prev));
+  }
+
   function handleLogout() {
     logout();
     navigate("/login");
@@ -159,14 +298,31 @@ export default function EbPublish() {
       return;
     }
     const schedule = publicationSchedule.trim();
+    const publishTime = clampPublishTime(scheduledPublishAt, scheduledPublishTime);
+    if (publishTime !== scheduledPublishTime) {
+      setScheduledPublishTime(publishTime);
+    }
     const scheduled_publish_at = scheduledPublishAt
-      ? formatEbScheduledPublishDateTime(scheduledPublishAt, scheduledPublishTime)
+      ? formatEbScheduledPublishDateTime(scheduledPublishAt, publishTime)
       : "";
     if (!schedule && !scheduled_publish_at) {
       toast.error(
         "Chọn lịch phát hành (weekly/monthly) hoặc ngày + giờ publish cụ thể.",
       );
       return;
+    }
+    if (scheduled_publish_at) {
+      const selectedMs = new Date(scheduled_publish_at).getTime();
+      const earliestAllowedMs = new Date(
+        formatEbScheduledPublishDateTime(getEbVietnamDateNow(), getEbVietnamTimeNow()),
+      ).getTime();
+      if (
+        Number.isNaN(selectedMs)
+        || Number.isNaN(earliestAllowedMs)
+        || selectedMs < earliestAllowedMs
+      ) {
+        return;
+      }
     }
     if (!hasScores) {
       toast.error("Gửi điểm Hội đồng trước khi xác nhận publish.");
@@ -180,9 +336,14 @@ export default function EbPublish() {
         ...(scheduled_publish_at ? { scheduled_publish_at } : {}),
       });
       const seriesName = res?.series?.name ?? chapter?.seriesName ?? "Series";
+      const whenLabel = scheduled_publish_at
+        ? formatEbScheduledPublishDisplay(scheduled_publish_at)
+        : "";
       toast.success(
-        res?.message
-        || `Series "${seriesName}" đã publish${scheduled_publish_at ? ` · ${formatEbScheduledPublishDisplay(scheduled_publish_at)}` : ""}${res?.council_average != null ? ` · DTB ${Number(res.council_average).toFixed(1)}` : ""}.`,
+        whenLabel
+          ? `Series đã được duyệt. Series sẽ tự động chuyển sang 'published' vào ${whenLabel}.`
+          : (res?.message
+            || `Series "${seriesName}" đã publish${res?.council_average != null ? ` · DTB ${Number(res.council_average).toFixed(1)}` : ""}.`),
       );
       navigate("/eb");
     } catch (err) {
@@ -250,12 +411,6 @@ export default function EbPublish() {
                   <Calendar className="size-5 text-primary" />
                   Lịch publish series
                 </CardTitle>
-                <CardDescription>
-                  Bước 2 sau khi đã gửi điểm Hội đồng —{" "}
-                  <code className="text-[10px]">
-                    POST /eb-evaluations/series/:seriesId/confirm-publish
-                  </code>
-                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="rounded-xl border bg-muted/30 p-4 text-sm">
@@ -273,9 +428,6 @@ export default function EbPublish() {
                       trước.
                     </p>
                   )}
-                  <Badge variant="secondary" className="mt-2">
-                    {chapter.status ?? "pending_EB"}
-                  </Badge>
                 </div>
 
                 <div className="space-y-2">
@@ -314,45 +466,23 @@ export default function EbPublish() {
                     <Input
                       id="eb-scheduled-publish"
                       type="date"
-                      min={getEbVietnamDateNow()}
+                      min={vietnamDateNow}
                       value={scheduledPublishAt}
-                      onChange={(event) => setScheduledPublishAt(event.target.value)}
+                      onChange={(event) => applyPublishDate(event.target.value)}
                     />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="eb-scheduled-publish-time">
                       Giờ publish (giờ Việt Nam, HH:mm)
                     </Label>
-                    <Input
-                      id="eb-scheduled-publish-time"
-                      type="time"
-                      step={60}
+                    <PublishTimePicker
+                      dateValue={scheduledPublishAt}
                       value={scheduledPublishTime}
                       disabled={!scheduledPublishAt}
-                      onChange={(event) =>
-                        setScheduledPublishTime(
-                          event.target.value || getEbVietnamTimeNow(),
-                        )
-                      }
+                      onChange={setScheduledPublishTime}
                     />
                   </div>
                 </div>
-                {scheduledPublishAt ? (
-                  <p className="text-xs text-muted-foreground">
-                    Dự kiến publish:{" "}
-                    <strong className="text-foreground">
-                      {formatEbScheduledPublishDisplay(
-                        formatEbScheduledPublishDateTime(
-                          scheduledPublishAt,
-                          scheduledPublishTime,
-                        ),
-                      )}
-                    </strong>
-                    {" "}
-                    (giờ Việt Nam · BE job quét mỗi phút theo{" "}
-                    <code className="text-[10px]">scheduled_publish_at</code> ISO)
-                  </p>
-                ) : null}
 
                 <Button
                   className="w-full"
@@ -367,13 +497,6 @@ export default function EbPublish() {
                   <CheckCircle2 className="size-4" />
                   Xác nhận publish series
                 </Button>
-
-                <p className="text-xs text-muted-foreground">
-                  Cần DTB ≥ 2.5. Gửi{" "}
-                  <code className="text-[10px]">publication_schedule</code> và/hoặc{" "}
-                  <code className="text-[10px]">scheduled_publish_at</code> (ISO 8601, có
-                  giờ/phút).
-                </p>
 
                 {!hasScores ? (
                   <Button variant="outline" className="w-full" asChild>

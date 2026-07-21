@@ -11,8 +11,6 @@ const BLEND_TO_GLOBAL = {
   overlay: 'overlay',
   darken: 'darken',
   lighten: 'lighten',
-  'color-dodge': 'color-dodge',
-  'color-burn': 'color-burn',
 }
 
 const WORK_TYPE_COLORS = {

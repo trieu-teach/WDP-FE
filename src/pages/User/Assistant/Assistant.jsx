@@ -512,40 +512,6 @@ export default function Assistant() {
           </Card>
         ) : null}
 
-        {isFullscreen && selectedWithTask ? (
-          <div className="mk-fullscreen" role="dialog" aria-modal="true">
-            <header className="mk-fullscreen__header">
-              <div className="mk-fullscreen__title">
-                <strong>{selectedWithTask.seriesTitle}</strong>
-                <span>· Ch.{selectedWithTask.chapterNum}</span>
-              </div>
-              <div className="mk-fullscreen__tools">
-                <Badge variant="secondary" className="border-white/15 bg-white/10 text-white">
-                  {selectedWithTask._task?.status ? TASK_STATUS_LABEL[selectedWithTask._task.status] : '—'}
-                </Badge>
-                <button type="button" className="mk-fullscreen__close" onClick={() => setIsFullscreen(false)}>
-                  <X className="size-4" aria-hidden />
-                  Thu nhỏ
-                </button>
-              </div>
-            </header>
-            <div className="min-h-0 flex-1 overflow-hidden">
-              <LayerEditor
-                chapter={selectedWithTask}
-                pages={selectedChapterPages}
-                task={selectedWithTask._task}
-                pageId={selectedWithTask._task?.pageId ?? null}
-                fullscreen
-                onSubmitted={() => {
-                  setIsFullscreen(false)
-                  void refreshTasks()
-                  void refresh()
-                }}
-              />
-            </div>
-          </div>
-        ) : null}
-
         {hubView === 'pick' ? (
           <AssistantMangakaPicker
             mangakas={mangakaOptions}
@@ -790,7 +756,38 @@ export default function Assistant() {
                   </div>
                 </div>
 
-                <div className="min-h-0 flex-1 overflow-hidden">
+                <div
+                  className={cn(
+                    'min-h-0 flex-1 overflow-hidden',
+                    isFullscreen && 'mk-fullscreen',
+                  )}
+                  role={isFullscreen ? 'dialog' : undefined}
+                  aria-modal={isFullscreen ? true : undefined}
+                >
+                  {isFullscreen ? (
+                    <header className="mk-fullscreen__header">
+                      <div className="mk-fullscreen__title">
+                        <strong>{selectedWithTask.seriesTitle}</strong>
+                        <span>· Ch.{selectedWithTask.chapterNum}</span>
+                      </div>
+                      <div className="mk-fullscreen__tools">
+                        <Badge variant="secondary" className="border-white/15 bg-white/10 text-white">
+                          {selectedWithTask._task?.status
+                            ? TASK_STATUS_LABEL[selectedWithTask._task.status]
+                            : '—'}
+                        </Badge>
+                        <button
+                          type="button"
+                          className="mk-fullscreen__close"
+                          onClick={() => setIsFullscreen(false)}
+                        >
+                          <X className="size-4" aria-hidden />
+                          Thu nhỏ
+                        </button>
+                      </div>
+                    </header>
+                  ) : null}
+                  <div className={cn('min-h-0 overflow-hidden', isFullscreen ? 'flex-1' : 'h-full')}>
                   {(() => {
                     if (import.meta.env.DEV) {
                       const pagesCount = (selectedWithTask.pages ?? []).length
@@ -811,11 +808,17 @@ export default function Assistant() {
                         pages={selectedWithTask.pages ?? []}
                         task={selectedWithTask._task}
                         pageId={selectedWithTask._task?.pageId ?? null}
+                        fullscreen={isFullscreen}
                         onEnterFullscreen={() => setIsFullscreen(true)}
-                        onSubmitted={() => { void refreshTasks(); void refresh() }}
+                        onSubmitted={() => {
+                          setIsFullscreen(false)
+                          void refreshTasks()
+                          void refresh()
+                        }}
                       />
                     )
                   })()}
+                  </div>
                 </div>
 
                 {selectedTask ? (

@@ -1499,6 +1499,7 @@ export default function Mangaka() {
                   onSendToAssistant={handleSendToAssistant}
                   onSendToTantou={handleSendToTantou}
                   workspaceApi={workspaceApi}
+                  pendingReviewCount={pendingReviews.length}
                 />
               </TabsContent>
             </Tabs>

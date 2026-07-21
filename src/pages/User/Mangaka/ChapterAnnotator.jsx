@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
   ChevronRight,
@@ -98,6 +99,7 @@ export default function ChapterAnnotator({
   onSendToAssistant,
   onSendToTantou,
   workspaceApi = null,
+  pendingReviewCount = 0,
 }) {
   const fileRef = useRef(null)
   const coverFileRef = useRef(null)
@@ -1176,7 +1178,9 @@ export default function ChapterAnnotator({
             embedded && !inline && 'text-zinc-400',
           )}>
             Assistant:{' '}
-            <strong className={inline || embedded ? 'text-zinc-100' : 'text-foreground'}>
+            <strong className={cn(
+              compact || inline || embedded ? 'text-zinc-100' : 'text-foreground',
+            )}>
               {hiredAssistants.find(a => String(a.assistantId) === String(sendAssistantId))?.label ?? sendAssistantId}
             </strong>
           </p>
@@ -1301,6 +1305,17 @@ export default function ChapterAnnotator({
 
   return (
     <div className="mk-annotate space-y-6">
+      {pendingReviewCount > 0 ? (
+        <div className="flex items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2.5">
+          <p className="text-sm">
+            <strong>{pendingReviewCount}</strong> chapter chờ duyệt Assistant
+          </p>
+          <Button size="xs" asChild>
+            <Link to="/mangaka/review">Duyệt</Link>
+          </Button>
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
         <span className={cn(
           'rounded-full px-2.5 py-1 font-medium transition-colors',
@@ -1609,7 +1624,7 @@ export default function ChapterAnnotator({
             <div
               className="flex h-[min(720px,calc(100vh-280px))] min-h-[480px] gap-3 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 p-3"
             >
-              <div className="min-h-0 min-w-0 flex-1 overflow-auto">
+              <div className="mk-board-stage-scroll min-h-0 min-w-0 flex-1 overflow-auto">
                 <div className="flex justify-center p-1">
                   <CanvasBoard refEl={boardRef} />
                 </div>

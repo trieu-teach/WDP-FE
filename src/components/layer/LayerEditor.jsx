@@ -590,38 +590,8 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
               {chapter?.seriesTitle} · Ch.{chapter?.chapterNum}
             </p>
             <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-white/40">
-              <span>
-                <span className="font-medium text-white/60">
-                  Trang {safeIdx + 1} / {pages.length}
-                </span>
-                {pages.length > 1 && (
-                  <div className="mt-1 flex items-center gap-1">
-                    {pages.map((page, i) => {
-                      const pid = page?.id ?? page?._id
-                      const isSubmitted = pid ? !!submittedPages[pid] : false
-                      const isFinalized = pid ? !!finalizedPages[pid] : false
-                      const isCurrent = i === safeIdx
-                      return (
-                        <button
-                          key={pid ?? i}
-                          type="button"
-                          onClick={() => setPageIdx(i)}
-                          title={`Trang ${i + 1}${isSubmitted ? ' — đã gửi' : isFinalized ? ' — đã gộp' : ''}`}
-                          className={cn(
-                            'size-2 shrink-0 rounded-full transition-all',
-                            isCurrent
-                              ? 'scale-125 bg-white ring-2 ring-white/40'
-                              : isSubmitted
-                                ? 'bg-emerald-400'
-                                : isFinalized
-                                  ? 'bg-violet-400'
-                                  : 'bg-white/20 hover:bg-white/40',
-                          )}
-                        />
-                      )
-                    })}
-                  </div>
-                )}
+              <span className="font-medium text-white/60">
+                Trang {safeIdx + 1} / {pages.length}
               </span>
               <span className="text-white/20">·</span>
               <span>

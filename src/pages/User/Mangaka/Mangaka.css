@@ -1901,6 +1901,16 @@
   align-items: start;
 }
 
+/* Ẩn thanh cuộn vùng xem trang — vẫn cuộn được bằng chuột/bánh xe */
+.mk-board-stage-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.mk-board-stage-scroll::-webkit-scrollbar {
+  display: none;
+}
+
 .mk-board {
   position: relative;
   margin: 0 auto;

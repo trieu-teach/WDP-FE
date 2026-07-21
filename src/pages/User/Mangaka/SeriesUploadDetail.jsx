@@ -231,8 +231,9 @@ export default function SeriesUploadDetail() {
     const hasPrev = pageStart > 0
     const hasNext = pageStart + PAGE_LIMIT < pagesWithMedia.length
 
+    // Giống nút "Upload chapter" (series list): chỉ mở tab annotate + series, không ép chapterId
     const openAnnotate = () => navigate('/mangaka', {
-      state: { tab: 'annotate', series: series.title, chapterId: activeRow.id },
+      state: { tab: 'annotate', series: series.title },
     })
 
     return (

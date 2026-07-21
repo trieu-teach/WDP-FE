@@ -32,8 +32,6 @@ const BLEND_LABEL = {
   overlay: 'Overlay',
   darken: 'Darken',
   lighten: 'Lighten',
-  'color-dodge': 'Color Dodge',
-  'color-burn': 'Color Burn',
 }
 
 function LayerThumb({ url, name }) {
@@ -171,11 +169,13 @@ function LayerRow({
             <select
               value={layer.blendMode}
               onChange={(e) => onBlend?.(layer.id, e.target.value)}
-              className="h-6 flex-1 cursor-pointer rounded-md border border-white/10 bg-white/5 px-1.5 text-[10px] font-medium text-white/70 transition-colors hover:border-white/20 hover:bg-white/10 focus:border-violet-500/60 focus:bg-white/5 focus:outline-none"
+              className="h-6 flex-1 cursor-pointer rounded-md border border-white/10 bg-zinc-900 px-1.5 text-[10px] font-medium text-zinc-100 transition-colors hover:border-white/20 hover:bg-zinc-800 focus:border-violet-500/60 focus:outline-none [color-scheme:dark]"
               title="Blend mode"
             >
               {BLEND_MODES.map((m) => (
-                <option key={m} value={m}>{BLEND_LABEL[m]}</option>
+                <option key={m} value={m} className="bg-zinc-900 text-zinc-100">
+                  {BLEND_LABEL[m]}
+                </option>
               ))}
             </select>
           </div>

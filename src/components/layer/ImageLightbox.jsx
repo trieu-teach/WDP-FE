@@ -48,7 +48,8 @@ export function ImageLightbox({ src, alt, title, className, trigger, onClose }) 
       )}
       <DialogContent
         showCloseButton={false}
-        className="max-w-[96vw] gap-0 overflow-hidden border-none bg-slate-950/95 p-0 shadow-2xl backdrop-blur sm:max-w-[96vw]"
+        overlayClassName="z-[10000]"
+        className="z-[10000] max-w-[96vw] gap-0 overflow-hidden border-none bg-slate-950/95 p-0 shadow-2xl backdrop-blur sm:max-w-[96vw]"
       >
         {title ? (
           <DialogTitle className="sr-only">{title}</DialogTitle>

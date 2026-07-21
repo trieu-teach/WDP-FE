@@ -1,4 +1,4 @@
-const BLEND_MODES = ['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten', 'color-dodge', 'color-burn']
+const BLEND_MODES = ['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten']
 
 function pickId(v) {
   if (!v) return null
