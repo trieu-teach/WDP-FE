@@ -341,9 +341,13 @@ export default function EbPublish() {
         : "";
       toast.success(
         whenLabel
-          ? `Series đã được duyệt. Series sẽ tự động chuyển sang 'published' vào ${whenLabel}.`
+          ? `Series đã được duyệt · chuẩn bị phát hành. Tự động chuyển sang đang phát hành vào ${whenLabel}.`
           : (res?.message
-            || `Series "${seriesName}" đã publish${res?.council_average != null ? ` · DTB ${Number(res.council_average).toFixed(1)}` : ""}.`),
+            || `Series "${seriesName}" đã duyệt phát hành${res?.council_average != null ? ` · DTB ${Number(res.council_average).toFixed(1)}` : ""}${
+              res?.series?.publication_status
+                ? ` · ${res.series.publication_status}`
+                : ""
+            }.`),
       );
       navigate("/eb");
     } catch (err) {

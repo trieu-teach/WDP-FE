@@ -196,16 +196,6 @@ function resolveChapterCoverUrl(c) {
   const fromField = resolveMediaUrl(c?.cover_url ?? c?.coverUrl)
   if (fromField) return fromField
 
-  const pages = Array.isArray(c?.pages)
-    ? c.pages
-    : Array.isArray(c?.data?.pages)
-      ? c.data.pages
-      : []
-  for (const p of pages) {
-    const url = rawPageToUi(p).url
-    if (url) return url
-  }
-
   const series = c?.series_id ?? c?.series
   if (series && typeof series === 'object') {
     const seriesCover = resolveMediaUrl(series.cover_image_url ?? series.coverUrl)
@@ -430,15 +420,22 @@ export function useAssistantAssignments() {
       ''
 
     // Parse revision_notes string → structured notes (dùng revision_annotations array nếu có)
+    // Ưu tiên annotation gắn task (round hiện tại từ BE), rồi mới tới chapter-level.
     const annotationsSource =
-      chapter?.revision_annotations_by_page
+      (Array.isArray(task?.revisionAnnotations) && task.revisionAnnotations.length
+        ? task.revisionAnnotations
+        : null)
+      ?? chapter?.revision_annotations_by_page
       ?? chapter?.data?.revision_annotations_by_page
       ?? chapter?.revision_annotations
       ?? chapter?.data?.revision_annotations
       ?? null
 
     const revisionNotesParsed = parseRevisionNotes(
-      chapter?.revision_notes ?? chapter?.data?.revision_notes ?? null,
+      task?.revisionNote
+        ?? chapter?.revision_notes
+        ?? chapter?.data?.revision_notes
+        ?? null,
       annotationsSource,
       pages.length,
     )

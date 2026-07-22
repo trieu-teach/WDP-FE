@@ -8,6 +8,10 @@ function unwrap(res) {
 }
 
 export const seriesService = {
+  /**
+   * GET /api/series
+   * Query hỗ trợ: publication_status=upcoming|ongoing|hiatus|completed|dropped
+   */
   getAll(params) {
     return http.get('/series', { params }).then(unwrap)
   },

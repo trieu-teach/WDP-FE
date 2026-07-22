@@ -348,9 +348,9 @@ export default function SeriesUploadDetail() {
               {chapterCards.map(({ row, cover, uploaded }) => {
                 const badge = STATUS_BADGE[row.status] ?? STATUS_BADGE.draft
                 return (
-                  <Link key={row.id} to={`${basePath}/chapter/${row.id}`} className="group">
-                    <Card className="overflow-hidden transition-shadow hover:shadow-md">
-                      <div className="aspect-[16/9] bg-muted">
+                  <Link key={row.id} to={`${basePath}/chapter/${row.id}`} className="group block h-full">
+                    <Card className="flex h-full flex-col overflow-hidden transition-shadow hover:shadow-md">
+                      <div className="aspect-[16/9] w-full shrink-0 overflow-hidden bg-muted">
                         {cover?.url ? (
                           <img src={cover.url} alt="" className="size-full object-cover transition-transform group-hover:scale-[1.02]" />
                         ) : (
@@ -359,7 +359,7 @@ export default function SeriesUploadDetail() {
                           </div>
                         )}
                       </div>
-                      <CardContent className="p-3">
+                      <CardContent className="mt-auto p-3">
                         <div className="flex items-center justify-between gap-2">
                           <span className="font-medium">Ch. {row.num}</span>
                           <Badge className={cn('text-xs', badge.className)} variant="secondary">{badge.label}</Badge>

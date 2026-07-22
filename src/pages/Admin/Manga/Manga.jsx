@@ -40,9 +40,11 @@ const STATUS_LABEL = {
   rejected: { label: 'Từ chối', class: 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400' },
   published: { label: 'Đã xuất bản', class: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400' },
   cancelled: { label: 'Đã huỷ', class: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400' },
-  ongoing: { label: 'Đang ra', class: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400' },
+  upcoming: { label: 'Chuẩn bị phát hành', class: 'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-400' },
+  ongoing: { label: 'Đang phát hành', class: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400' },
   completed: { label: 'Hoàn thành', class: 'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-400' },
-  hiatus: { label: 'Tạm dừng', class: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400' },
+  hiatus: { label: 'Tạm ngưng', class: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400' },
+  dropped: { label: 'Bị drop', class: 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400' },
 }
 
 const STATUS_OPTIONS = [

@@ -348,4 +348,20 @@ export const teReviewsService = {
     if (revision_feedback) body.revision_feedback = String(revision_feedback).trim()
     return http.post(`/te-reviews/series-review/${seriesId}/submit`, body).then(unwrap)
   },
+
+  /**
+   * PATCH /te-reviews/series/:seriesId/publication-status
+   * TE đổi trạng thái phát hành sau khi series đã published.
+   * Allowed: ongoing→hiatus|completed|dropped, hiatus→ongoing, dropped→ongoing
+   * Blocked: completed (read-only), upcoming (auto bởi job)
+   */
+  updatePublicationStatus(seriesId, publication_status) {
+    const id = String(seriesId ?? '').trim()
+    if (!id) return Promise.reject(new Error('seriesId required'))
+    const status = String(publication_status ?? '').trim()
+    if (!status) return Promise.reject(new Error('publication_status required'))
+    return http
+      .patch(`/te-reviews/series/${id}/publication-status`, { publication_status: status })
+      .then(unwrap)
+  },
 }

@@ -468,6 +468,7 @@ export default function Mangaka() {
   const [uploadPctBySeries, setUploadPctBySeries] = useState({});
   const [annotatorActiveChapterId, setAnnotatorActiveChapterId] = useState(null);
   const [annotatorPageIndex, setAnnotatorPageIndex] = useState(0);
+  const [revisionChapterId, setRevisionChapterId] = useState(null);
   const [annotatorChapterNum, setAnnotatorChapterNum] = useState("1");
   const [annotatorPagesPerChapter, setAnnotatorPagesPerChapter] = useState("");
   const [annotatorUploadPageBudget, setAnnotatorUploadPageBudget] = useState("");
@@ -636,7 +637,12 @@ export default function Mangaka() {
   const [cardRevision, setCardRevision] = useState(null); // { row, review, note, busy }
 
   function openCardRevision(row, review) {
-    setCardRevision({ row, review, note: "", busy: false });
+    if (!row?.id || !review) return;
+    setAnnotateSeries(row.series);
+    setAnnotatorActiveChapterId(row.id);
+    setAnnotatorPageIndex(0);
+    setRevisionChapterId(String(row.id));
+    setTab("annotate");
   }
   function closeCardRevision() {
     setCardRevision(null);
@@ -651,7 +657,20 @@ export default function Mangaka() {
       const finalNote =
         note.trim() ||
         "Mangaka yêu cầu chỉnh sửa — xem ghi chú trên từng trang.";
-      await requestRevision([review], finalNote);
+      const chapterPages =
+        annotatorChapters.find((ch) => String(ch.id) === String(row.id))?.pages
+        ?? []
+      await requestRevision([review], finalNote, {
+        getAnnotationsForTask: (task) => {
+          const pageId = task?.pageId
+          if (!pageId) return []
+          const pageIndex = chapterPages.findIndex(
+            (p) => String(p?.id ?? p?._id) === String(pageId),
+          )
+          if (pageIndex < 0) return []
+          return annotatorNotes[`${row.id}-${pageIndex}`] ?? []
+        },
+      });
       await updateChapterStatus(row.id, "assistant");
       toast.success(
         `Đã gửi lại chapter ${row.num} cho Assistant kèm ghi chú lỗi.`,
@@ -663,6 +682,45 @@ export default function Mangaka() {
       toast.error(getApiErrorMessage(err, "Gửi lại cho Assistant thất bại."));
       setCardRevision((s) => (s ? { ...s, busy: false } : s));
     }
+  }
+
+  async function handleSendRevisionFromAnnotator({
+    chapter,
+    pages,
+    notesByPage,
+  }) {
+    const chapterId = String(chapter?.id ?? "");
+    const review = pendingReviewByChapter.get(chapterId);
+    if (!chapterId || !review) {
+      toast.error("Không tìm thấy task đang chờ Mangaka yêu cầu sửa.");
+      return;
+    }
+
+    const allNotes = (pages ?? []).flatMap((_, pageIndex) =>
+      notesByPage?.[`${chapterId}-${pageIndex}`] ?? [],
+    );
+    const noteText = allNotes
+      .map((n) => String(n?.text ?? "").trim())
+      .filter(Boolean)
+      .join("\n")
+      || "Mangaka yêu cầu chỉnh sửa — xem vùng đánh dấu trên từng trang.";
+
+    await requestRevision([review], noteText, {
+      getAnnotationsForTask: (task) => {
+        const pageIndex = (pages ?? []).findIndex(
+          (p) => String(p?.id ?? p?._id) === String(task?.pageId),
+        );
+        return pageIndex >= 0
+          ? (notesByPage?.[`${chapterId}-${pageIndex}`] ?? [])
+          : [];
+      },
+    });
+    await updateChapterStatus(chapterId, "assistant");
+    toast.success("Đã gửi yêu cầu sửa kèm vùng đánh dấu cho Assistant.");
+    setRevisionChapterId(null);
+    setTab("chapters");
+    await refreshMangakaTasks();
+    await refreshWorkspace();
   }
 
   const pipelineSeries = useMemo(
@@ -1144,12 +1202,14 @@ export default function Mangaka() {
     if (typeof st.chapterId === "string" && st.chapterId) {
       setAnnotatorActiveChapterId(st.chapterId);
       setAnnotatorPageIndex(0);
+      setRevisionChapterId(st.revision === true ? st.chapterId : null);
     }
   }, [location.state]);
 
   function openAnnotate(seriesTitle, chapterLocalId) {
     setAnnotateSeries(seriesTitle);
     setTab("annotate");
+    setRevisionChapterId(null);
     if (chapterLocalId) {
       setAnnotatorActiveChapterId(chapterLocalId);
       setAnnotatorPageIndex(0);
@@ -1497,9 +1557,14 @@ export default function Mangaka() {
                   onOpenAssistantsTab={() => setTab("assistants")}
                   onUploadProgress={handleUploadProgress}
                   onSendToAssistant={handleSendToAssistant}
+                  onSendRevision={handleSendRevisionFromAnnotator}
                   onSendToTantou={handleSendToTantou}
                   workspaceApi={workspaceApi}
                   pendingReviewCount={pendingReviews.length}
+                  revisionMode={
+                    Boolean(revisionChapterId)
+                    && String(revisionChapterId) === String(annotatorActiveChapterId)
+                  }
                 />
               </TabsContent>
             </Tabs>

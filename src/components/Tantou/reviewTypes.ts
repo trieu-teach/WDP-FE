@@ -88,6 +88,8 @@ export type TantouSubmission = {
     synopsis?: string;
     coverImageUrl?: string;
     seriesApiStatus?: string | null;
+    /** BE Series.publication_status */
+    publicationStatus?: string | null;
     ebApproved?: boolean;
   };
 };

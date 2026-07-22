@@ -67,7 +67,12 @@ export function apiSeriesToUi(raw, index = 0) {
     format: s.format ?? 'manga',
     language: s.language ?? 'vi',
     contentRating: s.content_rating ?? s.contentRating ?? 'all',
-    publicationStatus: s.is_public ? 'ongoing' : (s.publication_status ?? 'preparing'),
+    // Ưu tiên publication_status từ BE; null = chưa xác định.
+    // is_public chỉ fallback legacy khi BE chưa có field.
+    publicationStatus:
+      s.publication_status != null
+        ? s.publication_status
+        : (s.is_public ? 'ongoing' : null),
     publishType: s.publish_type ?? 'debut',
     authorName,
     authorId,
@@ -293,6 +298,7 @@ export function sortPagesByNumber(pages) {
 function mapAnnotationNoteToUi(n, pageIdx, noteIdx, source = 'chapterAnnotations') {
   const region = n?.region ?? {}
   const id = n?._id ?? n?.id ?? `${source}-${pageIdx}-${noteIdx}`
+  const round = Number(n?.revision_round ?? n?.revisionRound ?? n?.round)
   return {
     id,
     clientKey: String(id),
@@ -303,8 +309,27 @@ function mapAnnotationNoteToUi(n, pageIdx, noteIdx, source = 'chapterAnnotations
     h: Number(n?.h ?? n?.height ?? region.height ?? region.h ?? 0),
     taskType: n?.taskType ?? n?.error_type ?? 'other',
     status: n?.status ?? 'open',
+    revisionRound: Number.isFinite(round) ? round : null,
     source,
   }
+}
+
+/**
+ * Chỉ giữ note của revision round mới nhất (khi có nhiều vòng sửa).
+ * Note không có round (undefined/null) được giữ nguyên để không ảnh hưởng luồng cũ.
+ */
+export function keepLatestRevisionNotes(notes) {
+  const list = notes ?? []
+  const rounds = list
+    .map((n) => Number(n?.revisionRound ?? n?.revision_round))
+    .filter((r) => Number.isFinite(r) && r > 0)
+  if (!rounds.length) return list
+  const maxRound = Math.max(...rounds)
+  if (maxRound <= 1) return list
+  return list.filter((n) => {
+    const r = Number(n?.revisionRound ?? n?.revision_round)
+    return !Number.isFinite(r) || r >= maxRound
+  })
 }
 
 /** Note có vùng % thật do Mangaka khoanh — loại placeholder full-canvas từ revision_notes text. */
@@ -525,6 +550,27 @@ export function uiTaskTypeToErrorType(taskType) {
   return UI_TASK_TYPE_TO_ERROR_TYPE[taskType] ?? 'other'
 }
 
+/** FE note → payload flat `revision_annotations` cho PATCH /tasks/:id/revision. */
+export function uiNotesToRevisionAnnotations(notes) {
+  return filterSpatialMangakaNotes(notes)
+    .map((n) => {
+      const content = String(n.text ?? '').trim() || 'Cần chỉnh sửa.'
+      const x = Number(n.x) || 0
+      const y = Number(n.y) || 0
+      const w = Number(n.w ?? n.width) || 0
+      const h = Number(n.h ?? n.height) || 0
+      return {
+        content,
+        error_type: uiTaskTypeToErrorType(n.taskType),
+        x,
+        y,
+        w,
+        h,
+      }
+    })
+    .filter((a) => a.w > 0 && a.h > 0 && a.x + a.w <= 100 && a.y + a.h <= 100)
+}
+
 export function uiTaskTypeToApi(taskType) {
   return UI_TASK_TYPE_TO_API[taskType] ?? 'other'
 }
@@ -603,6 +649,14 @@ export function apiTaskToUi(raw) {
     region,
     description: t.description ?? '',
     revisionNote: t.revision_note ?? '',
+    revisionRound: t.revision_round ?? t.round ?? null,
+    /**
+     * Annotation vùng hiện tại (round đang revision) từ BE.
+     * Shape: [{ _id, page_id, content, error_type, region:{x,y,width,height}, note_kind, revision_round }]
+     */
+    revisionAnnotations: Array.isArray(t.revision_annotations)
+      ? t.revision_annotations
+      : [],
     /**
      * note_ids: mảng PageNote gắn với task.
      * BE populate đầy đủ: [{ _id, text, x, y, w, h, taskType, status, createdAt }]

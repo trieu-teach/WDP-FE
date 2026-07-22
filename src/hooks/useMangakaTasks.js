@@ -5,6 +5,7 @@ import {
   apiSubmissionChapterToUi,
   apiTaskToUi,
   canMangakaSendToTe,
+  uiNotesToRevisionAnnotations,
 } from '@/utils/apiMappers.js'
 import {
   dedupeTasksByPage,
@@ -102,9 +103,13 @@ export function useMangakaTasks(chapterRows) {
     void refresh()
   }, [chapterIdKey, refresh])
 
-  const requestRevision = useCallback(async (reviews, note = '') => {
+  const requestRevision = useCallback(async (reviews, note = '', options = {}) => {
     const list = Array.isArray(reviews) ? reviews : [reviews].filter(Boolean)
     const trimmedNote = String(note ?? '').trim()
+    const getAnnotationsForTask =
+      typeof options?.getAnnotationsForTask === 'function'
+        ? options.getAnnotationsForTask
+        : null
 
     for (const review of list) {
       const chapterId = review?.submission?.id ?? review?.chapter?.id
@@ -122,7 +127,22 @@ export function useMangakaTasks(chapterRows) {
       }
 
       await Promise.all(
-        tasks.map((t) => tasksService.requestRevision(t.id, trimmedNote)),
+        tasks.map(async (t) => {
+          let revisionAnnotations = []
+          if (getAnnotationsForTask) {
+            const rawNotes = await getAnnotationsForTask(t)
+            revisionAnnotations = Array.isArray(rawNotes) && rawNotes.length
+              && rawNotes[0]?.content != null
+              ? rawNotes
+              : uiNotesToRevisionAnnotations(rawNotes)
+          }
+          return tasksService.requestRevision(t.id, {
+            note: trimmedNote,
+            ...(revisionAnnotations.length
+              ? { revision_annotations: revisionAnnotations }
+              : {}),
+          })
+        }),
       )
     }
 

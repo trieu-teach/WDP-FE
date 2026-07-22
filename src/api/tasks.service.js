@@ -105,8 +105,22 @@ export const tasksService = {
     return http.patch(`/tasks/${taskId}/approve`).then(unwrap)
   },
 
-  requestRevision(taskId, note = '') {
-    return http.patch(`/tasks/${taskId}/revision`, note ? { note } : {}).then(unwrap)
+  requestRevision(taskId, noteOrPayload = '') {
+    const payload =
+      noteOrPayload && typeof noteOrPayload === 'object' && !Array.isArray(noteOrPayload)
+        ? {
+            ...(String(noteOrPayload.note ?? '').trim()
+              ? { note: String(noteOrPayload.note).trim() }
+              : {}),
+            ...(Array.isArray(noteOrPayload.revision_annotations)
+              && noteOrPayload.revision_annotations.length > 0
+              ? { revision_annotations: noteOrPayload.revision_annotations }
+              : {}),
+          }
+        : (String(noteOrPayload ?? '').trim()
+          ? { note: String(noteOrPayload).trim() }
+          : {})
+    return http.patch(`/tasks/${taskId}/revision`, payload).then(unwrap)
   },
 
   /**

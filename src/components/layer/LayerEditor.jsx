@@ -19,7 +19,7 @@ import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { usePageLayers } from '@/hooks/usePageLayers.js'
 import { layersService } from '@/api/layers.service.js'
-import { apiNoteToUi, apiTaskToUi, buildChapterPageAnnotations, mergeMangakaNoteLists, parsePageNotesResponse, filterSpatialMangakaNotes, sortPagesByNumber } from '@/utils/apiMappers.js'
+import { apiNoteToUi, apiTaskToUi, buildChapterPageAnnotations, mergeMangakaNoteLists, parsePageNotesResponse, filterSpatialMangakaNotes, keepLatestRevisionNotes, sortPagesByNumber } from '@/utils/apiMappers.js'
 import { chaptersService } from '@/api/chapters.service.js'
 import { tasksService } from '@/api/tasks.service.js'
 import { getApiErrorMessage, resolveMediaUrl } from '@/api/http.js'
@@ -295,7 +295,7 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
       ...n,
       source: n.source ?? 'chapterAnnotations',
     }))
-    return mergeMangakaNoteLists(pageNotes, taskList, chapterList)
+    return keepLatestRevisionNotes(mergeMangakaNoteLists(pageNotes, taskList, chapterList))
   }, [taskNotes, chapterPageAnnotations, pageNotes])
 
   const overlayNotes = useMemo(

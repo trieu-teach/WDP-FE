@@ -60,12 +60,37 @@ export const SERIES_TAGS = [
   'Ecchi', 'Harem', 'Gore', 'Post-Apocalyptic', 'Cyberpunk', 'Dark Fantasy',
 ]
 
+/**
+ * Trạng thái phát hành (BE: Series.publication_status).
+ * null = chưa xác định (series mới, chưa phát hành).
+ * Flow: null → EB duyệt → upcoming → job → ongoing → TE: hiatus/completed/dropped
+ */
 export const SERIES_PUBLICATION_STATUSES = [
-  { value: 'preparing', label: 'Chuẩn bị phát hành' },
-  { value: 'ongoing', label: 'Đang ra' },
-  { value: 'hiatus', label: 'Tạm dừng' },
+  { value: 'upcoming', label: 'Chuẩn bị phát hành' },
+  { value: 'ongoing', label: 'Đang phát hành' },
+  { value: 'hiatus', label: 'Tạm ngưng' },
   { value: 'completed', label: 'Hoàn thành' },
+  { value: 'dropped', label: 'Bị drop' },
 ]
+
+/** Transition TE được phép (khớp PATCH /te-reviews/series/:id/publication-status). */
+export const TE_PUBLICATION_TRANSITIONS = {
+  ongoing: ['hiatus', 'completed', 'dropped'],
+  hiatus: ['ongoing'],
+  dropped: ['ongoing'],
+  // completed, upcoming: read-only
+}
+
+const PUB_LABEL = Object.fromEntries(SERIES_PUBLICATION_STATUSES.map((p) => [p.value, p.label]))
+
+export function getPublicationStatusLabel(value) {
+  if (value == null || value === '') return 'Chưa xác định'
+  return PUB_LABEL[value] ?? String(value)
+}
+
+export function getAllowedTePublicationStatuses(current) {
+  return TE_PUBLICATION_TRANSITIONS[current] ?? []
+}
 
 export const SERIES_PUBLISH_TYPES = [
   {
@@ -86,7 +111,6 @@ const DEMOGRAPHIC_LABEL = Object.fromEntries(SERIES_DEMOGRAPHICS.map((d) => [d.v
 const FORMAT_LABEL = Object.fromEntries(SERIES_FORMATS.map((f) => [f.value, f.label]))
 const LANGUAGE_LABEL = Object.fromEntries(SERIES_LANGUAGES.map((l) => [l.value, l.label]))
 const RATING_LABEL = Object.fromEntries(SERIES_CONTENT_RATINGS.map((r) => [r.value, r.label]))
-const PUB_LABEL = Object.fromEntries(SERIES_PUBLICATION_STATUSES.map((p) => [p.value, p.label]))
 
 export function slugifySeriesTitle(title) {
   const base = String(title)
@@ -132,7 +156,7 @@ export function normalizeSeries(raw, index = 0) {
     format: s.format ?? 'manga',
     language: s.language ?? 'vi',
     contentRating: s.contentRating ?? 'all',
-    publicationStatus: s.publicationStatus ?? 'ongoing',
+    publicationStatus: s.publicationStatus ?? null,
     publishType,
     needsFullDebutPipeline,
     authorName: String(s.authorName ?? '').trim() || 'Mangaka',
@@ -163,11 +187,11 @@ export function normalizeSeriesList(list) {
 }
 
 export function buildWorkflowStatusLabel(s) {
-  const pub = PUB_LABEL[s.publicationStatus] ?? 'Chuẩn bị'
+  const pub = getPublicationStatusLabel(s.publicationStatus)
   if (s.status === 'assistant') return 'Đang vẽ ngoại cảnh'
   if (s.status === 'review') return 'Chờ bạn duyệt'
   if (s.status === 'draft') {
-    if (s.publicationStatus === 'preparing') return `Bản nháp · ${pub}`
+    if (s.publicationStatus == null) return `Bản nháp · ${pub}`
     return 'Bản nháp'
   }
   return pub
@@ -214,7 +238,7 @@ export function seriesToExternalSummary(series) {
     altTitle: s.altTitle,
     publishType: s.publishType,
     publicationStatus: s.publicationStatus,
-    publicationLabel: PUB_LABEL[s.publicationStatus],
+    publicationLabel: getPublicationStatusLabel(s.publicationStatus),
     catalogLine: formatSeriesCatalogLine(s),
     category: s.category,
     tags: s.tags,
@@ -266,7 +290,7 @@ export function buildSeriesFromForm(form, { id, authorName, authorId }) {
     synopsis: String(form.description ?? '').trim(),
     genres,
     demographic: form.target_audience || 'shonen',
-    publicationStatus: 'preparing',
+    publicationStatus: null,
     publishType: 'debut',
     needsFullDebutPipeline: true,
     authorName: authorName || 'Mangaka',
@@ -321,7 +345,7 @@ export function buildSeriesFromUploadTitle(title, { id, authorName, colorIndex =
     slug: slugifySeriesTitle(title),
     synopsis: '',
     genres: [],
-    publicationStatus: 'preparing',
+    publicationStatus: null,
     publishType: 'debut',
     needsFullDebutPipeline: true,
     authorName: authorName || 'Mangaka',

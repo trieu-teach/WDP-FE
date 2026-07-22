@@ -25,9 +25,11 @@ import {
 import { cn } from '@/lib/utils'
 
 const STATUS_LABEL = {
-  ongoing: { label: 'Đang ra', variant: 'default', class: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400' },
+  upcoming: { label: 'Chuẩn bị phát hành', variant: 'secondary', class: 'bg-violet-100 text-violet-700 hover:bg-violet-100 dark:bg-violet-500/15 dark:text-violet-400' },
+  ongoing: { label: 'Đang phát hành', variant: 'default', class: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400' },
   completed: { label: 'Hoàn thành', variant: 'secondary', class: 'bg-sky-100 text-sky-700 hover:bg-sky-100 dark:bg-sky-500/15 dark:text-sky-400' },
-  hiatus: { label: 'Tạm dừng', variant: 'outline', class: 'bg-amber-100 text-amber-700 hover:bg-amber-100 dark:bg-amber-500/15 dark:text-amber-400' },
+  hiatus: { label: 'Tạm ngưng', variant: 'outline', class: 'bg-amber-100 text-amber-700 hover:bg-amber-100 dark:bg-amber-500/15 dark:text-amber-400' },
+  dropped: { label: 'Bị drop', variant: 'destructive', class: 'bg-rose-100 text-rose-700 hover:bg-rose-100 dark:bg-rose-500/15 dark:text-rose-400' },
 }
 
 const STAT_ICONS = {

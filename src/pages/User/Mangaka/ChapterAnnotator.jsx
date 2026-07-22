@@ -97,9 +97,11 @@ export default function ChapterAnnotator({
   onOpenAssistantsTab,
   onUploadProgress,
   onSendToAssistant,
+  onSendRevision,
   onSendToTantou,
   workspaceApi = null,
   pendingReviewCount = 0,
+  revisionMode = false,
 }) {
   const fileRef = useRef(null)
   const coverFileRef = useRef(null)
@@ -109,6 +111,7 @@ export default function ChapterAnnotator({
   const loadedNoteKeysRef = useRef(new Set())
   const draftTextRef = useRef(new Map())
   const noteTextareaRefs = useRef(new Map())
+  const revisionDraftKeysRef = useRef(new Set())
 
   const [drawStart, setDrawStart] = useState(null)
   const [drawCurrent, setDrawCurrent] = useState(null)
@@ -121,13 +124,23 @@ export default function ChapterAnnotator({
   const [sendingToAssistant, setSendingToAssistant] = useState(false)
 
   const activeChapter = chapters.find(c => c.id === activeChapterId)
-  const pages = activeChapter?.pages ?? []
+  const chapterPages = activeChapter?.pages ?? []
+  const pages = revisionMode
+    ? chapterPages.map((p) => ({
+        ...p,
+        url: p.resultUrl ?? p.resultImageUrl ?? p.url,
+      }))
+    : chapterPages
   const pageKey = activeChapter ? `${activeChapterId}-${pageIndex}` : ''
   const currentPageId = pages[pageIndex]?.id ?? null
   // Phòng thủ: chỉ gọi BE khi có ObjectId hợp lệ (24 ký tự hex).
   // Nếu page chưa sync _id từ BE (id là placeholder "page-X" hoặc rỗng), bỏ qua.
   const isValidObjectId = (id) => typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id)
   const pageNotes = notes[pageKey] ?? []
+
+  useEffect(() => {
+    revisionDraftKeysRef.current.clear()
+  }, [revisionMode, activeChapterId])
 
   useEffect(() => {
     if (!isFullscreen) return undefined
@@ -301,8 +314,14 @@ export default function ChapterAnnotator({
     }
 
     const seriesMeta = seriesOptions.find(s => s.title === trimmedSeries)
-    const assistantId = hiredAssistants.length === 1 ? String(hiredAssistants[0].assistantId) : null
+    const assistantId = sendAssistantId
+      ? String(sendAssistantId)
+      : (hiredAssistants.length === 1 ? String(hiredAssistants[0].assistantId) : null)
     if (workspaceApi?.createChapter && seriesMeta?.id) {
+      if (!assistantId) {
+        setUploadRejectMessage('Chọn Assistant trước khi tạo chapter.')
+        return
+      }
       try {
         const ch = await workspaceApi.createChapter(seriesMeta.id, trimmedSeries, num, assistantId)
         setActiveChapterId(ch.id)
@@ -334,7 +353,7 @@ export default function ChapterAnnotator({
   }, [
     selectedSeriesTitle, nextChapterNum, chapters, setChapters, seriesOptions,
     setActiveChapterId, setPageIndex, onChapterNumChange, activateChapter, workspaceApi,
-    hiredAssistants,
+    hiredAssistants, sendAssistantId,
   ])
 
   const handleFiles = useCallback(async (files) => {
@@ -353,7 +372,9 @@ export default function ChapterAnnotator({
     }
 
     const seriesMeta = seriesOptions.find(s => s.title === trimmedSeries)
-    const assistantId = hiredAssistants.length === 1 ? String(hiredAssistants[0].assistantId) : null
+    const assistantId = sendAssistantId
+      ? String(sendAssistantId)
+      : (hiredAssistants.length === 1 ? String(hiredAssistants[0].assistantId) : null)
 
     const fileList = Array.from(files).filter(
       f => f.type.startsWith('image/') || f.name.match(/\.(png|jpe?g|webp)$/i),
@@ -376,6 +397,12 @@ export default function ChapterAnnotator({
       if (workspaceApi?.createChapterWithPages && seriesMeta?.id) {
         const isLocalChapter = !/^[0-9a-f]{24}$/i.test(targetId)
         if (isLocalChapter) {
+          if (!assistantId) {
+            setUploadRejectMessage('Chọn Assistant trước khi tạo chapter.')
+            setUploadUi(null)
+            if (hasProgress) onUploadProgress(trimmedSeries, 0)
+            return
+          }
           try {
             const ch = await workspaceApi.createChapterWithPages(
               seriesMeta.id, trimmedSeries, target.num, assistantId, filesToAdd,
@@ -449,7 +476,7 @@ export default function ChapterAnnotator({
     setUploadUi(null)
   }, [
     selectedSeriesTitle, activeChapterId, chapters, setChapters, setNotes,
-    onUploadProgress, workspaceApi, seriesOptions, hiredAssistants,
+    onUploadProgress, workspaceApi, seriesOptions, hiredAssistants, sendAssistantId,
   ])
 
   function onFileChange(e) {
@@ -571,6 +598,7 @@ export default function ChapterAnnotator({
       taskType: 'background',
       assignee: '',
     }
+    if (revisionMode) revisionDraftKeysRef.current.add(String(clientKey))
     setNotes(prev => ({
       ...prev,
       [pageKey]: [...(prev[pageKey] ?? []), newNote],
@@ -612,12 +640,14 @@ export default function ChapterAnnotator({
   }, [activeChapterId, workspaceApi?.loadChapterPages])
 
   useEffect(() => {
+    // Revision mode: không nạp note cũ (round trước) — Mangaka chỉ khoanh vùng mới.
+    if (revisionMode) return
     if (!workspaceApi?.loadPageNotes || !currentPageId || !pageKey) return
     if (!isValidObjectId(currentPageId)) return
     if (loadedNoteKeysRef.current.has(pageKey)) return
     loadedNoteKeysRef.current.add(pageKey)
     void workspaceApi.loadPageNotes(currentPageId, pageKey)
-  }, [currentPageId, pageKey, workspaceApi?.loadPageNotes, isValidObjectId])
+  }, [currentPageId, pageKey, workspaceApi?.loadPageNotes, isValidObjectId, revisionMode])
 
   useEffect(() => {
     loadedNoteKeysRef.current.clear()
@@ -1138,15 +1168,26 @@ export default function ChapterAnnotator({
 
   function SendActionsBar({ compact = false, embedded = false, inline = false }) {
     const handleAssistant = async () => {
-      if (!activeChapter || !onSendToAssistant || sendingToAssistant) return
+      const sendHandler = revisionMode ? onSendRevision : onSendToAssistant
+      if (!activeChapter || !sendHandler || sendingToAssistant) return
       setSendingToAssistant(true)
       try {
         const syncedNotes = await flushNotesBeforeSend()
-        await onSendToAssistant({
+        const notesForSend = revisionMode
+          ? Object.fromEntries(
+              Object.entries(syncedNotes).map(([key, list]) => [
+                key,
+                (list ?? []).filter((n) =>
+                  revisionDraftKeysRef.current.has(String(noteStableKey(n))),
+                ),
+              ]),
+            )
+          : syncedNotes
+        await sendHandler({
           chapter: activeChapter,
           pages,
           assistantId: sendAssistantId,
-          notesByPage: syncedNotes,
+          notesByPage: notesForSend,
         })
       } finally {
         setSendingToAssistant(false)
@@ -1213,12 +1254,19 @@ export default function ChapterAnnotator({
           ) : null}
           <Button
             size="sm"
-            disabled={!activeChapter || pages.length === 0 || !sendAssistantId || sendingToAssistant}
+            disabled={
+              !activeChapter
+              || pages.length === 0
+              || (!revisionMode && !sendAssistantId)
+              || sendingToAssistant
+            }
             onClick={() => { void handleAssistant() }}
             className="h-8 w-full min-w-0 text-xs"
           >
             <Send className="size-3 shrink-0" />
-            {sendingToAssistant ? 'Đang gửi…' : 'Gửi Assistant'}
+            {sendingToAssistant
+              ? 'Đang gửi…'
+              : (revisionMode ? 'Gửi yêu cầu sửa cho Assistant' : 'Gửi Assistant')}
           </Button>
         </div>
       </div>
@@ -1305,6 +1353,13 @@ export default function ChapterAnnotator({
 
   return (
     <div className="mk-annotate space-y-6">
+      {revisionMode ? (
+        <div className="rounded-lg border border-amber-300/70 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+          <strong>Yêu cầu Assistant sửa lại:</strong>{' '}
+          khoanh vùng trên bản Assistant đã gửi, nhập ghi chú rồi bấm
+          {' '}“Gửi yêu cầu sửa cho Assistant”.
+        </div>
+      ) : null}
       {pendingReviewCount > 0 ? (
         <div className="flex items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2.5">
           <p className="text-sm">

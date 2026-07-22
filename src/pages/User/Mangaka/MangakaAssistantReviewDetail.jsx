@@ -41,8 +41,6 @@ export default function MangakaAssistantReviewDetail() {
 
   const {
     chapterRows,
-    annotatorChapters,
-    updateChapterStatus,
     loadChapterPages,
     refresh: refreshWorkspace,
   } = useMangakaWorkspace(user);
@@ -51,7 +49,6 @@ export default function MangakaAssistantReviewDetail() {
     pendingReviews,
     loading: tasksLoading,
     refresh: refreshMangakaTasks,
-    requestRevision,
     acknowledgeTask,
     approveTask,
     approveChapterByMangaka,
@@ -66,7 +63,6 @@ export default function MangakaAssistantReviewDetail() {
   );
 
   const [taskActionBusy, setTaskActionBusy] = useState(null);
-  const [revisionSending, setRevisionSending] = useState(false);
   const [highlightPageNumbers, setHighlightPageNumbers] = useState([]);
 
   const [teUsers, setTeUsers] = useState([]);
@@ -94,15 +90,6 @@ export default function MangakaAssistantReviewDetail() {
       cancelled = true;
     };
   }, [chapterId, loadChapterPages]);
-
-  // Đồng bộ khi annotatorChapters cập nhật (sau fetch khác)
-  useEffect(() => {
-    if (!chapterId) return;
-    const ch = (annotatorChapters ?? []).find(
-      (c) => String(c.id) === String(chapterId),
-    );
-    if (ch?.pages?.length) setPages(ch.pages);
-  }, [annotatorChapters, chapterId]);
 
   useEffect(() => {
     if (!review?.chapter) return;
@@ -262,28 +249,14 @@ export default function MangakaAssistantReviewDetail() {
 
   async function handleRequestRevision(item) {
     if (!item?.chapter) return;
-    setRevisionSending(true);
-    try {
-      await requestRevision(
-        [item],
-        "Mangaka yêu cầu chỉnh sửa chapter.",
-      );
-      await updateChapterStatus(item.chapter.id, "assistant");
-      toast.success("Đã trả chapter cho Assistant.");
-      navigate("/mangaka", {
-        state: {
-          tab: "annotate",
-          series: item.chapter.series,
-          chapterId: item.chapter.id,
-        },
-      });
-      await refreshMangakaTasks();
-      await refreshWorkspace();
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, "Gửi yêu cầu sửa thất bại."));
-    } finally {
-      setRevisionSending(false);
-    }
+    navigate("/mangaka", {
+      state: {
+        tab: "annotate",
+        series: item.chapter.series,
+        chapterId: item.chapter.id,
+        revision: true,
+      },
+    });
   }
 
 
@@ -355,7 +328,7 @@ export default function MangakaAssistantReviewDetail() {
             onAcknowledgeTask={handleAcknowledgeTask}
             onApproveTask={handleApproveTask}
             onRequestRevision={handleRequestRevision}
-            revisionSending={revisionSending}
+            revisionSending={false}
             highlightPageNumbers={highlightPageNumbers}
           />
         )}

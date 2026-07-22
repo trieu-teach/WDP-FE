@@ -62,7 +62,7 @@ function MangakaAvatar({ id, name, size = 'lg' }) {
 }
 
 function ChapterWorkCard({ chapter, onSelect, highlight }) {
-  const coverUrl = chapter.coverUrl ?? chapter.pages?.find(p => p.url)?.url ?? null
+  const coverUrl = chapter.coverUrl ?? null
   const pageCount = chapter.pageCount ?? chapter.pages?.length ?? 0
   const status = chapter._task?.status
 

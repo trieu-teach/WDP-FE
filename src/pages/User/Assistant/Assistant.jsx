@@ -597,7 +597,7 @@ export default function Assistant() {
                             STATUS_BADGE[ch._task?.status] ??
                             STATUS_BADGE[ch.status] ??
                             STATUS_BADGE.pending_assistant
-                          const coverUrl = ch.coverUrl ?? ch.pages?.find(p => p.url)?.url ?? null
+                          const coverUrl = ch.coverUrl ?? null
                           const pageCount = ch.pageCount ?? ch.pages?.length ?? 0
                           const isSelected = ch.chapterId === selectedChapterId
                           const needsAttention = ch._task?.status === 'revision'
