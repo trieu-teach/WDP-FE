@@ -1,18 +1,141 @@
 import { useEffect, useState } from 'react'
-import { Edit, Key, Loader2, Mail, Shield, ShieldCheck } from 'lucide-react'
+import { Edit, Key, Loader2, Mail, Phone, Shield, ShieldCheck } from 'lucide-react'
+import { toast } from 'sonner'
 import { api } from '@/api/index.js'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
+
+function formatDate(value) {
+  if (!value) return '—'
+  try {
+    return new Date(value).toLocaleDateString('vi-VN')
+  } catch {
+    return '—'
+  }
+}
+
+function normalizeProfile(raw) {
+  const p = raw?.data ?? raw ?? {}
+  const name = p.name || 'Admin'
+  return {
+    ...p,
+    name,
+    phoneNumber: p.phoneNumber || '',
+    initials: p.initials || name.slice(0, 2).toUpperCase(),
+    createdAt: formatDate(p.createdAt),
+  }
+}
+
+function EditProfileDialog({ open, profile, onClose, onSaved }) {
+  const [form, setForm] = useState({ name: '', email: '', phoneNumber: '' })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (open && profile) {
+      setForm({
+        name: profile.name ?? '',
+        email: profile.email ?? '',
+        phoneNumber: profile.phoneNumber ?? '',
+      })
+      setError('')
+    }
+  }, [open, profile])
+
+  async function handleSave(e) {
+    e.preventDefault()
+    setSaving(true)
+    setError('')
+    try {
+      const updated = await api.updateProfile(form)
+      onSaved(normalizeProfile(updated))
+      toast.success('Đã cập nhật hồ sơ.')
+      onClose()
+    } catch (err) {
+      const message =
+        err?.response?.data?.message || err?.message || 'Không thể cập nhật hồ sơ.'
+      setError(message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <form onSubmit={handleSave}>
+          <DialogHeader>
+            <DialogTitle>Chỉnh sửa hồ sơ</DialogTitle>
+            <DialogDescription>Cập nhật thông tin cá nhân của bạn.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="profile-name">Họ tên</Label>
+              <Input
+                id="profile-name"
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="profile-email">Email</Label>
+              <Input
+                id="profile-email"
+                type="email"
+                value={form.email}
+                onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="profile-phone">Số điện thoại</Label>
+              <Input
+                id="profile-phone"
+                value={form.phoneNumber}
+                onChange={(e) => setForm((f) => ({ ...f, phoneNumber: e.target.value }))}
+                placeholder="Tùy chọn"
+              />
+            </div>
+            {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
+              Huỷ
+            </Button>
+            <Button type="submit" disabled={saving}>
+              {saving ? <Loader2 className="size-4 animate-spin" /> : 'Lưu'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
 
 export default function Profile() {
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [editOpen, setEditOpen] = useState(false)
 
   useEffect(() => {
-    api.getProfile().then(setProfile).finally(() => setLoading(false))
+    api
+      .getProfile()
+      .then((data) => setProfile(normalizeProfile(data)))
+      .finally(() => setLoading(false))
   }, [])
 
   if (loading) {
@@ -48,11 +171,15 @@ export default function Profile() {
               {profile.role}
             </Badge>
             <div className="mt-4 flex w-full gap-2">
-              <Button className="flex-1">
+              <Button className="flex-1" onClick={() => setEditOpen(true)}>
                 <Edit className="size-4" />
                 Chỉnh sửa
               </Button>
-              <Button variant="outline" className="flex-1">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => toast.info('Đổi mật khẩu chưa được hỗ trợ trên API.')}
+              >
                 <Key className="size-4" />
                 Đổi mật khẩu
               </Button>
@@ -68,6 +195,7 @@ export default function Profile() {
             {[
               { label: 'Họ tên', value: profile.name, icon: null },
               { label: 'Email', value: profile.email, icon: Mail },
+              { label: 'Số điện thoại', value: profile.phoneNumber || '—', icon: Phone },
               { label: 'Vai trò', value: profile.role, icon: Shield, badge: true },
               { label: 'Ngày tạo', value: profile.createdAt, icon: null },
               {
@@ -106,6 +234,13 @@ export default function Profile() {
           </CardContent>
         </Card>
       </div>
+
+      <EditProfileDialog
+        open={editOpen}
+        profile={profile}
+        onClose={() => setEditOpen(false)}
+        onSaved={setProfile}
+      />
     </div>
   )
 }

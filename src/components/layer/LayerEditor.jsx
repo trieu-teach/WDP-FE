@@ -1,49 +1,90 @@
-import { useEffect, useMemo, useState } from 'react'
-import { ArrowDownToLine, ChevronLeft, ChevronRight, FileDown, Layers as LayersIcon, Loader2, Maximize2, RefreshCw, Send } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  ArrowDownToLine,
+  ChevronLeft,
+  ChevronRight,
+  Eye,
+  EyeOff,
+  FileDown,
+  Image as ImageIcon,
+  Layers as LayersIcon,
+  Loader2,
+  Maximize2,
+  RefreshCw,
+  Send,
+  Sparkles,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Card } from '@/components/ui/card'
 import { usePageLayers } from '@/hooks/usePageLayers.js'
 import { layersService } from '@/api/layers.service.js'
-import { apiNoteToUi } from '@/utils/apiMappers.js'
+import { apiNoteToUi, apiTaskToUi, buildChapterPageAnnotations, mergeMangakaNoteLists, parsePageNotesResponse, filterSpatialMangakaNotes, keepLatestRevisionNotes, sortPagesByNumber } from '@/utils/apiMappers.js'
 import { chaptersService } from '@/api/chapters.service.js'
-import { getApiErrorMessage } from '@/api/http.js'
+import { tasksService } from '@/api/tasks.service.js'
+import { getApiErrorMessage, resolveMediaUrl } from '@/api/http.js'
+import { normalizeResultImageUrl, dedupeTasksByPage, sortTasksByPage, listTasksMissingResultImage, formatSubmitAllAssistantError } from '@/utils/chapterTaskFlow.js'
 import { cn } from '@/lib/utils'
 import LayerCanvas from './LayerCanvas.jsx'
+import MangakaNoteOverlay from './MangakaNoteOverlay.jsx'
 import LayerStackPanel from './LayerStackPanel.jsx'
 import { ImageLightbox } from './ImageLightbox.jsx'
 
 function buildLayerNote(layers, notes) {
   if (!Array.isArray(notes)) return null
-  const blocked = notes.find(n => n.status === 'open' && n.layerIndex !== undefined && n.layerIndex !== null)
+  // Chỉ filter bỏ notes placeholder: full canvas (w=100, h=100, x=0, y=0) VÀ text rỗng/whitespace
+  const valid = notes.filter(n => {
+    const hasText = n.text && n.text.trim().length > 0
+    const isPlaceholder = (n.w >= 100 && n.h >= 100 && n.x === 0 && n.y === 0)
+    return hasText || !isPlaceholder
+  })
+  const blocked = valid.find(n => n.status === 'open' && n.layerIndex !== undefined && n.layerIndex !== null)
   if (!blocked) return null
   const layer = layers.find(l => l.index === blocked.layerIndex)
   return { note: blocked, layer }
 }
 
-async function urlToFile(url, filename) {
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`Không fetch được ${url}`)
-  const blob = await res.blob()
-  return new File([blob], filename, { type: blob.type || 'image/png' })
-}
+const CANVAS_W = 960
+const CANVAS_H = 1360
+const PADDING = 12
 
-export default function LayerEditor({ chapter, onSubmitted }) {
-  const pages = chapter?.pages ?? []
+export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskProp, onSubmitted, pages: pagesProp, fullscreen = false, onEnterFullscreen }) {
+  const chapterPages = chapter?.pages ?? []
+  const pages = pagesProp ?? chapterPages
+  const sortedPages = useMemo(() => sortPagesByNumber(pages), [pages])
   const [pageIdx, setPageIdx] = useState(0)
   const [submittingAll, setSubmittingAll] = useState(false)
+  const [showOriginal, setShowOriginal] = useState(true)
+  const [showRegionOverlay, setShowRegionOverlay] = useState(true)
+  const [showNoteOverlay, setShowNoteOverlay] = useState(true)
+  const [lightboxImage, setLightboxImage] = useState(null)
+  const [lightboxTitle, setLightboxTitle] = useState('')
+  const [downloadingImage, setDownloadingImage] = useState(null) // 'original' | 'merged' | null
+  // Track trang nào đã có ảnh gộp (finalized) và đã gửi cho Mangaka
+  const [finalizedPages, setFinalizedPages] = useState({})   // pageId → true
+  const [submittedPages, setSubmittedPages] = useState({})  // pageId → true
+  // Cache ảnh gộp (URL) cho từng page, để hiển thị ngay sau khi gộp
+  const [finalImagesByPage, setFinalImagesByPage] = useState({})  // pageId → url
+  const [tasksByPageId, setTasksByPageId] = useState({})  // pageId → task UI
 
-  const safeIdx = Math.min(Math.max(0, pageIdx), Math.max(0, pages.length - 1))
-  const safePage = pages[safeIdx] ?? null
+  const taskFromProp = taskProp ? (typeof taskProp === 'object' ? apiTaskToUi(taskProp) : null) : null
+  const chapterId = chapter?.chapterId ?? chapter?.id ?? chapter?._id ?? null
 
-  const layersApi = usePageLayers(safePage?.id ?? null)
+  const safeIdx = Math.min(Math.max(0, pageIdx), Math.max(0, sortedPages.length - 1))
+  const safePage = sortedPages[safeIdx] ?? null
+  const activePageId = safePage?.id ?? safePage?._id ?? pageIdProp ?? null
+
+  const fallbackTask = chapter?._task ?? taskFromProp
+  const activeTask = tasksByPageId[String(activePageId)] ?? fallbackTask ?? null
+  const taskNotes = activeTask?.noteIds ?? []
+
+  const layersApi = usePageLayers(activePageId)
   const {
     layers,
     versions,
+    originalImage,
     finalImage,
+    finalError,
     loading,
     uploading,
     finalizing,
@@ -58,30 +99,284 @@ export default function LayerEditor({ chapter, onSubmitted }) {
     refresh,
   } = layersApi
 
+  // Finalize cho trang hiện tại, đồng thời mark là đã finalize + cache URL ảnh gộp
+  const handleFinalize = useCallback(async () => {
+    if (!activePageId) return
+    try {
+      const url = normalizeResultImageUrl(await finalize())
+      setFinalizedPages(prev => ({ ...prev, [activePageId]: true }))
+      if (url) {
+        setFinalImagesByPage(prev => ({ ...prev, [activePageId]: url }))
+      }
+    } catch { /* finalize đã toast lỗi rồi */ }
+  }, [activePageId, finalize])
+
+  // Sync finalizedPages: nếu finalImage null → không còn đã finalize
+  useEffect(() => {
+    if (!finalImage && activePageId) {
+      setFinalizedPages(prev => {
+        const next = { ...prev }
+        delete next[activePageId]
+        return next
+      })
+    }
+    // Đồng bộ cache ảnh gộp theo pageId
+    if (activePageId) {
+      setFinalImagesByPage(prev => {
+        if (finalImage) {
+          // Có ảnh gộp mới → lưu vào cache
+          if (prev[activePageId] === finalImage) return prev
+          return { ...prev, [activePageId]: finalImage }
+        }
+        // Không có ảnh gộp → xóa khỏi cache (nếu có)
+        if (!(activePageId in prev)) return prev
+        const next = { ...prev }
+        delete next[activePageId]
+        return next
+      })
+    }
+  }, [finalImage, activePageId])
+
+  // Load task theo page — Assistant: GET /tasks/my-assignments?chapter_id=
+  useEffect(() => {
+    if (!chapterId) return
+    let cancelled = false
+    tasksService.getAssignmentsByChapter(chapterId)
+      .then((raw) => {
+        if (cancelled) return
+        const list = dedupeTasksByPage(
+          (Array.isArray(raw) ? raw : []).map(apiTaskToUi),
+        )
+        const map = {}
+        const submitted = {}
+        for (const t of list) {
+          if (t.pageId) {
+            map[String(t.pageId)] = t
+            if (['submitted', 'in_review', 'approved'].includes(t.status)) {
+              submitted[String(t.pageId)] = true
+            }
+          }
+        }
+        setTasksByPageId(map)
+        if (Object.keys(submitted).length) {
+          setSubmittedPages((prev) => ({ ...prev, ...submitted }))
+        }
+      })
+      .catch(() => { if (!cancelled) setTasksByPageId({}) })
+    return () => { cancelled = true }
+  }, [chapterId])
+
+  // Đánh dấu trang đã có resultUrl từ BE
+  useEffect(() => {
+    const nextFinal = {}
+    const nextImages = {}
+    for (const p of pages) {
+      const pid = p?.id ?? p?._id
+      if (!pid) continue
+      if (p.resultUrl) {
+        nextFinal[pid] = true
+        nextImages[pid] = p.resultUrl
+      }
+    }
+    if (Object.keys(nextFinal).length) {
+      setFinalizedPages((prev) => ({ ...prev, ...nextFinal }))
+      setFinalImagesByPage((prev) => ({ ...prev, ...nextImages }))
+    }
+  }, [pages])
+
   const [pageNotes, setPageNotes] = useState([])
+  const [notesPageMeta, setNotesPageMeta] = useState(null)
   const [notesLoading, setNotesLoading] = useState(false)
 
+  const chapterPageAnnotations = useMemo(
+    () => buildChapterPageAnnotations(chapter, safeIdx, sortedPages),
+    [chapter, safeIdx, sortedPages],
+  )
+
   async function loadNotes() {
-    if (!safePage?.id) return
-    setNotesLoading(true)
-    try {
-      const res = await chaptersService.getPageNotes(safePage.id).catch(() => [])
-      setPageNotes((Array.isArray(res) ? res : []).map(apiNoteToUi))
-    } finally {
-      setNotesLoading(false)
+    // Luôn kết hợp: task.noteIds + chapterPageAnnotations + API fallback
+    const results = []
+
+    // 1. Notes từ task.noteIds (BE populate vào task object)
+    if (taskNotes.length > 0) {
+      results.push(...taskNotes.map(n => ({
+        ...n,
+        source: 'taskNotes',
+        clientKey: n.id ? String(n.id) : undefined,
+        status: n.status ?? 'open',
+        x: n.x ?? 0,
+        y: n.y ?? 0,
+        w: n.w ?? 0,
+        h: n.h ?? 0,
+        taskType: n.taskType ?? 'other',
+        text: n.text ?? '',
+      })))
     }
+
+    // 2. Notes từ chapterPageAnnotations (revision_annotations + revision_notes_parsed)
+    if (chapterPageAnnotations.length > 0) {
+      results.push(...chapterPageAnnotations.map(n => ({ ...n, source: n.source ?? 'chapterAnnotations' })))
+    }
+
+    // 3. Notes từ API /pages/:id/notes — luôn gọi để chắc chắn note có trong DB hiện lên
+    if (activePageId) {
+      setNotesLoading(true)
+      try {
+        const revisionRound =
+          safePage?.current_version
+          ?? safePage?.currentVersion
+          ?? notesPageMeta?.current_version
+          ?? 1
+        const isRevisionFlow = activeTask?.status === 'revision'
+        const notesQuery = isRevisionFlow
+          ? { note_kind: 'revision', revision_round: revisionRound }
+          : { note_kind: 'brief' }
+        let res = await chaptersService.getPageNotes(activePageId, notesQuery).catch((err) => {
+          if (import.meta.env.DEV) {
+            console.warn('[LayerEditor.loadNotes] GET notes failed', { pageId: activePageId, notesQuery, err })
+          }
+          return null
+        })
+        let { page: notesPage, notes: apiNotes } = parsePageNotesResponse(res)
+        if (!apiNotes.length && notesQuery.note_kind) {
+          res = await chaptersService.getPageNotes(activePageId).catch((err) => {
+            if (import.meta.env.DEV) {
+              console.warn('[LayerEditor.loadNotes] GET notes fallback failed', { pageId: activePageId, err })
+            }
+            return null
+          })
+          const fallback = parsePageNotesResponse(res)
+          notesPage = fallback.page ?? notesPage
+          apiNotes = fallback.notes
+        }
+        setNotesPageMeta(notesPage)
+        if (import.meta.env.DEV) {
+          console.debug('[LayerEditor.loadNotes] /pages/:id/notes', {
+            pageId: activePageId,
+            count: apiNotes.length,
+            sample: apiNotes[0],
+            originalUrl: notesPage?.original_image_url,
+          })
+        }
+        results.push(...apiNotes)
+      } finally {
+        setNotesLoading(false)
+      }
+    }
+
+    setPageNotes(mergeMangakaNoteLists(results))
   }
 
-  useEffect(() => { loadNotes() }, [safePage?.id])
+  useEffect(() => {
+    setNotesPageMeta(null)
+  }, [activePageId])
 
-  const layerNoteInfo = useMemo(() => buildLayerNote(layers, pageNotes), [layers, pageNotes])
+  useEffect(() => {
+    void loadNotes()
+  }, [
+    activePageId,
+    safeIdx,
+    taskNotes.length,
+    chapterPageAnnotations.length,
+    activeTask?.status,
+    activeTask?.id,
+    chapter?.revision_annotations,
+    chapter?.revision_notes_parsed,
+  ])
 
-  const canvasW = safePage?.width ?? 800
-  const canvasH = safePage?.height ?? 1100
+  // Gộp notes — ưu tiên GET /pages/:id/notes (source: api) khi trùng id
+  const allNotes = useMemo(() => {
+    const taskList = taskNotes.map(n => ({
+      ...n,
+      source: n.source ?? 'taskNotes',
+      clientKey: n.clientKey ?? (n.id ? String(n.id) : undefined),
+    }))
+    const chapterList = chapterPageAnnotations.map(n => ({
+      ...n,
+      source: n.source ?? 'chapterAnnotations',
+    }))
+    return keepLatestRevisionNotes(mergeMangakaNoteLists(pageNotes, taskList, chapterList))
+  }, [taskNotes, chapterPageAnnotations, pageNotes])
+
+  const overlayNotes = useMemo(
+    () => filterSpatialMangakaNotes(allNotes),
+    [allNotes],
+  )
+
+  // DEBUG: theo dõi note đến từ đâu, có toạ độ không
+  useEffect(() => {
+    console.debug('[NOTE-DEBUG] pageIdx=', pageIdx, 'taskNotesCount=', taskNotes.length, 'chapterAnnotationsCount=', chapterPageAnnotations.length, 'pageNotesCount=', pageNotes.length, 'allNotesCount=', allNotes.length)
+    console.debug('[NOTE-DEBUG] chapter.revision_annotations raw =', chapter?.revision_annotations)
+    console.debug('[NOTE-DEBUG] chapter.revision_notes_parsed =', chapter?.revision_notes_parsed)
+    console.debug('[NOTE-DEBUG] allNotes =', allNotes.map(n => ({ id: n.id, source: n.source, x: n.x, y: n.y, w: n.w, h: n.h, taskType: n.taskType, text: n.text?.slice(0, 30) })))
+    console.debug('[NOTE-DEBUG] overlayNotes =', overlayNotes.map(n => ({ id: n.id, source: n.source, x: n.x, y: n.y, w: n.w, h: n.h })))
+  }, [pageIdx, taskNotes, chapterPageAnnotations, pageNotes, allNotes, overlayNotes, chapter?.revision_annotations, chapter?.revision_notes_parsed])
+
+  const layerNoteInfo = useMemo(() => buildLayerNote(layers, allNotes), [layers, allNotes])
+
+  const notesOriginalUrl = notesPageMeta?.original_image_url
+    ? resolveMediaUrl(notesPageMeta.original_image_url)
+    : null
+
+  // Ảnh gốc Mangaka — luôn hiện làm nền (khớp toạ độ % khi có note overlay)
+  const mangakaReferenceImage = useMemo(() => (
+    notesOriginalUrl
+    || safePage?.originalUrl
+    || safePage?.url
+    || (originalImage ? resolveMediaUrl(originalImage) : null)
+    || null
+  ), [notesOriginalUrl, safePage, originalImage])
+
+  const baseImage = showOriginal ? mangakaReferenceImage : null
+
+  if (import.meta.env.DEV) {
+    console.debug('[LayerEditor]', {
+      pagesCount: pages.length,
+      pageIdx,
+      safeIdx,
+      hasSafePage: !!safePage,
+      safePageId: safePage?.id,
+      safePageUrl: safePage?.url,
+      originalImage,
+      baseImage,
+      layersCount: layers.length,
+      activePageId,
+    })
+  }
 
   async function handleAddLayer(file) {
+    if (!activePageId) {
+      toast.error('Chưa có trang để thêm layer. Hãy chọn 1 trang trước.')
+      return
+    }
+    // Auto-chuyển task: pending → in_progress khi upload layer đầu tiên
+    if (layers.length === 0 && activeTask?.status === 'pending') {
+      try {
+        await tasksService.start(activeTask.id)
+        setTasksByPageId((prev) => ({
+          ...prev,
+          [String(activePageId)]: { ...activeTask, status: 'in_progress' },
+        }))
+        onSubmitted?.({ ...activeTask, status: 'in_progress' })
+        toast.success('Đã bắt đầu làm.')
+      } catch {
+        // Không block upload vì lỗi start không ảnh hưởng layer
+      }
+    }
     const nextIdx = layers.length
     await addLayer({ file, index: nextIdx })
+    // Có chỉnh sửa tiếp → cho phép gộp & gửi lại
+    clearSubmittedForActivePage()
+  }
+
+  function clearSubmittedForActivePage() {
+    if (!activePageId) return
+    setSubmittedPages((prev) => {
+      if (!prev[activePageId]) return prev
+      const next = { ...prev }
+      delete next[activePageId]
+      return next
+    })
   }
 
   async function handleUploadVersion(layerId, file) {
@@ -90,64 +385,166 @@ export default function LayerEditor({ chapter, onSubmitted }) {
       ? layerNoteInfo.note?.content ?? layerNoteInfo.note?.text ?? ''
       : ''
     await uploadNewVersion(layerId, { file, note })
+    // Có chỉnh sửa tiếp → cho phép gộp & gửi lại
+    clearSubmittedForActivePage()
   }
 
-  async function handleSubmitAllPages({ chapterTaskId, chapterId }) {
-    if (!chapterTaskId) {
-      toast.error('Chưa có task — chờ Mangaka gửi chapter cho bạn.')
+  /**
+   * LUỒNG 2 — Bước 3→6 (từng task) rồi Bước 7 submit-all-by-assistant.
+   * Ảnh kết quả lấy từ finalize (URL) → PATCH upload-result, không POST multipart submit.
+   */
+  async function pushTaskResultUrl(pageTask, imageUrl) {
+    if (!pageTask?.id) return null
+
+    const absoluteUrl = normalizeResultImageUrl(imageUrl)
+    if (!absoluteUrl) return null
+
+    const alreadyOnServer = normalizeResultImageUrl(pageTask.resultImageUrl)
+    if (
+      ['submitted', 'in_review', 'approved'].includes(pageTask.status)
+      && alreadyOnServer
+    ) {
+      return pageTask
+    }
+
+    if (pageTask.status === 'pending') {
+      await tasksService.start(pageTask.id)
+    }
+
+    const raw = await tasksService.uploadResult(pageTask.id, absoluteUrl)
+    const payload = raw?.data ?? raw
+    return apiTaskToUi(payload?.task ?? payload)
+  }
+
+  function resolvePageTaskImageUrl(page, pageTask) {
+    const pid = page?.id ?? page?._id
+    const fromCache = pid ? finalImagesByPage[pid] : null
+    return (
+      normalizeResultImageUrl(fromCache)
+      ?? normalizeResultImageUrl(page?.resultUrl)
+      ?? normalizeResultImageUrl(pageTask?.resultImageUrl)
+      ?? null
+    )
+  }
+
+  async function handleSubmitChapter() {
+    if (!chapterId) {
+      toast.error('Không tìm thấy chapterId — không thể gửi.')
       return
     }
-    if (!pages.length) return
     setSubmittingAll(true)
     try {
-      const files = []
-      for (let i = 0; i < pages.length; i++) {
-        const page = pages[i]
-        if (!page?.id) continue
-        toast.info(`Đang gộp trang ${i + 1}/${pages.length}…`)
-        try {
-          await layersService.finalize(page.id)
-        } catch {
-          toast.error(`Trang ${i + 1}: finalize thất bại — bỏ qua.`)
-          continue
-        }
-        await new Promise(r => window.setTimeout(r, 500))
-        try {
-          const finalRes = await layersService.getFinal(page.id)
-          const url = finalRes?.final_image_url ?? finalRes?.imageUrl ?? finalRes?.url ?? null
-          if (!url) {
-            toast.error(`Trang ${i + 1}: không có ảnh final — bỏ qua.`)
-            continue
-          }
-          const filename = `${chapter?.seriesTitle ?? 'Ch' + chapter?.chapterNum}-p${i + 1}.png`
-          const file = await urlToFile(url, filename)
-          files.push(file)
-        } catch {
-          toast.error(`Trang ${i + 1}: lỗi khi lấy ảnh final — bỏ qua.`)
-        }
-      }
+      toast.info('Đang lưu kết quả từng task…')
+      const raw = await tasksService.getAssignmentsByChapter(chapterId)
+      const allTasks = (Array.isArray(raw) ? raw : []).map(apiTaskToUi)
+      const tasksToSubmit = sortTasksByPage(allTasks)
 
-      if (!files.length) {
-        toast.error('Không có trang nào có ảnh final để gửi.')
+      if (!tasksToSubmit.length) {
+        toast.error('Không tìm thấy task nào cho chapter này.')
         return
       }
 
-      toast.info(`Đang gửi ${files.length} trang cho Mangaka…`)
-      const { tasksService } = await import('@/api/tasks.service.js')
-      const { apiTaskToUi } = await import('@/utils/apiMappers.js')
-      let updated
-      if (files.length > 1) {
-        updated = await tasksService.submitChapter(chapterTaskId, files)
-      } else {
-        updated = await tasksService.submit(chapterTaskId, files[0])
+      const imageUrlByPageId = new Map()
+      let uploadedCount = 0
+      let alreadyDoneCount = 0
+
+      for (const pageTask of tasksToSubmit) {
+        const pid = pageTask.pageId ? String(pageTask.pageId) : null
+        const page = pid
+          ? pages.find((p) => String(p?.id ?? p?._id) === pid)
+          : null
+        const pageLabel = pageTask.pageNumber ?? page?.pageNumber ?? pageTask.id
+
+        let imageUrl = pid ? imageUrlByPageId.get(pid) : null
+        if (!imageUrl) {
+          imageUrl = resolvePageTaskImageUrl(page, pageTask)
+          if (!imageUrl) {
+            const missing = listTasksMissingResultImage(tasksToSubmit, pages)
+            const label = missing.length
+              ? missing
+                .filter((m) => m.pageNumber != null)
+                .map((m) => `Trang ${m.pageNumber}`)
+                .join(', ') || `Trang ${pageLabel}`
+              : `Trang ${pageLabel}`
+            toast.error(
+              `${label} chưa gộp layer — hãy bấm "Gộp layer" trước khi gửi Mangaka.`,
+            )
+            return
+          }
+          if (pid) imageUrlByPageId.set(pid, imageUrl)
+        }
+
+        const alreadyOnServer = normalizeResultImageUrl(pageTask.resultImageUrl)
+        if (
+          ['submitted', 'in_review', 'approved'].includes(pageTask.status)
+          && alreadyOnServer
+        ) {
+          uploadedCount += 1
+          alreadyDoneCount += 1
+          if (pid) setSubmittedPages((prev) => ({ ...prev, [pid]: true }))
+          continue
+        }
+
+        if (alreadyOnServer) {
+          uploadedCount += 1
+          if (pid) setSubmittedPages((prev) => ({ ...prev, [pid]: true }))
+          continue
+        }
+
+        const updated = await pushTaskResultUrl(pageTask, imageUrl)
+        const savedUrl = normalizeResultImageUrl(updated?.resultImageUrl)
+        if (!updated || !savedUrl) {
+          toast.error(`Không lưu được ảnh cho task trang ${pageLabel}. Thử gộp layer lại.`)
+          return
+        }
+        if (pid) {
+          setTasksByPageId((prev) => ({ ...prev, [pid]: updated }))
+          setSubmittedPages((prev) => ({ ...prev, [pid]: true }))
+        }
+        uploadedCount += 1
       }
-      const task = apiTaskToUi(updated)
+
+      const refreshedRaw = await tasksService.getAssignmentsByChapter(chapterId)
+      const refreshedTasks = (Array.isArray(refreshedRaw) ? refreshedRaw : []).map(apiTaskToUi)
+      const stillMissing = listTasksMissingResultImage(refreshedTasks, pages)
+      if (stillMissing.length) {
+        const pageLabels = [...new Set(
+          stillMissing.map((m) => m.pageNumber).filter((n) => n != null),
+        )].sort((a, b) => Number(a) - Number(b))
+        const pagesText = pageLabels.length
+          ? pageLabels.map((n) => `Trang ${n}`).join(', ')
+          : `${stillMissing.length} task`
+        toast.error(
+          `${stillMissing.length} task chưa có ảnh trên server (${pagesText}). `
+          + 'Vào từng trang còn thiếu, bấm "Gộp layer" rồi thử lại.',
+        )
+        return
+      }
+
+      const freshlySubmitted = tasksToSubmit.length - alreadyDoneCount
+      if (freshlySubmitted === 0) {
+        toast.info('Chapter này đã được nộp trước đó — không cần gửi lại.')
+        onSubmitted?.()
+        return
+      }
+
+      toast.info('Đang nộp chapter cho Mangaka…')
+      const submitRes = await tasksService.submitAllByAssistant(chapterId)
+      const submittedTasks = submitRes?.data?.tasks ?? submitRes?.tasks ?? []
+      const count = submittedTasks.length || uploadedCount
+
+      for (const p of pages) {
+        const pid = p?.id ?? p?._id
+        if (pid) setSubmittedPages((prev) => ({ ...prev, [pid]: true }))
+      }
+
       toast.success(
-        `Đã gửi ${files.length} trang cho Mangaka.`,
+        submitRes?.message ?? `Đã nộp ${count} task cho Mangaka.`,
       )
-      onSubmitted?.(task)
+      onSubmitted?.()
     } catch (err) {
-      toast.error(getApiErrorMessage(err, 'Gửi chapter thất bại.'))
+      console.error('[handleSubmitChapter] submit failed:', err)
+      toast.error(formatSubmitAllAssistantError(err, pages))
     } finally {
       setSubmittingAll(false)
     }
@@ -155,230 +552,409 @@ export default function LayerEditor({ chapter, onSubmitted }) {
 
   const baseFileName = `${chapter?.seriesTitle ?? ''}-Ch${chapter?.chapterNum ?? ''}`
 
+  const handleDownloadImage = useCallback(async (type) => {
+    if (!activePageId) return
+    setDownloadingImage(type)
+    try {
+      const suffix = type === 'merged' ? '-final' : ''
+      const fallbackFilename = `${baseFileName}-p${safeIdx + 1}${suffix}.png`
+      await layersService.downloadPageImage(activePageId, type, fallbackFilename)
+      toast.success(type === 'merged' ? 'Đã tải ảnh gộp.' : 'Đã tải ảnh gốc.')
+    } catch (err) {
+      toast.error(getApiErrorMessage(
+        err,
+        type === 'merged'
+          ? 'Chưa có ảnh gộp — hãy bấm "Gộp layer" trước.'
+          : 'Không tải được ảnh gốc.',
+      ))
+    } finally {
+      setDownloadingImage(null)
+    }
+  }, [activePageId, baseFileName, safeIdx])
+
   return (
-    <Card className="flex h-[calc(100vh-180px)] min-h-[640px] flex-col overflow-hidden p-0">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-4 py-3">
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold">
-            {chapter?.seriesTitle} · Ch.{chapter?.chapterNum}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Trang {safeIdx + 1} / {pages.length} ·{' '}
-            {layers.length} layer
-          </p>
+    <div className={cn(
+      'relative flex h-full flex-col overflow-hidden rounded-2xl bg-[#0f0f1a]',
+      'border border-white/5',
+      fullscreen ? 'rounded-none border-none' : 'shadow-xl shadow-slate-900/20',
+    )}>
+      {/* ── TOPBAR ── */}
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-white/5 bg-[#0f0f1a]/95 px-4 py-2 backdrop-blur">
+        {/* Left: icon + title */}
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 text-white shadow-md shadow-violet-500/20">
+            <Sparkles className="size-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold tracking-tight text-white/90">
+              {chapter?.seriesTitle} · Ch.{chapter?.chapterNum}
+            </p>
+            <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-white/40">
+              <span className="font-medium text-white/60">
+                Trang {safeIdx + 1} / {pages.length}
+              </span>
+              <span className="text-white/20">·</span>
+              <span>
+                <span className="font-semibold text-violet-400">{layers.length}</span>{' '}
+                layer{layers.length !== 1 ? 's' : ''}
+              </span>
+              {finalImage && (
+                <>
+                  <span className="text-white/20">·</span>
+                  <span className="inline-flex items-center gap-1 font-medium text-emerald-400">
+                    <span className="size-1.5 animate-pulse rounded-full bg-emerald-400" />
+                    đã gộp
+                  </span>
+                </>
+              )}
+              {submittedPages[activePageId] && (
+                <>
+                  <span className="text-white/20">·</span>
+                  <span className="inline-flex items-center gap-1 font-medium text-emerald-300">
+                    ✓ đã gửi Mangaka
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-1.5">
+
+        {/* Center: page nav */}
+        <div className="flex shrink-0 items-center gap-1.5">
+          <div className="flex items-center rounded-xl border border-white/10 bg-white/5 p-0.5 backdrop-blur">
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              className="size-7 rounded-lg text-white/60 hover:bg-white/10 hover:text-white"
+              disabled={safeIdx <= 0}
+              onClick={() => setPageIdx(i => Math.max(0, i - 1))}
+              title="Trang trước"
+            >
+              <ChevronLeft className="size-4" />
+            </Button>
+            <span className="min-w-[3.5rem] px-2 text-center text-xs font-bold tabular-nums text-white/80">
+              {safeIdx + 1} / {pages.length}
+            </span>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              className="size-7 rounded-lg text-white/60 hover:bg-white/10 hover:text-white"
+              disabled={safeIdx >= pages.length - 1}
+              onClick={() => setPageIdx(i => Math.min(pages.length - 1, i + 1))}
+              title="Trang sau"
+            >
+              <ChevronRight className="size-4" />
+            </Button>
+          </div>
+
+          <div className="mx-1 h-6 w-px bg-white/10" />
+
           <Button
             size="sm"
-            variant="ghost"
-            className="h-7 px-2"
-            disabled={safeIdx <= 0}
-            onClick={() => setPageIdx(i => Math.max(0, i - 1))}
-            title="Trang trước"
+            variant={showOriginal ? 'secondary' : 'ghost'}
+            className={cn(
+              'h-8 gap-1.5 px-2.5 text-xs font-medium',
+              showOriginal
+                ? 'border border-violet-500/40 bg-violet-500/20 text-violet-300 hover:bg-violet-500/30'
+                : 'text-white/50 hover:bg-white/10 hover:text-white/80',
+            )}
+            onClick={() => setShowOriginal(v => !v)}
           >
-            <ChevronLeft className="h-4 w-4" />
+            {showOriginal ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+            Gốc
           </Button>
-          <span className="text-xs tabular-nums text-muted-foreground">
-            {safeIdx + 1} / {pages.length}
-          </span>
+
+          {activeTask?.region && (
+            <Button
+              size="sm"
+              variant={showRegionOverlay ? 'secondary' : 'ghost'}
+              className={cn(
+                'h-8 gap-1.5 px-2.5 text-xs font-medium',
+                showRegionOverlay
+                  ? 'border border-violet-500/40 bg-violet-500/20 text-violet-300 hover:bg-violet-500/30'
+                  : 'text-white/50 hover:bg-white/10 hover:text-white/80',
+              )}
+              onClick={() => setShowRegionOverlay(v => !v)}
+            >
+              <span className="inline-block size-2 rounded-sm bg-violet-500" />
+              Vùng
+            </Button>
+          )}
+
           <Button
             size="sm"
-            variant="ghost"
-            className="h-7 px-2"
-            disabled={safeIdx >= pages.length - 1}
-            onClick={() => setPageIdx(i => Math.min(pages.length - 1, i + 1))}
-            title="Trang sau"
+            variant={showNoteOverlay ? 'secondary' : 'ghost'}
+            className={cn(
+              'h-8 gap-1.5 px-2.5 text-xs font-medium',
+              showNoteOverlay
+                ? 'border border-amber-500/40 bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
+                : 'text-white/50 hover:bg-white/10 hover:text-white/80',
+            )}
+            onClick={() => setShowNoteOverlay(v => !v)}
           >
-            <ChevronRight className="h-4 w-4" />
+            {showNoteOverlay ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+            {showNoteOverlay ? 'Ẩn Note' : 'Hiện Note'}
           </Button>
+
+          <div className="mx-1 h-6 w-px bg-white/10" />
+
           <Button
-            size="sm"
+            size="icon-sm"
             variant="ghost"
-            className="h-7 px-2"
+            className="size-8 text-white/50 transition-all hover:bg-white/10 hover:text-white active:scale-95"
+            onClick={() => void handleDownloadImage('original')}
+            disabled={!activePageId || downloadingImage === 'original'}
+            title="Tải ảnh gốc"
+          >
+            {downloadingImage === 'original' ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <ArrowDownToLine className="size-3.5" />
+            )}
+          </Button>
+
+          {finalImage && (
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              className="size-8 text-white/50 transition-all hover:bg-white/10 hover:text-white active:scale-95"
+              onClick={() => void handleDownloadImage('merged')}
+              disabled={downloadingImage === 'merged'}
+              title="Tải ảnh gộp"
+            >
+              {downloadingImage === 'merged' ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <FileDown className="size-3.5" />
+              )}
+            </Button>
+          )}
+
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            className={cn(
+              'size-8 text-white/50 hover:bg-white/10 hover:text-white',
+              loading && 'animate-spin',
+            )}
             onClick={() => { refresh(); loadNotes() }}
-            disabled={loading}
             title="Làm mới"
           >
-            <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
+            <RefreshCw className="size-4" />
           </Button>
-          <div className="h-5 w-px bg-border" />
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 px-2 text-xs"
-            onClick={() => {
-              const url = safePage?.url
-              if (!url) return
-              const a = document.createElement('a')
-              a.href = url
-              a.download = `${baseFileName}-p${safeIdx + 1}.png`
-              document.body.appendChild(a)
-              a.click()
-              document.body.removeChild(a)
-              toast.success('Đã tải ảnh gốc trang hiện tại.')
-            }}
-            disabled={!safePage?.url}
-            title="Tải ảnh gốc trang hiện tại"
-          >
-            <ArrowDownToLine className="h-3.5 w-3.5" />
-          </Button>
-          {finalImage && (
-            <a
-              href={finalImage}
-              download={`${baseFileName}-p${safeIdx + 1}-final.png`}
-              className="inline-flex"
-            >
-              <Button size="sm" variant="outline" className="h-7 px-2 text-xs">
-                <FileDown className="h-3.5 w-3.5" />
-              </Button>
-            </a>
-          )}
-        </div>
-      </div>
 
+          {!fullscreen && onEnterFullscreen ? (
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              className="size-8 text-white/50 hover:bg-white/10 hover:text-white"
+              onClick={onEnterFullscreen}
+              title="Toàn màn hình"
+            >
+              <Maximize2 className="size-4" />
+            </Button>
+          ) : null}
+
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            className="size-8 text-white/50 hover:bg-white/10 hover:text-white"
+            onClick={() => {
+              setLightboxImage(finalImage || baseImage)
+              setLightboxTitle(`Trang ${safeIdx + 1} · ${layers.length} layer`)
+            }}
+            disabled={!baseImage && !finalImage}
+            title="Xem ảnh"
+          >
+            <ImageIcon className="size-4" />
+          </Button>
+        </div>
+      </header>
+
+      {/* ── REVISION BANNER ── */}
       {layerNoteInfo && (
-        <Alert className="m-3 border-amber-300 bg-amber-50">
-          <AlertDescription className="flex items-start gap-2 text-xs">
-            <span className="shrink-0 font-semibold text-amber-800">
-              Mangaka yêu cầu sửa layer #{layerNoteInfo.layer.index}
-              {layerNoteInfo.layer.name ? ` (${layerNoteInfo.layer.name})` : ''}:
-            </span>
-            <span className="text-amber-700">
-              {layerNoteInfo.note.content ?? layerNoteInfo.note.text ?? '(không có nội dung)'}
-            </span>
-          </AlertDescription>
-        </Alert>
+        <div className="mx-4 mt-3 shrink-0">
+          <Alert className="border-amber-500/30 bg-amber-500/10">
+            <AlertDescription className="flex items-start gap-2 text-xs text-amber-200">
+              <span className="shrink-0 rounded-md bg-amber-500/30 px-1.5 py-0.5 font-semibold text-amber-200">
+                Sửa layer #{layerNoteInfo.layer.index}
+                {layerNoteInfo.layer.name ? ` (${layerNoteInfo.layer.name})` : ''}
+              </span>
+              <span className="text-amber-200/80">
+                {layerNoteInfo.note.content ?? layerNoteInfo.note.text ?? '(không có nội dung)'}
+              </span>
+            </AlertDescription>
+          </Alert>
+        </div>
       )}
 
-      <div className="grid flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="flex min-h-0 flex-col items-stretch justify-start overflow-auto bg-slate-100 p-4">
+      {/* ── MAIN AREA: canvas + sidebar ── */}
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        {/* Canvas side — scrollable if canvas is taller than available space */}
+        <div className="scrollbar-hide flex min-h-0 flex-1 flex-col overflow-auto bg-[#0f0f0f]">
+          {/* Canvas container — fills available space, canvas scales to fit */}
           <div
-            className="group/canvas relative mx-auto"
-            style={{
-              width: canvasW,
-              maxWidth: '100%',
-              aspectRatio: `${canvasW} / ${canvasH}`,
-            }}
+            className="scrollbar-hide relative flex min-h-0 flex-1 items-center justify-center overflow-auto p-3"
           >
-            {safePage?.url ? (
-              <img
-                src={safePage.url}
-                alt="Gốc"
-                className="pointer-events-none absolute inset-0 h-full w-full opacity-25"
-                style={{ objectFit: 'fill' }}
-                draggable={false}
-              />
-            ) : null}
-            <LayerCanvas
-              layers={layers}
-              width={canvasW}
-              height={canvasH}
-              mode="edit"
-              className="relative z-10 h-full w-full"
-            />
-            <div className="absolute inset-0 z-20 cursor-zoom-in opacity-0 transition-opacity group-hover/canvas:opacity-100">
-              <ImageLightbox
-                src={finalImage || safePage?.url}
-                alt={`Trang ${safeIdx + 1}`}
-                title={`Trang ${safeIdx + 1} · ${layers.length} layer`}
+            {/* Aspect-ratio box so canvas keeps 960×1360 ratio when scaled */}
+            <div
+              className="relative w-full overflow-hidden rounded-sm shadow-2xl shadow-black/60 ring-1 ring-white/10"
+              style={{ aspectRatio: `${CANVAS_W} / ${CANVAS_H}` }}
+            >
+              {/* Layer canvas — ảnh gốc được vẽ làm nền, layers xếp đè lên */}
+              <LayerCanvas
+                layers={layers}
+                width={CANVAS_W}
+                height={CANVAS_H}
+                mode="edit"
+                fullscreen={fullscreen}
+                baseImage={showOriginal ? mangakaReferenceImage : null}
+                className="absolute inset-0 z-0 h-full w-full"
+                region={activeTask?.region ?? null}
+                notes={[]}
+                showRegion={showRegionOverlay}
+                showNotes={false}
+                overlay={
+                  <MangakaNoteOverlay notes={overlayNotes} visible={showNoteOverlay} />
+                }
               />
             </div>
           </div>
 
-          {finalImage && (
-            <div className="mt-4 w-full self-center rounded border border-violet-200 bg-white p-3">
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-xs font-semibold text-violet-800">
-                  Ảnh đã gộp trang {safeIdx + 1}
+          {/* Bottom toolbar */}
+          <div className="flex shrink-0 items-center justify-between gap-3 border-t border-white/5 bg-[#0f0f1a]/95 px-4 py-2 backdrop-blur">
+            <div className="flex items-center gap-3">
+              {(uploading || notesLoading || finalizing) && (
+                <div className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-medium text-white/60 backdrop-blur">
+                  <Loader2 className="h-3 w-3 animate-spin text-violet-400" />
+                  {uploading ? 'Đang upload layer…' : finalizing ? 'Đang gộp ảnh…' : 'Đang tải ghi chú…'}
+                </div>
+              )}
+              {pages.length > 1 && (
+                <span className="text-[11px] text-white/30">
+                  {pages.length} trang trong chapter
                 </span>
-                <span className="text-[10px] text-violet-500">
-                  {layers.length} layer
-                </span>
-              </div>
-              <div className="group/final relative">
-                <img
-                  src={finalImage}
-                  alt="Final"
-                  className="block h-auto w-full rounded border border-violet-100"
-                  style={{ maxHeight: '70vh', objectFit: 'contain' }}
-                />
-                <ImageLightbox
-                  src={finalImage}
-                  alt={`Final trang ${safeIdx + 1}`}
-                  title={`Ảnh gộp trang ${safeIdx + 1} · ${layers.length} layer`}
-                  trigger={
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="icon-sm"
-                      className="absolute right-2 top-2 z-20 size-7 rounded-full bg-white/90 opacity-0 shadow-sm backdrop-blur transition-opacity hover:bg-white group-hover/final:opacity-100"
-                      title="Xem ảnh phóng to"
-                      aria-label="Xem ảnh phóng to"
-                    >
-                      <Maximize2 className="size-3.5" />
-                    </Button>
-                  }
-                />
-              </div>
+              )}
             </div>
-          )}
-
-          {(uploading || notesLoading) && (
-            <div className="mt-2 flex items-center gap-2 text-[11px] text-slate-500">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              {uploading ? 'Đang upload…' : 'Đang tải ghi chú…'}
+            <div className="flex items-center gap-2">
+                {layers.length > 0 && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className={cn(
+                      'h-8 gap-1.5 border px-3 text-xs font-medium',
+                      finalImage
+                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20'
+                        : 'border-violet-500/30 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20 hover:border-violet-500/50',
+                    )}
+                    onClick={handleFinalize}
+                    disabled={finalizing || submittedPages[activePageId]}
+                    title={submittedPages[activePageId] ? 'Đã gửi — thêm layer để chỉnh sửa tiếp' : ''}
+                  >
+                    {finalizing ? (
+                      <><Loader2 className="size-3.5 animate-spin" /> Đang gộp…</>
+                    ) : finalImage ? (
+                      <><LayersIcon className="size-3.5" /> Gộp lại</>
+                    ) : (
+                      <><LayersIcon className="size-3.5" /> Gộp layer</>
+                    )}
+                  </Button>
+                )}
+                {/* Button "Gửi Mangaka" — nộp cả chapter, BE tự dùng result_image_url đã gộp */}
+                <Button
+                  size="sm"
+                  className={cn(
+                    'h-8 gap-1.5 px-4 text-xs font-semibold shadow-lg',
+                    'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-violet-500/20 hover:from-violet-500 hover:to-indigo-500',
+                  )}
+                  disabled={submittingAll || finalizing || pages.length === 0 || submittedPages[activePageId]}
+                  onClick={() => void handleSubmitChapter()}
+                  title={submittedPages[activePageId] ? 'Đã gửi — thêm layer để chỉnh sửa tiếp' : ''}
+                >
+                  {submittingAll ? (
+                    <><Loader2 className="size-3.5 animate-spin" /> Đang nộp task…</>
+                  ) : (
+                    <><Send className="size-3.5" /> Gửi Mangaka</>
+                  )}
+                </Button>
             </div>
-          )}
+          </div>
         </div>
 
-        <div className="border-l">
-          <ScrollArea className="h-full">
-            <LayerStackPanel
-              layers={layers}
-              versions={versions}
-              loading={loading}
-              uploading={uploading}
-              finalizing={finalizing}
-              finalImage={finalImage}
-              onAddLayer={handleAddLayer}
-              onUpdateLayer={updateLayer}
-              onDeleteLayer={deleteLayer}
-              onUploadVersion={handleUploadVersion}
-              onRollback={rollback}
-              onLoadVersions={loadVersions}
-              onReorder={reorderLayers}
-              onFinalize={finalize}
-              canEdit
-              className="rounded-none border-0 bg-slate-50/60"
-            />
-          </ScrollArea>
+        {/* Sidebar */}
+        <div className="flex w-96 shrink-0 flex-col border-l border-white/5 bg-[#0f0f1a]">
+          <div className="scrollbar-hide flex min-h-0 flex-1 flex-col overflow-y-auto">
+            {/* Final image preview — dùng URL cache theo pageId, fallback sang finalImage */}
+            {(finalImagesByPage[activePageId] || finalImage) && (
+              <div className="border-b border-white/5 p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="flex size-6 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 text-white">
+                      <ImageIcon className="size-3" />
+                    </div>
+                    <span className="text-xs font-semibold text-white/80">Ảnh gộp</span>
+                  </div>
+                  <span className="rounded-full border border-emerald-500/30 bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">
+                    sẵn sàng
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="group/final relative w-full cursor-pointer overflow-hidden rounded-xl border border-white/10 bg-white/5 text-left transition-shadow hover:shadow-lg hover:shadow-violet-500/10"
+                  onClick={() => {
+                    setLightboxImage(finalImagesByPage[activePageId] || finalImage)
+                    setLightboxTitle(`Ảnh gộp trang ${safeIdx + 1}`)
+                  }}
+                  title="Xem ảnh gộp"
+                >
+                  <img
+                    src={finalImagesByPage[activePageId] || finalImage}
+                    alt="Final"
+                    className="block h-28 w-full object-contain transition-transform duration-300 group-hover/final:scale-[1.03]"
+                    style={{ background: 'rgba(255,255,255,0.03)' }}
+                  />
+                </button>
+              </div>
+            )}
+
+            {/* Layer stack — scrollable */}
+            <div className="w-full">
+              <LayerStackPanel
+                layers={layers}
+                versions={versions}
+                loading={loading}
+                uploading={uploading}
+                finalizing={finalizing}
+                finalImage={finalImage}
+                onAddLayer={handleAddLayer}
+                onUpdateLayer={updateLayer}
+                onDeleteLayer={deleteLayer}
+                onUploadVersion={handleUploadVersion}
+                onRollback={rollback}
+                onLoadVersions={loadVersions}
+                onReorder={reorderLayers}
+                onFinalize={finalize}
+                onViewImage={(url) => {
+                  setLightboxImage(url)
+                  setLightboxTitle(`Ảnh gộp trang ${safeIdx + 1}`)
+                }}
+                canEdit
+                className="rounded-none border-0 bg-transparent p-3"
+              />
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="border-t bg-muted/20 px-4 py-3">
-        <Button
-          className="w-full bg-violet-600 hover:bg-violet-700"
-          disabled={submittingAll || finalizing || pages.length === 0}
-          onClick={() => handleSubmitAllPages({ chapterTaskId: chapter?._task?.id, chapterId: chapter?.chapterId })}
-        >
-          {submittingAll ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Đang gửi {pages.length} trang…
-            </>
-          ) : (
-            <>
-              <Send className="mr-2 h-4 w-4" />
-              Gửi {pages.length} trang cho Mangaka
-            </>
-          )}
-        </Button>
-        {pages.length > 1 && (
-          <p className="mt-1 text-center text-[10px] text-muted-foreground">
-            Sẽ gộp từng trang rồi gửi cả chapter cùng lúc.
-          </p>
-        )}
-      </div>
-    </Card>
+      {/* ── LIGHTBOX ── */}
+      {lightboxImage && (
+        <ImageLightbox
+          src={lightboxImage}
+          alt={lightboxTitle}
+          title={lightboxTitle}
+          onClose={() => { setLightboxImage(null); setLightboxTitle('') }}
+        />
+      )}
+    </div>
   )
 }

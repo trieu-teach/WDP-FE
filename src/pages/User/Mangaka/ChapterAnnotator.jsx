@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
+  ChevronRight,
   Eraser,
   Image as ImageIcon,
   Maximize2,
   MousePointer2,
+  PenSquare,
   Plus,
   Send,
   Square,
@@ -12,7 +15,6 @@ import {
   Upload,
   X,
 } from 'lucide-react'
-import { LABEL_EDITOR_BOARD, LABEL_TANTOU_EDITOR } from '@/constants/roleTerminology.js'
 import { NOTE_TASK_TYPES, noteTaskLabel } from '@/constants/workspaceTasks.js'
 import { fileToStorableDataUrl } from '@/utils/mangakaWorkspaceStorage.js'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -46,6 +48,18 @@ function noteStableKey(note) {
   return note?.clientKey ?? note?.id ?? ''
 }
 
+/** Màu accent theo loại việc — dùng chung cho marker trên ảnh và card trong panel. */
+const NOTE_TASK_COLOR = {
+  background: '#0ea5e9',
+  shading: '#8b5cf6',
+  fx: '#f59e0b',
+  other: '#71717a',
+}
+
+function noteTaskColor(type) {
+  return NOTE_TASK_COLOR[type] ?? NOTE_TASK_COLOR.other
+}
+
 function displayChapterNum(baseStr, index) {
   const s = String(baseStr ?? '').trim()
   if (!s) return String(index + 1)
@@ -69,7 +83,6 @@ export default function ChapterAnnotator({
   seriesOptions = [],
   chapterNum,
   onChapterNumChange,
-  chapterNumHint,
   chapters,
   setChapters,
   activeChapterId,
@@ -82,8 +95,10 @@ export default function ChapterAnnotator({
   onOpenAssistantsTab,
   onUploadProgress,
   onSendToAssistant,
-  onSendToTantou,
+  onSendRevision,
   workspaceApi = null,
+  pendingReviewCount = 0,
+  revisionMode = false,
 }) {
   const fileRef = useRef(null)
   const coverFileRef = useRef(null)
@@ -93,6 +108,7 @@ export default function ChapterAnnotator({
   const loadedNoteKeysRef = useRef(new Set())
   const draftTextRef = useRef(new Map())
   const noteTextareaRefs = useRef(new Map())
+  const revisionDraftKeysRef = useRef(new Set())
 
   const [drawStart, setDrawStart] = useState(null)
   const [drawCurrent, setDrawCurrent] = useState(null)
@@ -102,12 +118,26 @@ export default function ChapterAnnotator({
   const [uploadUi, setUploadUi] = useState(null)
   const [uploadRejectMessage, setUploadRejectMessage] = useState(null)
   const [sendAssistantId, setSendAssistantId] = useState('')
+  const [sendingToAssistant, setSendingToAssistant] = useState(false)
 
   const activeChapter = chapters.find(c => c.id === activeChapterId)
-  const pages = activeChapter?.pages ?? []
+  const chapterPages = activeChapter?.pages ?? []
+  const pages = revisionMode
+    ? chapterPages.map((p) => ({
+        ...p,
+        url: p.resultUrl ?? p.resultImageUrl ?? p.url,
+      }))
+    : chapterPages
   const pageKey = activeChapter ? `${activeChapterId}-${pageIndex}` : ''
   const currentPageId = pages[pageIndex]?.id ?? null
+  // Phòng thủ: chỉ gọi BE khi có ObjectId hợp lệ (24 ký tự hex).
+  // Nếu page chưa sync _id từ BE (id là placeholder "page-X" hoặc rỗng), bỏ qua.
+  const isValidObjectId = (id) => typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id)
   const pageNotes = notes[pageKey] ?? []
+
+  useEffect(() => {
+    revisionDraftKeysRef.current.clear()
+  }, [revisionMode, activeChapterId])
 
   useEffect(() => {
     if (!isFullscreen) return undefined
@@ -200,6 +230,27 @@ export default function ChapterAnnotator({
     }
   }, [pageIndex, pageKey, pages, workspaceApi, setNotes])
 
+  const flushNotesBeforeSend = useCallback(async () => {
+    for (const timerId of Object.values(noteSaveTimersRef.current)) {
+      window.clearTimeout(timerId)
+    }
+    noteSaveTimersRef.current = {}
+
+    for (const stableKey of [...draftTextRef.current.keys()]) {
+      await persistNoteById(stableKey)
+    }
+
+    const snapshot = {}
+    for (const [pk, list] of Object.entries(notes)) {
+      snapshot[pk] = (list ?? []).map((n) => {
+        const key = noteStableKey(n)
+        const draft = draftTextRef.current.get(key)
+        return draft !== undefined ? { ...n, text: draft } : n
+      })
+    }
+    return snapshot
+  }, [notes, persistNoteById])
+
   const scheduleNoteSave = useCallback((stableKey, currentText) => {
     if (!stableKey) return
     if (!currentText?.trim()) return
@@ -260,8 +311,14 @@ export default function ChapterAnnotator({
     }
 
     const seriesMeta = seriesOptions.find(s => s.title === trimmedSeries)
-    const assistantId = hiredAssistants.length === 1 ? String(hiredAssistants[0].assistantId) : null
+    const assistantId = sendAssistantId
+      ? String(sendAssistantId)
+      : (hiredAssistants.length === 1 ? String(hiredAssistants[0].assistantId) : null)
     if (workspaceApi?.createChapter && seriesMeta?.id) {
+      if (!assistantId) {
+        setUploadRejectMessage('Chọn Assistant trước khi tạo chapter.')
+        return
+      }
       try {
         const ch = await workspaceApi.createChapter(seriesMeta.id, trimmedSeries, num, assistantId)
         setActiveChapterId(ch.id)
@@ -293,7 +350,7 @@ export default function ChapterAnnotator({
   }, [
     selectedSeriesTitle, nextChapterNum, chapters, setChapters, seriesOptions,
     setActiveChapterId, setPageIndex, onChapterNumChange, activateChapter, workspaceApi,
-    hiredAssistants,
+    hiredAssistants, sendAssistantId,
   ])
 
   const handleFiles = useCallback(async (files) => {
@@ -310,6 +367,11 @@ export default function ChapterAnnotator({
       setUploadRejectMessage('Chọn hoặc bấm "Tạo chapter" trước.')
       return
     }
+
+    const seriesMeta = seriesOptions.find(s => s.title === trimmedSeries)
+    const assistantId = sendAssistantId
+      ? String(sendAssistantId)
+      : (hiredAssistants.length === 1 ? String(hiredAssistants[0].assistantId) : null)
 
     const fileList = Array.from(files).filter(
       f => f.type.startsWith('image/') || f.name.match(/\.(png|jpe?g|webp)$/i),
@@ -328,8 +390,50 @@ export default function ChapterAnnotator({
         setUploadUi({ series: trimmedSeries, chapter: target.num, pct: 5 })
       }
 
+      // Chapter chưa sync server → gộp tạo + upload thành 1 request (BE yêu cầu multipart)
+      if (workspaceApi?.createChapterWithPages && seriesMeta?.id) {
+        const isLocalChapter = !/^[0-9a-f]{24}$/i.test(targetId)
+        if (isLocalChapter) {
+          if (!assistantId) {
+            setUploadRejectMessage('Chọn Assistant trước khi tạo chapter.')
+            setUploadUi(null)
+            if (hasProgress) onUploadProgress(trimmedSeries, 0)
+            return
+          }
+          try {
+            const ch = await workspaceApi.createChapterWithPages(
+              seriesMeta.id, trimmedSeries, target.num, assistantId, filesToAdd,
+            )
+            setChapters(prev => prev.map(c => (c.id !== targetId ? c : ch)))
+            setActiveChapterId(ch.id)
+            setPageIndex(0)
+            setUploadRejectMessage(null)
+            if (hasProgress) onUploadProgress(trimmedSeries, 100)
+            return
+          } catch (err) {
+            const status = err?.response?.status
+            if (status === 409) {
+              setUploadRejectMessage('Chapter đã tồn tại — đang đồng bộ dữ liệu.')
+              workspaceApi.refresh?.().catch(() => null)
+            } else {
+              setUploadRejectMessage('Không tạo được chapter — thử lại.')
+            }
+            return
+          }
+        }
+      }
+
       if (workspaceApi?.uploadChapterPages) {
-        newPages = await workspaceApi.uploadChapterPages(targetId, filesToAdd)
+        const uploadedPages = await workspaceApi.uploadChapterPages(targetId, filesToAdd)
+        newPages = Array.isArray(uploadedPages) ? uploadedPages : []
+        // Deduplicate theo id để chắc chắn không có page trùng (BE có thể trả về list đầy đủ)
+        const seen = new Set()
+        newPages = newPages.filter(p => {
+          const k = p?.id ?? p?._id
+          if (!k || seen.has(k)) return false
+          seen.add(k)
+          return true
+        })
         setNotes(prev => {
           const next = { ...prev }
           const startIdx = target.pages.length
@@ -369,7 +473,7 @@ export default function ChapterAnnotator({
     setUploadUi(null)
   }, [
     selectedSeriesTitle, activeChapterId, chapters, setChapters, setNotes,
-    onUploadProgress, workspaceApi,
+    onUploadProgress, workspaceApi, seriesOptions, hiredAssistants, sendAssistantId,
   ])
 
   function onFileChange(e) {
@@ -491,12 +595,14 @@ export default function ChapterAnnotator({
       taskType: 'background',
       assignee: '',
     }
+    if (revisionMode) revisionDraftKeysRef.current.add(String(clientKey))
     setNotes(prev => ({
       ...prev,
       [pageKey]: [...(prev[pageKey] ?? []), newNote],
     }))
     setSelectedNoteId(clientKey)
-    scheduleNoteSave(clientKey, '')
+    // Lưu ngay lên BE (kể cả khi text rỗng) để giữ toạ độ x,y,w,h cho Assistant
+    void persistNoteById(clientKey)
   }
 
   function updateNoteField(stableKey, field, value) {
@@ -531,11 +637,14 @@ export default function ChapterAnnotator({
   }, [activeChapterId, workspaceApi?.loadChapterPages])
 
   useEffect(() => {
+    // Revision mode: không nạp note cũ (round trước) — Mangaka chỉ khoanh vùng mới.
+    if (revisionMode) return
     if (!workspaceApi?.loadPageNotes || !currentPageId || !pageKey) return
+    if (!isValidObjectId(currentPageId)) return
     if (loadedNoteKeysRef.current.has(pageKey)) return
     loadedNoteKeysRef.current.add(pageKey)
     void workspaceApi.loadPageNotes(currentPageId, pageKey)
-  }, [currentPageId, pageKey, workspaceApi?.loadPageNotes])
+  }, [currentPageId, pageKey, workspaceApi?.loadPageNotes, isValidObjectId, revisionMode])
 
   useEffect(() => {
     loadedNoteKeysRef.current.clear()
@@ -550,7 +659,7 @@ export default function ChapterAnnotator({
     setSelectedNoteId(null)
   }
 
-  const removeCurrentPage = useCallback(() => {
+  const removeCurrentPage = useCallback(async () => {
     if (!activeChapterId || !activeChapter) return
     const chId = activeChapterId
     const idx = pageIndex
@@ -559,6 +668,16 @@ export default function ChapterAnnotator({
 
     const removed = oldPages[idx]
     if (removed?.url?.startsWith('blob:')) URL.revokeObjectURL(removed.url)
+
+    const serverPage = removed?.id && !String(removed.id).startsWith('note-')
+      ? removed
+      : null
+
+    if (serverPage && workspaceApi?.deleteChapterPage) {
+      try {
+        await workspaceApi.deleteChapterPage(chId, serverPage.id)
+      } catch { /* local fallback: renumber anyway */ }
+    }
 
     const newPages = oldPages.filter((_, i) => i !== idx)
     const chapterRemoved = newPages.length === 0
@@ -594,7 +713,7 @@ export default function ChapterAnnotator({
       const max = newPages.length - 1
       return pi > max ? max : pi
     })
-  }, [activeChapter, activeChapterId, pageIndex, chapters, setChapters, setNotes, setActiveChapterId, setPageIndex])
+  }, [activeChapter, activeChapterId, pageIndex, chapters, setChapters, setNotes, setActiveChapterId, setPageIndex, workspaceApi])
 
   const draftRect = drawStart && drawCurrent ? {
     x: Math.min(drawStart.x, drawCurrent.x),
@@ -612,14 +731,21 @@ export default function ChapterAnnotator({
     && !!uploadTargetChapter
     && (hiredAssistants.length === 0 || !!sendAssistantId)
 
-  const selectedSeriesPipeline = seriesOptions.find(s => s.title === selectedSeriesTitle.trim())
+  function ToolButtons({ onDark = false }) {
+    const outlineOnDark =
+      'border-white/15 bg-zinc-800/90 text-zinc-100 shadow-none hover:border-white/25 hover:bg-zinc-700 hover:text-white'
 
-  function ToolButtons() {
     return (
-      <div className="flex flex-wrap gap-1.5">
+      <div
+        className={cn(
+          'flex flex-wrap items-center gap-1.5',
+          onDark && 'rounded-lg border border-white/10 bg-black/30 p-1',
+        )}
+      >
         <Button
           size="sm"
           variant={tool === 'draw' ? 'default' : 'outline'}
+          className={cn(tool !== 'draw' && onDark && outlineOnDark)}
           onClick={() => setTool('draw')}
         >
           <Square className="size-3.5" />
@@ -628,6 +754,7 @@ export default function ChapterAnnotator({
         <Button
           size="sm"
           variant={tool === 'select' ? 'default' : 'outline'}
+          className={cn(tool !== 'select' && onDark && outlineOnDark)}
           onClick={() => setTool('select')}
         >
           <MousePointer2 className="size-3.5" />
@@ -636,6 +763,7 @@ export default function ChapterAnnotator({
         <Button
           size="sm"
           variant={tool === 'delete' ? 'destructive' : 'outline'}
+          className={cn(tool !== 'delete' && onDark && outlineOnDark)}
           onClick={() => setTool('delete')}
           title="Bấm vào ô trên trang để gỡ. Không xóa ảnh trang."
         >
@@ -646,24 +774,49 @@ export default function ChapterAnnotator({
     )
   }
 
-  function PageNav({ compact = false }) {
+  function PageNav({ compact = false, onDark = false }) {
     const canRemovePage = !!(activeChapter && pages.length > 0)
+    const navBtnCls = onDark
+      ? 'border-white/15 bg-zinc-800/90 text-zinc-100 shadow-none hover:bg-zinc-700 hover:text-white disabled:opacity-35'
+      : undefined
+
     return (
-      <div className="flex items-center gap-2">
-        <Button size="icon-sm" variant="outline" disabled={pageIndex === 0} onClick={() => goPage(-1)}>
+      <div
+        className={cn(
+          'flex items-center gap-2',
+          onDark && 'rounded-lg border border-white/10 bg-black/30 px-2 py-1',
+        )}
+      >
+        <Button
+          size="icon-sm"
+          variant="outline"
+          className={navBtnCls}
+          disabled={pageIndex === 0}
+          onClick={() => goPage(-1)}
+        >
           ‹
         </Button>
-        <span className="text-xs text-muted-foreground tabular-nums">
-          <strong className="text-foreground">{pageIndex + 1}</strong> / {pages.length}
+        <span className={cn('text-xs tabular-nums', onDark ? 'text-zinc-400' : 'text-muted-foreground')}>
+          <strong className={onDark ? 'text-white' : 'text-foreground'}>{pageIndex + 1}</strong> / {pages.length}
         </span>
-        <Button size="icon-sm" variant="outline" disabled={pageIndex >= pages.length - 1} onClick={() => goPage(1)}>
+        <Button
+          size="icon-sm"
+          variant="outline"
+          className={navBtnCls}
+          disabled={pageIndex >= pages.length - 1}
+          onClick={() => goPage(1)}
+        >
           ›
         </Button>
         {canRemovePage ? (
           <Button
             size="sm"
             variant="ghost"
-            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+            className={cn(
+              onDark
+                ? 'text-amber-300 hover:bg-amber-500/15 hover:text-amber-200'
+                : 'text-destructive hover:bg-destructive/10 hover:text-destructive',
+            )}
             onClick={removeCurrentPage}
             title="Gỡ ảnh trang đang xem"
           >
@@ -685,16 +838,16 @@ export default function ChapterAnnotator({
           const badge = notes[`${activeChapterId}-${i}`]?.length ?? 0
           return (
             <button
-              key={pg.id}
+              key={`${activeChapterId}-${pg.pageNumber ?? i}-${pg.id ?? i}`}
               type="button"
               onClick={() => { setPageIndex(i); setSelectedNoteId(null) }}
-              title={pg.name}
+              title={`${pg.name} | url=${pg.url ?? 'none'}`}
               className={cn(
                 'relative shrink-0 overflow-hidden rounded-md border-2 transition-colors',
                 i === pageIndex ? 'border-primary' : 'border-transparent hover:border-muted-foreground/30',
               )}
             >
-              <span className="manga-page manga-page--thumb-strip block">
+              <span className="manga-page manga-page--thumb-strip block h-10 w-6">
                 {pg.url ? (
                   <img src={pg.url} alt={pg.name} className="manga-page__media" />
                 ) : (
@@ -759,9 +912,13 @@ export default function ChapterAnnotator({
             style={{ left: `${n.x}%`, top: `${n.y}%`, width: `${n.w}%`, height: `${n.h}%` }}
             onClick={e => onNoteClick(e, stableKey)}
           >
-            <span className="mk-note-box__num">{idx + 1}</span>
+            <span className="mk-note-box__num" style={{ background: noteTaskColor(n.taskType) }}>{idx + 1}</span>
             {n.taskType ? (
-              <span className="mk-note-box__task" title={n.assignee ? `Giao: ${n.assignee}` : undefined}>
+              <span
+                className="mk-note-box__task"
+                style={{ background: noteTaskColor(n.taskType) }}
+                title={n.assignee ? `Giao: ${n.assignee}` : undefined}
+              >
                 {noteTaskLabel(n.taskType)}
               </span>
             ) : null}
@@ -793,20 +950,50 @@ export default function ChapterAnnotator({
     )
   }
 
-  function NotesPanel({ inFullscreen = false }) {
-    return (
-      <Card className={cn('flex flex-col', inFullscreen && 'h-full overflow-hidden')}>
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between gap-2">
-            <CardTitle className="text-base">Ô ghi chú — Trang {pageIndex + 1}</CardTitle>
+  function NotesPanel({ inFullscreen = false, embedded = false }) {
+    const panelContent = (
+      <>
+        {!embedded && !inFullscreen && (
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="text-base">Ô ghi chú — Trang {pageIndex + 1}</CardTitle>
+              {selectedNoteId ? (
+                <Button size="xs" variant="ghost" className="text-destructive" onClick={() => deleteNote(selectedNoteId)}>
+                  Gỡ ô đang chọn
+                </Button>
+              ) : null}
+            </div>
+          </CardHeader>
+        )}
+        {embedded || inFullscreen ? (
+          <div className="mb-3 flex shrink-0 items-center justify-between gap-2 border-b border-white/10 pb-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-white/10 text-zinc-200">
+                <PenSquare className="size-3.5" />
+              </span>
+              <p className="truncate text-sm font-semibold text-zinc-100">
+                Ô ghi chú · Trang {pageIndex + 1}
+              </p>
+              {pageNotes.length > 0 ? (
+                <Badge className="h-5 shrink-0 border-transparent bg-white/15 px-1.5 text-[11px] font-semibold text-zinc-100">
+                  {pageNotes.length}
+                </Badge>
+              ) : null}
+            </div>
             {selectedNoteId ? (
-              <Button size="xs" variant="ghost" className="text-destructive" onClick={() => deleteNote(selectedNoteId)}>
-                Gỡ ô đang chọn
+              <Button
+                size="xs"
+                variant="ghost"
+                className="h-7 shrink-0 gap-1 rounded-md bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 hover:text-rose-200"
+                onClick={() => deleteNote(selectedNoteId)}
+              >
+                <Trash2 className="size-3" />
+                Gỡ ô
               </Button>
             ) : null}
           </div>
-        </CardHeader>
-        <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
+        ) : null}
+        <div className={cn('flex min-w-0 flex-col gap-3', (embedded || inFullscreen) ? 'min-h-0 flex-1' : '')}>
           {hiredAssistants.length === 0 ? (
             <Alert className="border-violet-200 bg-violet-50/50 dark:border-violet-500/30 dark:bg-violet-500/5">
               <AlertDescription className="text-xs">
@@ -833,14 +1020,34 @@ export default function ChapterAnnotator({
           ) : null}
 
           {pageNotes.length === 0 ? (
-            <p className="text-xs text-muted-foreground">
-              Chưa có ô nào. Chọn <strong>Tạo ô</strong>, kéo vùng trên trang và mô tả việc cần làm. Gửi Assistant ở cuối — cả chapter giao cho 1 người.
-            </p>
+            <div className={cn(
+              'rounded-lg border border-dashed px-3 py-6 text-center',
+              embedded || inFullscreen
+                ? 'border-white/15 bg-zinc-950/40'
+                : 'border-muted-foreground/25 bg-muted/20',
+            )}>
+              <span className={cn(
+                'mx-auto mb-3 flex size-10 items-center justify-center rounded-full',
+                embedded || inFullscreen ? 'bg-white/10 text-zinc-400' : 'bg-muted text-muted-foreground',
+              )}>
+                <PenSquare className="size-5" />
+              </span>
+              <p className={cn('text-xs font-medium leading-relaxed', embedded || inFullscreen ? 'text-zinc-300' : 'text-muted-foreground')}>
+                Chưa có ô trên trang này.
+              </p>
+              <p className={cn(
+                'mt-1.5 break-words text-[11px] leading-relaxed',
+                embedded || inFullscreen ? 'text-zinc-500' : 'text-muted-foreground',
+              )}>
+                Chọn <strong className={embedded || inFullscreen ? 'text-zinc-200' : 'text-foreground'}>Tạo ô</strong>, kéo vùng trên trang và mô tả việc cần làm.
+              </p>
+            </div>
           ) : (
             <div
               className={cn(
-                'min-h-0 overflow-y-auto overscroll-contain pr-1',
-                inFullscreen ? 'flex-1' : 'max-h-[480px]',
+                'mk-notes-scroll min-h-0 min-w-0 overflow-x-hidden overscroll-contain pr-1',
+                pageNotes.length >= 2 ? 'overflow-y-auto' : 'overflow-y-visible',
+                inFullscreen || embedded ? 'flex-1' : 'max-h-[calc(100vh-480px)]',
               )}
             >
               <ul className="space-y-3">
@@ -849,28 +1056,51 @@ export default function ChapterAnnotator({
                   return (
                   <li
                     key={stableKey}
+                    style={{ borderLeftColor: noteTaskColor(n.taskType), borderLeftWidth: 4 }}
                     className={cn(
-                      'rounded-lg border p-3 transition-colors',
-                      selectedNoteId === stableKey ? 'border-primary bg-primary/5' : 'bg-background',
+                      'min-w-0 rounded-lg border p-3 shadow-sm transition-all duration-150 hover:shadow-md',
+                      embedded || inFullscreen
+                        ? selectedNoteId === stableKey
+                          ? 'border-rose-400/60 bg-rose-500/10 text-zinc-100 ring-2 ring-rose-400/40'
+                          : 'border-white/10 bg-zinc-950/60 text-zinc-100 hover:border-white/20'
+                        : selectedNoteId === stableKey
+                          ? 'border-primary bg-primary/5 ring-2 ring-primary/20'
+                          : 'bg-background hover:border-primary/30',
                     )}
                   >
                     <div className="mb-2 flex items-center justify-between">
-                      <Badge variant="outline">Ô #{idx + 1}</Badge>
-                      <Button size="xs" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => deleteNote(stableKey)}>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span
+                          className="flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white shadow-sm"
+                          style={{ background: noteTaskColor(n.taskType) }}
+                        >
+                          {idx + 1}
+                        </span>
+                        <span
+                          className="truncate text-xs font-semibold"
+                          style={{ color: noteTaskColor(n.taskType) }}
+                        >
+                          {noteTaskLabel(n.taskType ?? 'background')}
+                        </span>
+                      </div>
+                      <Button size="xs" variant="ghost" className="shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => deleteNote(stableKey)}>
                         <Trash2 className="size-3" />
                         Gỡ
                       </Button>
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-xs">Loại việc</Label>
+                      <Label className={cn('text-xs', (embedded || inFullscreen) && 'text-zinc-400')}>Loại việc</Label>
                       <Select
                         value={n.taskType ?? 'background'}
                         onValueChange={v => updateNoteField(stableKey, 'taskType', v)}
                       >
-                        <SelectTrigger className="h-8" onFocus={() => setSelectedNoteId(stableKey)}>
+                        <SelectTrigger
+                          className={cn('h-8', (embedded || inFullscreen) && 'border-white/15 bg-zinc-900/80 text-zinc-100')}
+                          onFocus={() => setSelectedNoteId(stableKey)}
+                        >
                           <SelectValue />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className={cn(inFullscreen && 'z-[10000]')}>
                           {NOTE_TASK_TYPES.map(t => (
                             <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
                           ))}
@@ -882,7 +1112,7 @@ export default function ChapterAnnotator({
                         if (el) noteTextareaRefs.current.set(stableKey, el)
                         else noteTextareaRefs.current.delete(stableKey)
                       }}
-                      className="mt-2 text-sm"
+                      className={cn('mt-2 text-sm', (embedded || inFullscreen) && 'border-white/15 bg-zinc-900/80 text-zinc-100 placeholder:text-zinc-500')}
                       placeholder="Mô tả chi tiết (VD: vẽ cảnh phố đêm, thêm đèn neon)..."
                       defaultValue={n.text ?? ''}
                       onInput={e => {
@@ -898,30 +1128,128 @@ export default function ChapterAnnotator({
               </ul>
             </div>
           )}
+        </div>
+      </>
+    )
+
+    if (inFullscreen) {
+      return (
+        <div className="flex h-full min-h-0 w-full flex-col overflow-hidden text-zinc-100">
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
+            {panelContent}
+          </div>
+        </div>
+      )
+    }
+
+    if (embedded) {
+      return (
+        <div className="flex h-full min-h-0 w-full min-w-0 max-w-full flex-col overflow-hidden rounded-lg border border-white/10 bg-zinc-900/95 text-zinc-100">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden p-4">
+            {panelContent}
+          </div>
+        </div>
+      )
+    }
+
+    return (
+      <Card className="flex flex-col">
+        <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
+          {panelContent}
         </CardContent>
       </Card>
     )
   }
 
-  function SendActionsBar({ compact = false }) {
-    const handleAssistant = () => {
-      if (!activeChapter || !onSendToAssistant) return
-      onSendToAssistant({
-        chapter: activeChapter,
-        pages,
-        assistantId: sendAssistantId,
-      })
+  function SendActionsBar({ compact = false, embedded = false, inline = false }) {
+    const handleAssistant = async () => {
+      const sendHandler = revisionMode ? onSendRevision : onSendToAssistant
+      if (!activeChapter || !sendHandler || sendingToAssistant) return
+      setSendingToAssistant(true)
+      try {
+        const syncedNotes = await flushNotesBeforeSend()
+        const notesForSend = revisionMode
+          ? Object.fromEntries(
+              Object.entries(syncedNotes).map(([key, list]) => [
+                key,
+                (list ?? []).filter((n) =>
+                  revisionDraftKeysRef.current.has(String(noteStableKey(n))),
+                ),
+              ]),
+            )
+          : syncedNotes
+        await sendHandler({
+          chapter: activeChapter,
+          pages,
+          assistantId: sendAssistantId,
+          notesByPage: notesForSend,
+        })
+      } finally {
+        setSendingToAssistant(false)
+      }
     }
-    const handleTantou = () => {
-      if (!activeChapter || !onSendToTantou) return
-      const page = pages[pageIndex]
-      onSendToTantou({
-        chapter: activeChapter,
-        pageIndex,
-        pageUrl: page?.url ?? null,
-        pageName: page?.name,
-        notes: pageNotes,
-      })
+
+    const innerContent = (
+      <div className={cn(
+        'min-w-0',
+        compact || embedded ? 'space-y-2' : 'space-y-3 p-4',
+        inline && 'p-0',
+      )}>
+        {hiredAssistants.length > 0 && sendAssistantId ? (
+          <p className={cn(
+            'truncate text-xs',
+            compact ? 'text-zinc-300' : 'text-muted-foreground',
+            inline && 'text-zinc-400',
+            embedded && !inline && 'text-zinc-400',
+          )}>
+            Assistant:{' '}
+            <strong className={cn(
+              compact || inline || embedded ? 'text-zinc-100' : 'text-foreground',
+            )}>
+              {hiredAssistants.find(a => String(a.assistantId) === String(sendAssistantId))?.label ?? sendAssistantId}
+            </strong>
+          </p>
+        ) : hiredAssistants.length === 0 ? (
+          <p className={cn(
+            'break-words text-xs leading-relaxed',
+            compact ? 'text-zinc-400' : 'text-muted-foreground',
+            inline && 'text-zinc-500',
+            embedded && !inline && 'text-zinc-500',
+          )}>
+            Thuê Assistant ở tab <strong className="text-zinc-300">Thuê Assistant</strong> trước khi gửi chapter.
+          </p>
+        ) : null}
+        <div className="flex w-full min-w-0 flex-col gap-1.5">
+          <Button
+            size="sm"
+            disabled={
+              !activeChapter
+              || pages.length === 0
+              || (!revisionMode && !sendAssistantId)
+              || sendingToAssistant
+            }
+            onClick={() => { void handleAssistant() }}
+            className="h-8 w-full min-w-0 text-xs"
+          >
+            <Send className="size-3 shrink-0" />
+            {sendingToAssistant
+              ? 'Đang gửi…'
+              : (revisionMode ? 'Gửi yêu cầu sửa cho Assistant' : 'Gửi Assistant')}
+          </Button>
+        </div>
+      </div>
+    )
+
+    if (embedded && inline) {
+      return innerContent
+    }
+
+    if (embedded) {
+      return (
+        <div className="w-full min-w-0 overflow-hidden rounded-lg border border-rose-500/30 bg-zinc-900/90 p-2 shadow-sm">
+          {innerContent}
+        </div>
+      )
     }
 
     return (
@@ -931,48 +1259,7 @@ export default function ChapterAnnotator({
           compact && 'border-white/10 bg-zinc-900/80 text-white shadow-xl backdrop-blur',
         )}
       >
-        <CardContent className={cn('space-y-3', compact ? 'p-3' : 'p-4')}>
-          <div className="min-w-0">
-            <p className={cn('text-sm font-semibold', compact && 'text-white')}>
-              Gửi cả chapter {activeChapter ? `Ch. ${activeChapter.num}` : ''} cho Assistant
-            </p>
-            <p className={cn('text-xs', compact ? 'text-zinc-300' : 'text-muted-foreground')}>
-              {pages.length} trang · {totalNotes} ô ghi chú · 1 task = cả chapter
-              {totalNotes > 0 ? ' · các ghi chú sẽ gộp vào mô tả' : ''}
-            </p>
-          </div>
-          {hiredAssistants.length > 0 && sendAssistantId ? (
-            <p className="text-xs text-muted-foreground">
-              Assistant: <strong>{hiredAssistants.find(a => String(a.assistantId) === String(sendAssistantId))?.label ?? sendAssistantId}</strong>
-            </p>
-          ) : hiredAssistants.length === 0 ? (
-            <p className={cn('text-xs', compact ? 'text-zinc-400' : 'text-muted-foreground')}>
-              Thuê Assistant ở tab <strong>Thuê Assistant</strong> trước khi gửi chapter.
-            </p>
-          ) : null}
-          <div className="flex flex-wrap items-center gap-2">
-            {onSendToTantou ? (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!activeChapter || pages.length === 0 || !sendAssistantId}
-                title={`Gửi bản thảo sang ${LABEL_TANTOU_EDITOR}`}
-                onClick={handleTantou}
-                className={cn(compact && 'border-white/20 bg-transparent text-white hover:bg-white/10')}
-              >
-                Gửi {LABEL_TANTOU_EDITOR}
-              </Button>
-            ) : null}
-            <Button
-              size="sm"
-              disabled={!activeChapter || pages.length === 0 || !sendAssistantId}
-              onClick={handleAssistant}
-            >
-              <Send className="size-3.5" />
-              Gửi cả chapter
-            </Button>
-          </div>
-        </CardContent>
+        <CardContent className={cn(compact && 'p-2')}>{innerContent}</CardContent>
       </Card>
     )
   }
@@ -981,16 +1268,13 @@ export default function ChapterAnnotator({
     const assistantReady = hiredAssistants.length > 0 && sendAssistantId
     return (
       <Card className={cn(
-        'border-violet-200 bg-violet-50/50 dark:border-violet-500/30 dark:bg-violet-500/5',
+        'border-violet-200 bg-gradient-to-br from-violet-50/80 to-background dark:border-violet-500/30 dark:from-violet-500/5',
       )}>
         <CardHeader className="pb-3">
           <div className="flex items-center gap-2">
-            <Badge variant="outline" className="size-6 justify-center p-0">0</Badge>
+            <Badge variant="outline" className="size-6 justify-center p-0 font-semibold">1</Badge>
             <CardTitle className="text-base">Chọn Assistant nhận chapter</CardTitle>
           </div>
-          <CardDescription>
-            Chọn assistant trước khi upload ảnh, tạo ghi chú và gửi chapter.
-          </CardDescription>
         </CardHeader>
         <CardContent>
           {assistantReady ? (
@@ -1033,29 +1317,60 @@ export default function ChapterAnnotator({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="mk-annotate space-y-6">
+      {revisionMode ? (
+        <div className="rounded-lg border border-amber-300/70 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+          <strong>Yêu cầu Assistant sửa lại:</strong>{' '}
+          khoanh vùng trên bản Assistant đã gửi, nhập ghi chú rồi bấm
+          {' '}“Gửi yêu cầu sửa cho Assistant”.
+        </div>
+      ) : null}
+      {pendingReviewCount > 0 ? (
+        <div className="flex items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2.5">
+          <p className="text-sm">
+            <strong>{pendingReviewCount}</strong> chapter chờ duyệt Assistant
+          </p>
+          <Button size="xs" asChild>
+            <Link to="/mangaka/review">Duyệt</Link>
+          </Button>
+        </div>
+      ) : null}
+
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+        <span className={cn(
+          'rounded-full px-2.5 py-1 font-medium transition-colors',
+          sendAssistantId ? 'bg-violet-100 text-violet-800 dark:bg-violet-500/15 dark:text-violet-300' : 'bg-background text-foreground shadow-sm',
+        )}>
+          1 · Assistant
+        </span>
+        <ChevronRight className="size-3.5 opacity-40" aria-hidden />
+        <span className={cn(
+          'rounded-full px-2.5 py-1 font-medium',
+          activeChapterId ? 'bg-background text-foreground shadow-sm' : 'opacity-60',
+        )}>
+          2 · Upload
+        </span>
+        <ChevronRight className="size-3.5 opacity-40" aria-hidden />
+        <span className={cn(
+          'rounded-full px-2.5 py-1 font-medium',
+          totalNotes > 0 ? 'bg-background text-foreground shadow-sm' : 'opacity-60',
+        )}>
+          3 · Ghi chú & gửi
+        </span>
+      </div>
+
       <AssistantPicker />
 
-      {!sendAssistantId && hiredAssistants.length > 0 ? (
-        <Alert className="border-amber-200 bg-amber-50/50 dark:border-amber-500/30 dark:bg-amber-500/5">
-          <AlertDescription className="text-xs">
-            Chọn Assistant trước khi upload ảnh, tạo ghi chú hoặc gửi chapter.
-          </AlertDescription>
-        </Alert>
-      ) : null}
-      <Card>
-        <CardHeader>
+      <Card className="overflow-hidden border-border/80 shadow-sm">
+        <CardHeader className="border-b bg-muted/20">
           <div className="flex items-center gap-2">
-            <Badge variant="outline" className="size-6 justify-center p-0">1</Badge>
+            <Badge variant="outline" className="size-6 justify-center p-0 font-semibold">2</Badge>
             <CardTitle className="text-base">Chapter & upload ảnh</CardTitle>
           </div>
-          <CardDescription>
-            Chọn chapter, nhập số trang — upload đúng bấy nhiêu ảnh (1 ảnh = 1 trang).
-          </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-5">
+        <CardContent className="space-y-5 pt-5">
           <div className="space-y-2">
-            <Label>Series (draft)</Label>
+            <Label>Series</Label>
             <Select
               value={seriesOptions.some(s => s.title === selectedSeriesTitle) ? selectedSeriesTitle : ''}
               onValueChange={(v) => onSelectedSeriesTitleChange(v)}
@@ -1070,20 +1385,6 @@ export default function ChapterAnnotator({
                 ))}
               </SelectContent>
             </Select>
-            {chapterNumHint ? <p className="text-xs text-muted-foreground">{chapterNumHint}</p> : null}
-            {selectedSeriesPipeline?.needsFullDebutPipeline ? (
-              <Alert>
-                <AlertDescription className="text-xs">
-                  <strong>✦ Lần đầu:</strong> Assistant → bạn duyệt → {LABEL_TANTOU_EDITOR} → {LABEL_EDITOR_BOARD} biểu quyết → xuất bản.
-                </AlertDescription>
-              </Alert>
-            ) : selectedSeriesPipeline ? (
-              <Alert>
-                <AlertDescription className="text-xs">
-                  <strong>Lần 2+:</strong> {LABEL_TANTOU_EDITOR} duyệt trực tiếp → xuất bản.
-                </AlertDescription>
-              </Alert>
-            ) : null}
           </div>
 
           <div className="grid gap-5 lg:grid-cols-[280px_1fr]">
@@ -1292,11 +1593,11 @@ export default function ChapterAnnotator({
       </Card>
 
       {activeChapter ? (
-        <Card>
-          <CardHeader>
+        <Card className="overflow-hidden border-border/80 shadow-sm">
+          <CardHeader className="border-b bg-muted/20">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2">
-                <Badge variant="outline" className="size-6 justify-center p-0">2</Badge>
+                <Badge variant="outline" className="size-6 justify-center p-0 font-semibold">3</Badge>
                 <div>
                   <CardTitle className="text-base">Ghi chú trên trang truyện</CardTitle>
                   <CardDescription>
@@ -1316,20 +1617,30 @@ export default function ChapterAnnotator({
               </div>
             </div>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+          <CardContent className="space-y-3">
+            <div className="flex items-center gap-3">
               <PageNav />
               <div className="min-w-0 flex-1 overflow-x-auto">
                 <PageThumbs />
               </div>
             </div>
-            <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
-              <div className="flex justify-center rounded-lg border bg-zinc-950 p-4">
-                <CanvasBoard refEl={boardRef} />
+            <div
+              className="flex h-[min(720px,calc(100vh-280px))] min-h-[480px] gap-3 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 p-3"
+            >
+              <div className="mk-board-stage-scroll min-h-0 min-w-0 flex-1 overflow-auto">
+                <div className="flex justify-center p-1">
+                  <CanvasBoard refEl={boardRef} />
+                </div>
               </div>
-              <NotesPanel />
+              <aside className="flex h-full w-[min(300px,100%)] min-w-[260px] max-w-[300px] shrink-0 flex-col gap-3 overflow-hidden">
+                <div className="min-h-0 flex-1 overflow-hidden">
+                  {NotesPanel({ embedded: true })}
+                </div>
+                <div className="shrink-0">
+                  {SendActionsBar({ embedded: true })}
+                </div>
+              </aside>
             </div>
-            <SendActionsBar />
           </CardContent>
         </Card>
       ) : (
@@ -1341,43 +1652,47 @@ export default function ChapterAnnotator({
       )}
 
       {isFullscreen && activeChapter ? (
-        <div className="fixed inset-0 z-50 flex flex-col bg-zinc-950" role="dialog" aria-modal="true">
-          <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-zinc-900 px-5 py-3 text-white">
-            <div>
+        <div className="mk-fullscreen" role="dialog" aria-modal="true">
+          <header className="mk-fullscreen__header">
+            <div className="mk-fullscreen__title">
               <strong>{activeChapter.series} — Ch.{activeChapter.num}</strong>
-              <span className="ml-2 text-sm text-zinc-400">· Trang {pageIndex + 1}/{pages.length}</span>
+              <span>· Trang {pageIndex + 1}/{pages.length}</span>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <ToolButtons />
-              <PageNav compact />
-              <Button size="sm" variant="outline" className="border-white/20 bg-transparent text-white hover:bg-white/10" onClick={() => setIsFullscreen(false)}>
-                <X className="size-4" />
+            <div className="mk-fullscreen__tools">
+              <ToolButtons onDark />
+              <PageNav compact onDark />
+              <button type="button" className="mk-fullscreen__close" onClick={() => setIsFullscreen(false)}>
+                <X className="size-4" aria-hidden />
                 Thu nhỏ
-              </Button>
+              </button>
             </div>
           </header>
 
-          <div className="grid min-h-0 flex-1 grid-cols-[1fr_360px] gap-4 overflow-hidden p-4">
-            <div className="flex items-center justify-center overflow-hidden">
+          <div className="mk-fullscreen__body">
+            <div className="mk-fullscreen__stage">
               <CanvasBoard refEl={fsBoardRef} fs />
             </div>
-            <div className="flex min-h-0 flex-col gap-3 overflow-hidden">
-              <div className="min-h-0 flex-1 overflow-hidden">
-                <NotesPanel inFullscreen />
+            <div className="mk-fullscreen__panel">
+              <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
+                <div className="min-h-0 flex-1 overflow-hidden">
+                  {NotesPanel({ inFullscreen: true })}
+                </div>
+                <div className="shrink-0">
+                  {SendActionsBar({ compact: true })}
+                </div>
               </div>
-              <SendActionsBar compact />
             </div>
           </div>
 
-          <div className="flex shrink-0 gap-2 overflow-x-auto border-t border-white/10 bg-zinc-900 p-2">
+          <div className="mk-fullscreen__thumbs">
             {pages.map((pg, i) => (
               <button
-                key={pg.id}
+                key={pg.id ?? i}
                 type="button"
                 onClick={() => { setPageIndex(i); setSelectedNoteId(null) }}
                 title={pg.name}
                 className={cn(
-                  'shrink-0 overflow-hidden rounded border-2 transition-colors',
+                  'mk-page-thumb shrink-0 overflow-hidden rounded border-2 transition-colors',
                   i === pageIndex ? 'border-primary' : 'border-transparent',
                 )}
               >

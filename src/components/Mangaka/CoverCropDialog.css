@@ -1,0 +1,29 @@
+.cover-crop-dialog__stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 3 / 1;
+  min-height: 180px;
+  max-height: 320px;
+  overflow: hidden;
+  border-radius: 0.75rem;
+  background: #111;
+}
+
+.cover-crop-dialog__area,
+.cover-crop-dialog__stage .reactEasyCrop_CropArea,
+.cover-crop-dialog__stage .reactEasyCrop_CropAreaRound {
+  border-radius: 0 !important;
+}
+
+.cover-crop-dialog__zoom {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding-top: 0.25rem;
+}
+
+.cover-crop-dialog__range {
+  width: 100%;
+  accent-color: #6f3cff;
+  cursor: pointer;
+}

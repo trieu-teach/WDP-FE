@@ -1,17 +1,18 @@
-import { useEffect, useMemo, useState, Fragment } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
   AlertTriangle,
   ArrowRight,
+  Bell,
   BookOpen,
   CheckCircle2,
   ChevronRight,
   ClipboardCheck,
   FileText,
-  Image as ImageIcon,
   Lightbulb,
   ListChecks,
+  MoreHorizontal,
   PenSquare,
   Plus,
   Send,
@@ -20,11 +21,10 @@ import {
   TrendingUp,
   Upload,
   UserPlus,
-  Workflow,
+  Users,
 } from "lucide-react";
 import Header from "@/components/User/Header/Header.jsx";
 import Footer from "@/components/User/Footer/Footer.jsx";
-import { WorkspaceHero } from "@/components/layout/WorkspaceHero.jsx";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,20 +46,31 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { getSession, logout } from "@/lib/auth.js";
 import { cn } from "@/lib/utils";
 import ChapterAnnotator from "./ChapterAnnotator.jsx";
 import AddSeriesModal from "./AddSeriesModal.jsx";
 import MangakaAssistants from "./MangakaAssistants.jsx";
 import { seriesPath } from "./SeriesUploadDetail.jsx";
-import { ImageCompareGrid } from "@/components/layout/ImageCompareGrid.jsx";
-import { ChapterPipeline } from "@/components/layout/ChapterPipeline.jsx";
 import {
   LABEL_EDITOR_BOARD,
   LABEL_TANTOU_EDITOR,
   PATH_EDITOR_BOARD,
-  PATH_TANTOU_EDITOR,
 } from "@/constants/roleTerminology.js";
+import { getMangakaTeRevisionPath } from "@/utils/notificationTarget.js";
+import {
+  isTeRevisionSeen,
+  markTeRevisionSeen,
+  pruneTeRevisionSeen,
+  TE_REVISION_SEEN_EVENT,
+} from "@/utils/teRevisionSeenStorage.js";
 import {
   readEbDebutApproved,
   removeEbDebutApproval,
@@ -67,15 +78,17 @@ import {
 } from "@/utils/ebDebutStorage.js";
 import { resolveAnnotatorChapter } from "@/utils/mangakaWorkspaceReader.js";
 import { useMangakaWorkspace } from "@/hooks/useMangakaWorkspace.js";
-import { getApiErrorMessage } from "@/api/http.js";
-import { tasksService } from "@/api/tasks.service.js";
+import { getApiErrorMessage, resolveMediaUrl } from "@/api/http.js";
 import { chaptersService } from "@/api/chapters.service.js";
 import { submissionsService } from "@/api/submissions.service.js";
-import { uiNoteToTaskCreate, uiChapterToTaskCreate, apiTaskToUi } from "@/utils/apiMappers.js";
+import { tasksService } from "@/api/tasks.service.js";
+import { uiNoteToTaskCreate, uiChapterToTaskCreate, uiTaskTypeToErrorType, canMangakaSendToTe, chapterPagesToCompareUrls, apiTaskToUi } from "@/utils/apiMappers.js";
 import { useMangakaTasks } from "@/hooks/useMangakaTasks.js";
+import { dedupeTasksByPage } from "@/utils/chapterTaskFlow.js";
 import {
-  listTantouSubmissions,
-} from "@/utils/tantouWorkspaceStorage.js";
+  mangakaTeSubmitMessage,
+  resolveTePhase,
+} from "@/utils/teReviewPhase.js";
 import { useMangakaCooperation } from "@/hooks/useMangakaCooperation.js";
 import {
   formatSeriesCardLine,
@@ -87,12 +100,12 @@ import "./Mangaka.css";
 
 const NAV_LINKS = [{ to: "/", label: "Trang chủ" }];
 
-const STAT_DEFS = [
-  { label: "Series draft", icon: BookOpen, color: "rose" },
-  { label: "Chapter đã upload", icon: FileText, color: "sky" },
-  { label: "Chờ Assistant", icon: ImageIcon, color: "violet" },
-  { label: "Chờ duyệt bản tổng hợp", icon: ClipboardCheck, color: "amber" },
+const HERO_IMAGES = [
+  "/images/mangaka1.png",
+  "/images/mangaka2.png",
+  "/images/mangaka3.png",
 ];
+const HERO_SLIDE_MS = 5000;
 
 const STATUS_BADGE = {
   draft: {
@@ -110,6 +123,11 @@ const STATUS_BADGE = {
     className:
       "bg-amber-100 text-amber-700 hover:bg-amber-100 dark:bg-amber-500/15 dark:text-amber-400",
   },
+  approved: {
+    label: "Đã duyệt",
+    className:
+      "bg-emerald-100 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400",
+  },
   tantou: {
     label: `Chờ ${LABEL_TANTOU_EDITOR}`,
     className:
@@ -122,99 +140,217 @@ const STATUS_BADGE = {
   },
 };
 
-const PIPELINE_DEBUT_STEPS = [
-  { step: 1, title: "Mangaka → Assistant", desc: "Gửi ảnh + ghi chú gộp → 1 task = 1 chapter" },
-  {
-    step: 2,
-    title: "Assistant → Mangaka",
-    desc: "Nộp ảnh kết quả cả chapter, bạn duyệt / yêu cầu sửa",
-  },
-  {
-    step: 3,
-    title: `Mangaka → ${LABEL_TANTOU_EDITOR}`,
-    desc: "Chuyển bản đã duyệt sang Tantou Editor",
-  },
-  {
-    step: 4,
-    title: `${LABEL_TANTOU_EDITOR} → ${LABEL_EDITOR_BOARD}`,
-    desc: "Tantou Editor duyệt rồi đưa lên Editor Board",
-  },
-  {
-    step: 5,
-    title: `${LABEL_EDITOR_BOARD} biểu quyết`,
-    desc: "Editor Board chấp nhận → thông báo Mangaka",
-  },
-  {
-    step: 6,
-    title: "Xuất bản",
-    desc: "Phát hành sau khi Editor Board đồng thuận",
-  },
-];
-
-const PIPELINE_RECURRING_STEPS = [
-  {
-    step: 1,
-    title: `Mangaka → ${LABEL_TANTOU_EDITOR}`,
-    desc: "Gửi chapter / bản thảo",
-  },
-  {
-    step: 2,
-    title: `${LABEL_TANTOU_EDITOR} duyệt`,
-    desc: "Chỉnh sửa & phê duyệt",
-  },
-  { step: 3, title: "Xuất bản", desc: `Không cần vòng ${LABEL_EDITOR_BOARD}` },
-];
-
 const TAB_ITEMS = [
-  { id: "series", label: "Series draft", icon: BookOpen },
+  { id: "series", label: "Series", icon: BookOpen },
   { id: "chapters", label: "Chapter", icon: FileText },
   { id: "assistants", label: "Thuê Assistant", icon: UserPlus },
-  { id: "annotate", label: "Upload & Ghi chú", icon: PenSquare },
+  { id: "annotate", label: "Upload & ghi chú", icon: PenSquare },
 ];
 
-const STAT_ICON_BG = {
-  rose: "bg-rose-500/10 text-rose-600",
-  sky: "bg-sky-500/10 text-sky-600",
-  violet: "bg-violet-500/10 text-violet-600",
-  amber: "bg-amber-500/10 text-amber-600",
-};
-
-function StatCard({ def, value, trend }) {
-  const Icon = def.icon;
+function EmptyWorkspaceState({ icon: Icon, title, description, action }) {
   return (
-    <Card>
-      <CardContent className="flex items-start justify-between gap-3 p-5">
-        <div className="space-y-1">
-          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-            {def.label}
-          </p>
-          <div className="text-3xl font-bold tracking-tight">{value}</div>
-          <p className="text-xs text-muted-foreground">{trend}</p>
+    <Card className="border-dashed bg-muted/20">
+      <CardContent className="flex flex-col items-center gap-4 py-16 text-center">
+        <div className="flex size-14 items-center justify-center rounded-2xl bg-muted">
+          <Icon className="size-7 text-muted-foreground" />
         </div>
-        <div
-          className={cn(
-            "flex size-11 items-center justify-center rounded-xl",
-            STAT_ICON_BG[def.color],
-          )}
-        >
-          <Icon className="size-5" />
+        <div className="max-w-sm space-y-1">
+          <p className="font-semibold">{title}</p>
+          <p className="text-sm text-muted-foreground">{description}</p>
         </div>
+        {action}
       </CardContent>
     </Card>
+  );
+}
+
+function TeRevisionInboxPanel({ revisions, onClose, onMarkRead }) {
+  return (
+    <div className="space-y-3">
+      <div>
+        <p className="flex items-center gap-2 text-sm font-semibold">
+          <Bell className="size-4 text-amber-600" />
+          Thông báo chỉnh sửa
+        </p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Yêu cầu chỉnh sửa từ {LABEL_TANTOU_EDITOR} gửi về cho bạn.
+        </p>
+      </div>
+
+      {revisions.length === 0 ? (
+        <div className="rounded-xl border border-dashed bg-muted/20 px-4 py-8 text-center">
+          <p className="text-sm font-medium">Không có thông báo chưa đọc</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Khi TE gửi yêu cầu chỉnh sửa mới, thông báo sẽ hiện lại tại đây.
+          </p>
+        </div>
+      ) : (
+        <ul className="max-h-[min(24rem,55vh)] space-y-2 overflow-y-auto pr-1">
+          {revisions.map((item) => {
+            const revisionPath = getMangakaTeRevisionPath(
+              item.chapterId ?? item.id,
+            );
+            const comment = String(item.editorialComment ?? "").trim();
+            const chapterId = item.chapterId ?? item.id;
+            return (
+              <li
+                key={item.id}
+                className="rounded-xl border bg-background p-3 shadow-sm"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold">
+                      {item.seriesTitle}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Ch. {item.chapterNum}
+                      {item.pageLabel ? ` · ${item.pageLabel}` : ""}
+                    </p>
+                    {comment ? (
+                      <p className="mt-2 line-clamp-3 text-xs leading-relaxed text-foreground/80">
+                        {comment}
+                      </p>
+                    ) : (
+                      <p className="mt-2 text-xs italic text-muted-foreground">
+                        Không có ghi chú kèm theo.
+                      </p>
+                    )}
+                  </div>
+                  <Badge
+                    variant="outline"
+                    className="shrink-0 border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
+                  >
+                    Cần sửa
+                  </Badge>
+                </div>
+                <div className="mt-3 flex flex-col gap-2">
+                  {revisionPath ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 w-full gap-1.5"
+                      asChild
+                    >
+                      <Link
+                        to={revisionPath}
+                        onClick={() => {
+                          onMarkRead?.(chapterId);
+                          onClose?.();
+                        }}
+                      >
+                        Xem nhận xét & chỉnh sửa
+                        <ChevronRight className="size-3.5" />
+                      </Link>
+                    </Button>
+                  ) : null}
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-8 w-full gap-1.5 bg-amber-600 text-white hover:bg-amber-700"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onMarkRead?.(chapterId);
+                    }}
+                  >
+                    <CheckCircle2 className="size-3.5" />
+                    Xác nhận đã đọc
+                  </Button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function WorkspaceActionBar({
+  pendingReviewCount,
+  teReadyCount,
+  tantouRevisionCount,
+  incompleteSeriesCount,
+  onOpenChaptersTab,
+  onOpenSeriesTab,
+  onOpenAssistantsTab,
+  onOpenRevisionInbox,
+}) {
+  const hasItems =
+    pendingReviewCount > 0
+    || teReadyCount > 0
+    || tantouRevisionCount > 0
+    || incompleteSeriesCount > 0;
+
+  if (!hasItems) return null;
+
+  return (
+    <div className="mk-action-bar mb-6 flex flex-wrap items-center gap-2 rounded-xl border bg-card p-3 shadow-sm">
+      <span className="mr-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Việc cần làm
+      </span>
+      {pendingReviewCount > 0 ? (
+        <Button size="sm" variant="secondary" className="h-8 gap-1.5" asChild>
+          <Link to="/mangaka/review">
+            <ClipboardCheck className="size-3.5" />
+            {pendingReviewCount} chờ duyệt Assistant
+          </Link>
+        </Button>
+      ) : null}
+      {teReadyCount > 0 ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 gap-1.5 border-sky-200 bg-sky-50/50 text-sky-800 hover:bg-sky-100 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-300"
+          onClick={onOpenChaptersTab}
+        >
+          <Users className="size-3.5" />
+          {teReadyCount} sẵn sàng gửi {LABEL_TANTOU_EDITOR}
+        </Button>
+      ) : null}
+      {tantouRevisionCount > 0 ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 gap-1.5 border-amber-200 bg-amber-50/50 text-amber-900 hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
+          onClick={onOpenRevisionInbox}
+        >
+          <Bell className="size-3.5" />
+          {tantouRevisionCount} thông báo chỉnh sửa
+        </Button>
+      ) : null}
+      {incompleteSeriesCount > 0 ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 gap-1.5"
+          onClick={onOpenSeriesTab}
+        >
+          <AlertTriangle className="size-3.5 text-amber-600" />
+          {incompleteSeriesCount} series thiếu hồ sơ
+        </Button>
+      ) : null}
+      <Button
+        size="sm"
+        variant="ghost"
+        className="ml-auto h-8 text-muted-foreground"
+        onClick={onOpenAssistantsTab}
+      >
+        <UserPlus className="size-3.5" />
+        Thuê Assistant
+      </Button>
+    </div>
   );
 }
 
 function SeriesCard({
   series,
   ebApproved,
-  uploadPct,
   onOpenAnnotate,
   onOpenEdit,
   onDelete,
   onCompleteDebut,
 }) {
-  const isUploading = uploadPct > 0 && uploadPct < 100;
-  const barPct = isUploading ? uploadPct : Math.min(100, series.progress ?? 0);
   const toSeries = seriesPath(series);
   const statusBadge = STATUS_BADGE[series.status] ?? STATUS_BADGE.draft;
   const initials = (
@@ -224,39 +360,41 @@ function SeriesCard({
   return (
     <Card className="group relative gap-0 overflow-hidden p-0 transition-all hover:-translate-y-0.5 hover:shadow-lg">
       <div
-        className="absolute inset-x-0 top-0 h-1"
+        className="absolute inset-x-0 top-0 z-10 h-1"
         style={{ background: series.color }}
       />
-      {series.needsFullDebutPipeline ? (
-        <Badge
-          className="absolute right-3 top-3 z-10 bg-amber-500 text-white hover:bg-amber-500"
-          title={`Series lần đầu: đủ vòng ${LABEL_EDITOR_BOARD}.`}
-        >
-          <Sparkles className="size-3" />
-          Lần đầu
-        </Badge>
-      ) : null}
 
-      <Link
-        to={toSeries}
-        className="flex aspect-[16/7] items-center justify-center text-3xl font-extrabold tracking-tight text-white transition-transform group-hover:scale-[1.02]"
-        style={{
-          background: `linear-gradient(135deg, ${series.color}, ${series.color}88)`,
-        }}
-      >
-        <span className="drop-shadow-lg">{initials}</span>
+      <Link to={toSeries} className="relative block overflow-hidden">
+        <div
+          className="aspect-[3/4] flex items-center justify-center bg-muted text-3xl font-extrabold tracking-tight text-white transition-transform duration-300 group-hover:scale-[1.02]"
+          style={{
+            background: series.coverImage
+              ? `url(${resolveMediaUrl(series.coverImage)}) center / cover no-repeat`
+              : `linear-gradient(145deg, ${series.color}, ${series.color}99)`,
+          }}
+        >
+          {!series.coverImage ? (
+            <span className="drop-shadow-lg">{initials}</span>
+          ) : null}
+        </div>
+        {series.needsFullDebutPipeline ? (
+          <Badge className="absolute left-3 top-3 bg-amber-500 text-white shadow-sm hover:bg-amber-500">
+            <Sparkles className="size-3" />
+            Lần đầu
+          </Badge>
+        ) : null}
       </Link>
 
-      <CardContent className="space-y-3 p-4">
+      <CardContent className="space-y-2.5 p-4">
         <div className="flex items-start justify-between gap-2">
           <Link
             to={toSeries}
-            className="line-clamp-1 font-semibold hover:underline"
+            className="line-clamp-2 font-semibold leading-snug hover:underline"
             title={series.title}
           >
             {series.title}
           </Link>
-          <Badge className={statusBadge.className} variant="secondary">
+          <Badge className={cn("shrink-0", statusBadge.className)} variant="secondary">
             {series.statusLabel ?? statusBadge.label}
           </Badge>
         </div>
@@ -264,110 +402,71 @@ function SeriesCard({
         <p className="line-clamp-1 text-xs text-muted-foreground">
           {formatSeriesCardLine(series)}
         </p>
+
         {series.ebAssessment ? (
-          <div className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50/60 p-3 text-xs text-emerald-950 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-200">
-            <div className="flex items-center justify-between gap-2">
-              <span className="font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
-                EB đánh giá
-              </span>
-              <Badge
-                variant="outline"
-                className="border-emerald-300 bg-white/80 text-emerald-700 dark:border-emerald-400/30 dark:bg-emerald-500/10 dark:text-emerald-200"
-              >
-                DTB {Number(series.ebAssessment.average ?? 0).toFixed(1)} ·{" "}
-                {series.ebAssessment.classification ?? "N/A"}
-              </Badge>
-            </div>
-            <p className="line-clamp-2 text-xs text-emerald-900/80 dark:text-emerald-100/85">
-              {series.ebAssessment.classificationNote ??
-                "Chưa có ghi chú từ Editor Board."}
-            </p>
-            {Array.isArray(series.ebAssessment.summaryNotes) &&
-            series.ebAssessment.summaryNotes.length > 0 ? (
-              <p className="line-clamp-2 text-xs text-emerald-900/70 dark:text-emerald-100/75">
-                {series.ebAssessment.summaryNotes.slice(0, 2).join(" · ")}
-              </p>
-            ) : null}
-          </div>
+          <p className="truncate text-xs font-medium text-emerald-700 dark:text-emerald-400">
+            EB · DTB {Number(series.ebAssessment.average ?? 0).toFixed(1)}
+            {series.ebAssessment.classification
+              ? ` · ${series.ebAssessment.classification}`
+              : ""}
+          </p>
         ) : null}
+
         {!series.metadataComplete ? (
           <p className="flex items-center gap-1 text-xs text-amber-600">
-            <AlertTriangle className="size-3" />
+            <AlertTriangle className="size-3 shrink-0" />
             Thiếu mô tả hồ sơ
           </p>
         ) : null}
 
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span>{series.chapters} ch</span>
-          <span>·</span>
-          <span>{series.marks} vùng ghi chú</span>
+          <span>{series.chapters} chapter</span>
+          <span aria-hidden>·</span>
+          <span>{series.marks} ghi chú</span>
         </div>
 
-        <div>
-          <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
-            <span>{isUploading ? "Đang tải chapter" : "Tiến độ"}</span>
-            <span className="font-medium tabular-nums">
-              {Math.round(barPct)}%
-            </span>
-          </div>
-          <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full rounded-full transition-all"
-              style={{ width: `${barPct}%`, background: series.color }}
-            />
-          </div>
-        </div>
-
-        <p className="text-xs text-muted-foreground">{series.updated}</p>
+        <p className="text-[11px] text-muted-foreground">{series.updated}</p>
       </CardContent>
 
-      <CardFooter className="flex flex-col gap-2 border-t bg-muted/30 p-3">
-        <div className="flex w-full flex-wrap gap-1.5">
-          <Button asChild size="sm" variant="outline" className="flex-1">
-            <Link to={toSeries}>Xem truyện</Link>
-          </Button>
-          <Button size="sm" variant="ghost" onClick={onOpenEdit}>
-            Chỉnh sửa
-          </Button>
-          {series.status === "draft" ? (
-            <Button size="sm" variant="ghost" onClick={onOpenAnnotate}>
-              Đánh dấu vùng
+      <CardFooter className="flex items-center gap-2 border-t bg-muted/20 p-3">
+        <Button asChild size="sm" className="min-w-0 flex-1">
+          <Link to={toSeries}>Vào series</Link>
+        </Button>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm" variant="outline" className="size-8 shrink-0 p-0">
+              <MoreHorizontal className="size-4" />
+              <span className="sr-only">Tùy chọn series</span>
             </Button>
-          ) : null}
-        </div>
-
-        {series.needsFullDebutPipeline && !ebApproved ? (
-          <Button
-            asChild
-            variant="secondary"
-            size="sm"
-            className="w-full bg-amber-100 text-amber-800 hover:bg-amber-200 dark:bg-amber-500/15 dark:text-amber-300"
-          >
-            <Link to={PATH_EDITOR_BOARD}>
-              <Sparkles className="size-3.5" />
-              Chờ {LABEL_EDITOR_BOARD} duyệt
-            </Link>
-          </Button>
-        ) : null}
-
-        {series.needsFullDebutPipeline && ebApproved ? (
-          <Button size="sm" className="w-full" onClick={onCompleteDebut}>
-            <CheckCircle2 className="size-3.5" />
-            Hoàn tất vòng đầu
-          </Button>
-        ) : null}
-
-        <div className="flex w-full justify-end">
-          <Button
-            size="xs"
-            variant="ghost"
-            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-            onClick={onDelete}
-          >
-            <Trash2 className="size-3" />
-            Xóa
-          </Button>
-        </div>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuItem onClick={onOpenEdit}>Chỉnh sửa hồ sơ</DropdownMenuItem>
+            {series.status === "draft" ? (
+              <DropdownMenuItem onClick={onOpenAnnotate}>Đánh dấu vùng</DropdownMenuItem>
+            ) : null}
+            {series.needsFullDebutPipeline && !ebApproved ? (
+              <DropdownMenuItem asChild>
+                <Link to={PATH_EDITOR_BOARD}>
+                  Chờ {LABEL_EDITOR_BOARD} duyệt
+                </Link>
+              </DropdownMenuItem>
+            ) : null}
+            {series.needsFullDebutPipeline && ebApproved ? (
+              <DropdownMenuItem onClick={onCompleteDebut}>
+                Hoàn tất vòng đầu
+              </DropdownMenuItem>
+            ) : null}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="text-destructive focus:text-destructive"
+              onClick={onDelete}
+            >
+              <Trash2 className="size-3.5" />
+              Xóa series
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </CardFooter>
     </Card>
   );
@@ -395,22 +494,24 @@ export default function Mangaka() {
     updateSeries,
     removeSeries,
     createChapter,
+    createChapterWithPages,
     uploadChapterPages,
     assignChapter,
     unassignChapter,
     updateChapterStatus,
+    deleteChapterPage,
     loadPageNotes,
     loadChapterPages,
     savePageNote,
+    syncChapterNotes,
     deletePageNote,
     refresh: refreshWorkspace,
   } = useMangakaWorkspace(user);
 
   const {
     pendingReviews,
-    loading: tasksLoading,
+    teReadyChapters,
     refresh: refreshMangakaTasks,
-    approveChapterTasks,
     requestRevision,
   } = useMangakaTasks(chapterRows);
 
@@ -423,38 +524,124 @@ export default function Mangaka() {
   const [uploadPctBySeries, setUploadPctBySeries] = useState({});
   const [annotatorActiveChapterId, setAnnotatorActiveChapterId] = useState(null);
   const [annotatorPageIndex, setAnnotatorPageIndex] = useState(0);
+  const [revisionChapterId, setRevisionChapterId] = useState(null);
   const [annotatorChapterNum, setAnnotatorChapterNum] = useState("1");
   const [annotatorPagesPerChapter, setAnnotatorPagesPerChapter] = useState("");
   const [annotatorUploadPageBudget, setAnnotatorUploadPageBudget] = useState("");
   const [ebApprovedTick, setEbApprovedTick] = useState(0);
-  const [tantouTick, setTantouTick] = useState(0);
-  const [revisionOpen, setRevisionOpen] = useState(false);
-  const [revisionNote, setRevisionNote] = useState("");
-  const [revisionBusy, setRevisionBusy] = useState(false);
 
-  const statValues = useMemo(() => {
-    const pendingAssistant = chapterRows.filter(
-      (c) => c.status === "assistant",
-    ).length;
-    const pendingComposite = chapterRows.filter(
-      (c) => c.status === "review",
-    ).length;
-    return [
-      { value: String(seriesList.length), trend: "Hồ sơ trong workspace" },
-      {
-        value: String(chapterRows.length),
-        trend: `${chapterRows.length} dòng trong bảng Chapter`,
-      },
-      {
-        value: String(pendingAssistant),
-        trend: pendingAssistant > 0 ? "Đang gửi Assistant" : "Không có",
-      },
-      {
-        value: String(pendingComposite),
-        trend: pendingComposite > 0 ? "Cần duyệt" : "Không có",
-      },
-    ];
-  }, [seriesList.length, chapterRows]);
+  // TE assignment — luồng mới
+  const [teUsers, setTeUsers] = useState([]);          // danh sách TE active
+  const [teLoading, setTeLoading] = useState(false);
+  const [teSelectorOpen, setTeSelectorOpen] = useState(false); // dialog chọn TE
+  const [selectedTeId, setSelectedTeId] = useState(null);      // TE đã chọn cho lastApprovedChapter
+  const [teAssigning, setTeAssigning] = useState(false);      // đang gán
+  const [teSending, setTeSending] = useState(false);          // đang gửi sang TE
+  const [teSendChapter, setTeSendChapter] = useState(null);   // chapter đang mở dialog gửi TE
+  const [teRevisionInboxOpen, setTeRevisionInboxOpen] = useState(false);
+  const [teRevisionSeenTick, setTeRevisionSeenTick] = useState(0);
+  const [heroSlide, setHeroSlide] = useState(0);
+  const [lastApprovedChapter, setLastApprovedChapter] = useState(null);
+
+  const teTargetChapter = teSelectorOpen
+    ? (teSendChapter ?? lastApprovedChapter)
+    : (lastApprovedChapter ?? teSendChapter);
+
+  // Load danh sách TE khi mở selector
+  useEffect(() => {
+    if (!teSelectorOpen) return;
+    let cancelled = false;
+    setTeLoading(true);
+    submissionsService.getTeUsers()
+      .then((users) => { if (!cancelled) setTeUsers(Array.isArray(users) ? users : []) })
+      .catch(() => { if (!cancelled) setTeUsers([]) })
+      .finally(() => { if (!cancelled) setTeLoading(false) });
+    return () => { cancelled = true; };
+  }, [teSelectorOpen]);
+
+  async function verifyChapterPagesReadyForTe(chapterId) {
+    const pages = await loadChapterPages(chapterId, { force: true });
+    const { resultCount, pageCount } = chapterPagesToCompareUrls(pages);
+    if (pageCount > 0 && resultCount < pageCount) {
+      throw new Error(
+        `${pageCount - resultCount} trang chưa có ảnh kết quả từ Assistant.`,
+      );
+    }
+    return pages;
+  }
+
+  function openTeSelector(chapter) {
+    if (!chapter) return;
+    setTeSendChapter(chapter);
+    setSelectedTeId(chapter.teId ?? chapter.te_id ?? null);
+    setTeSelectorOpen(true);
+  }
+
+  /** Bước 6 — Gán TE (không đổi status chapter). */
+  async function handleAssignTe(teId) {
+    const chapter = teTargetChapter;
+    if (!chapter?.id || !teId) return;
+    setTeAssigning(true);
+    try {
+      const res = await submissionsService.assignTe(chapter.id, teId);
+      setSelectedTeId(teId);
+      toast.success(res.message || "Đã gán TE cho chapter.");
+      await refreshMangakaTasks();
+      await refreshWorkspace();
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Gán TE thất bại."));
+    } finally {
+      setTeAssigning(false);
+    }
+  }
+
+  /** Bước 7 — Gửi chapter sang TE. teId optional: override hoặc broadcast. */
+  async function handleSubmitToTe(teId) {
+    const chapter = teTargetChapter;
+    if (!chapter?.id) return;
+    const apiStatus = chapter.apiStatus ?? chapter.status;
+    if (!canMangakaSendToTe(apiStatus)) {
+      toast.error("Chapter chưa sẵn sàng gửi TE. Vui lòng duyệt chapter trước.");
+      return;
+    }
+
+    setTeSending(true);
+    try {
+      await verifyChapterPagesReadyForTe(chapter.id);
+      const res = await submissionsService.submitChapterToTe(
+        chapter.id,
+        teId || undefined,
+      );
+      const phase = resolveTePhase({
+        phase: res.phase,
+        seriesStatus: res.seriesInfo?.status,
+      });
+      toast.success(
+        res.message || mangakaTeSubmitMessage(phase),
+      );
+      setTeSelectorOpen(false);
+      setLastApprovedChapter(null);
+      setTeSendChapter(null);
+      await refreshMangakaTasks();
+      await refreshWorkspace();
+    } catch (err) {
+      toast.error(
+        getApiErrorMessage(err, `Gửi sang ${LABEL_TANTOU_EDITOR} thất bại.`),
+      );
+    } finally {
+      setTeSending(false);
+    }
+  }
+
+  async function handleRemoveTe(chapterId) {
+    try {
+      await submissionsService.removeTe(chapterId);
+      toast.success('Đã gỡ TE khỏi chapter.');
+      await refreshMangakaTasks();
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Gỡ TE thất bại.'));
+    }
+  }
 
   const nextChapterNumSuggest = useMemo(() => {
     const rows = chapterRows.filter(
@@ -471,14 +658,6 @@ export default function Mangaka() {
     return String(Math.max(...nums) + 1);
   }, [chapterRows, annotateSeries]);
 
-  const annotateChapterHint = useMemo(() => {
-    const n = chapterRows.filter((c) => c.series === annotateSeries).length;
-    const tail = n
-      ? `${n} dòng trong bảng Chapter`
-      : "Chưa có dòng trong bảng Chapter";
-    return `Gợi ý tiếp theo Ch. ${nextChapterNumSuggest} · ${tail}`;
-  }, [chapterRows, annotateSeries, nextChapterNumSuggest]);
-
   const chapterRowsBySeries = useMemo(() => {
     const order = [];
     const map = new Map();
@@ -490,46 +669,166 @@ export default function Mangaka() {
       }
       map.get(key).push(row);
     }
-    return order.map((series) => ({ series, chapters: map.get(series) }));
-  }, [chapterRows]);
 
-  const pipelineSeries = useMemo(
-    () => seriesList.find((s) => s.title === annotateSeries) ?? seriesList[0],
-    [seriesList, annotateSeries],
-  );
+    const pendingIds = new Set(
+      (pendingReviews ?? [])
+        .map((r) => String(r?.chapter?.id ?? ""))
+        .filter(Boolean),
+    );
 
-  const pendingReview = pendingReviews[0] ?? null;
-  const pendingCompositeReview = pendingReview?.chapter ?? null;
-  const pendingSubmittedTasks = pendingReview?.tasks ?? [];
-  // Flow mới (1 task = 1 chapter): gom ảnh từ resultImageUrls (mảng) hoặc resultImageUrl (1 ảnh)
-  const pendingResultUrls = useMemo(() => {
-    const urls = []
-    for (const task of pendingSubmittedTasks) {
-      if (Array.isArray(task.resultImageUrls) && task.resultImageUrls.length) {
-        urls.push(...task.resultImageUrls)
-      } else if (task.resultImageUrl) {
-        urls.push(task.resultImageUrl)
-      }
+    function chapterSortKey(row) {
+      const n =
+        typeof row?.num === "number"
+          ? row.num
+          : parseInt(String(row?.num ?? ""), 10);
+      return Number.isNaN(n) ? Number.POSITIVE_INFINITY : n;
     }
-    return urls
-  }, [pendingSubmittedTasks]);
-  const pendingChapterTask = pendingReview?.task ?? null;
-  // Ảnh gốc các trang của chapter đang duyệt (fallback nếu BE không trả diff)
-  const pendingOriginalUrls = useMemo(() => {
-    if (!pendingCompositeReview) return []
-    const list = (annotatorChapters ?? []).find(
-      c => c.id === pendingCompositeReview.id,
-    )
-    return (list?.pages ?? []).map(p => p?.url).filter(Boolean)
-  }, [pendingCompositeReview, annotatorChapters])
+
+    const groups = order.map((series) => {
+      const chapters = [...(map.get(series) ?? [])].sort((a, b) => {
+        const aPending = pendingIds.has(String(a.id)) ? 0 : 1;
+        const bPending = pendingIds.has(String(b.id)) ? 0 : 1;
+        if (aPending !== bPending) return aPending - bPending;
+        return chapterSortKey(a) - chapterSortKey(b);
+      });
+      const pendingCount = chapters.filter((c) =>
+        pendingIds.has(String(c.id)),
+      ).length;
+      return { series, chapters, pendingCount };
+    });
+
+    groups.sort((a, b) => {
+      if (a.pendingCount !== b.pendingCount) return b.pendingCount - a.pendingCount;
+      return a.series.localeCompare(b.series, "vi");
+    });
+
+    return groups.map(({ series, chapters }) => ({ series, chapters }));
+  }, [chapterRows, pendingReviews]);
+
+  /**
+   * Map chapterId → pendingReview để chapter card tra nhanh khi render.
+   * pendingReview có dạng { chapter, task, tasks } — task đang ở trạng thái `submitted` / `in_review`.
+   */
+  const pendingReviewByChapter = useMemo(() => {
+    const m = new Map();
+    for (const r of pendingReviews ?? []) {
+      if (r?.chapter?.id) m.set(String(r.chapter.id), r);
+    }
+    return m;
+  }, [pendingReviews]);
+
+  // State cho accept / send-back ngay trong chapter card (chapter có ảnh assistant đã gửi)
+  const [cardRevision, setCardRevision] = useState(null); // { row, review, note, busy }
+
+  function openCardRevision(row, review) {
+    if (!row?.id || !review) return;
+    setAnnotateSeries(row.series);
+    setAnnotatorActiveChapterId(row.id);
+    setAnnotatorPageIndex(0);
+    setRevisionChapterId(String(row.id));
+    setTab("annotate");
+  }
+  function closeCardRevision() {
+    setCardRevision(null);
+  }
+
+  async function handleCardSendBack() {
+    if (!cardRevision) return;
+    const { row, review, note } = cardRevision;
+    if (!review?.submission?.id && !row?.id) return;
+    setCardRevision((s) => (s ? { ...s, busy: true } : s));
+    try {
+      const finalNote =
+        note.trim() ||
+        "Mangaka yêu cầu chỉnh sửa — xem ghi chú trên từng trang.";
+      const chapterPages =
+        annotatorChapters.find((ch) => String(ch.id) === String(row.id))?.pages
+        ?? []
+      await requestRevision([review], finalNote, {
+        getAnnotationsForTask: (task) => {
+          const pageId = task?.pageId
+          if (!pageId) return []
+          const pageIndex = chapterPages.findIndex(
+            (p) => String(p?.id ?? p?._id) === String(pageId),
+          )
+          if (pageIndex < 0) return []
+          return annotatorNotes[`${row.id}-${pageIndex}`] ?? []
+        },
+      });
+      await updateChapterStatus(row.id, "assistant");
+      toast.success(
+        `Đã gửi lại chapter ${row.num} cho Assistant kèm ghi chú lỗi.`,
+      );
+      closeCardRevision();
+      await refreshMangakaTasks();
+      await refreshWorkspace();
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Gửi lại cho Assistant thất bại."));
+      setCardRevision((s) => (s ? { ...s, busy: false } : s));
+    }
+  }
+
+  async function handleSendRevisionFromAnnotator({
+    chapter,
+    pages,
+    notesByPage,
+  }) {
+    const chapterId = String(chapter?.id ?? "");
+    const review = pendingReviewByChapter.get(chapterId);
+    if (!chapterId || !review) {
+      toast.error("Không tìm thấy task đang chờ Mangaka yêu cầu sửa.");
+      return;
+    }
+
+    const allNotes = (pages ?? []).flatMap((_, pageIndex) =>
+      notesByPage?.[`${chapterId}-${pageIndex}`] ?? [],
+    );
+    const noteText = allNotes
+      .map((n) => String(n?.text ?? "").trim())
+      .filter(Boolean)
+      .join("\n")
+      || "Mangaka yêu cầu chỉnh sửa — xem vùng đánh dấu trên từng trang.";
+
+    await requestRevision([review], noteText, {
+      getAnnotationsForTask: (task) => {
+        const pageIndex = (pages ?? []).findIndex(
+          (p) => String(p?.id ?? p?._id) === String(task?.pageId),
+        );
+        return pageIndex >= 0
+          ? (notesByPage?.[`${chapterId}-${pageIndex}`] ?? [])
+          : [];
+      },
+    });
+    await updateChapterStatus(chapterId, "assistant");
+    toast.success("Đã gửi yêu cầu sửa kèm vùng đánh dấu cho Assistant.");
+    setRevisionChapterId(null);
+    setTab("chapters");
+    await refreshMangakaTasks();
+    await refreshWorkspace();
+  }
 
   // Chapter vừa duyệt xong — dùng để nhắc gửi Tantou
-  const [lastApprovedChapter, setLastApprovedChapter] = useState(null)
   useEffect(() => {
     if (!lastApprovedChapter) return
     const t = window.setTimeout(() => setLastApprovedChapter(null), 60_000)
     return () => window.clearTimeout(t)
   }, [lastApprovedChapter])
+
+  const pendingReviewChapterIds = useMemo(
+    () => (pendingReviews ?? []).map((r) => r?.chapter?.id).filter(Boolean).join("|"),
+    [pendingReviews],
+  );
+
+  // Luồng pages: refresh pages từ BE khi có chapter chờ duyệt (lấy result_image_url mới).
+  useEffect(() => {
+    if (!pendingReviewChapterIds) return;
+    const ids = pendingReviewChapterIds.split("|").filter(Boolean);
+    let cancelled = false;
+    Promise.all(ids.map((id) => loadChapterPages(id, { force: true })))
+      .then(() => { if (cancelled) void 0 })
+      .catch(() => { if (cancelled) void 0 });
+    return () => { cancelled = true };
+  }, [pendingReviewChapterIds, loadChapterPages]);
 
   const seriesRankings = useMemo(() => {
     const titles = new Set(seriesList.map((s) => s.title));
@@ -541,6 +840,19 @@ export default function Mangaka() {
     [seriesRankings],
   );
 
+  const incompleteSeriesCount = useMemo(
+    () => seriesList.filter((s) => !s.metadataComplete).length,
+    [seriesList],
+  );
+
+  const userInitials = useMemo(() => {
+    const parts = String(mangakaName ?? "MK").trim().split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) {
+      return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+    }
+    return String(mangakaName ?? "MK").slice(0, 2).toUpperCase();
+  }, [mangakaName]);
+
   const ebApprovedMap = useMemo(
     () => readEbDebutApproved(),
     [ebApprovedTick, seriesList],
@@ -549,69 +861,100 @@ export default function Mangaka() {
   const workspaceApi = useMemo(
     () => ({
       createChapter,
+      createChapterWithPages,
       uploadChapterPages,
+      deleteChapterPage,
       loadChapterPages,
       loadPageNotes,
       savePageNote,
+      syncChapterNotes,
       deletePageNote,
       refresh: refreshWorkspace,
     }),
     [
       createChapter,
+      createChapterWithPages,
       uploadChapterPages,
+      deleteChapterPage,
       loadChapterPages,
       loadPageNotes,
       savePageNote,
+      syncChapterNotes,
       deletePageNote,
       refreshWorkspace,
     ],
   );
 
   /**
-   * Flow mới (1 task = 1 chapter): tạo DUY NHẤT 1 task cho cả chapter.
-   * Tất cả ghi chú trên các trang được gộp thành `description` để Assistant nắm ngữ cảnh.
-   * TODO backend: BE cần chấp nhận `chapter_id` (không bắt buộc `page_id`+`region`) để tạo task chapter.
-   * Tạm thời fallback: gửi page_id của trang đầu + region toàn ảnh, BE vẫn nhận như task cũ.
+   * Luồng mới: Gửi chapter cho Assistant.
+   * Bước 1 — POST /chapters/:id/assign { assistant_id } (nếu chưa gán hoặc đổi assistant).
+   * Bước 2 — PATCH /chapters/:id { action: 'submit', assigned_to, revision_notes, revision_annotations }.
+   *   BE tự động tạo Task cho mỗi Page chưa có task (kèm PageNote + region + assigned_to).
+   *   assigned_to trong body là backup — BE có thể đọc từ body hoặc fallback về chapter.assistant_id đã set ở bước 1.
+   *   Đổi status chapter → pending_assistant.
    */
   async function handleSendToAssistant({
     chapter,
     pages,
     assistantId,
+    notesByPage,
   }) {
-    console.log('[SEND-ASSISTANT] start', { chapterId: chapter?.id, pagesCount: pages?.length, assistantId })
-    if (!chapter?.id) return;
+    if (!chapter?.id) return
     if (!pages?.length) {
-      toast.error("Chapter chưa có trang nào — upload ảnh trước.");
-      return;
+      toast.error('Chapter chưa có trang nào — upload ảnh trước.')
+      return
     }
     if (!assistantId) {
-      toast.error("Chọn Assistant trước khi gửi chapter.");
-      return;
+      toast.error('Chọn Assistant trước khi gửi chapter.')
+      return
     }
 
-    const targetAssistantId = String(assistantId);
-    const chapterRow = chapterRows.find((r) => r.id === chapter.id);
-    const currentAssistantId = chapterRow?.assistantId
-      ? String(chapterRow.assistantId)
-      : null;
-    console.log('[SEND-ASSISTANT] ids', { targetAssistantId, currentAssistantId })
+    const targetAssistantId = String(assistantId)
+    const chapterRow = chapterRows.find(r => r.id === chapter.id)
+    const currentAssistantId = chapterRow?.assistantId ? String(chapterRow.assistantId) : null
 
     try {
-      // Gom tất cả note trên các trang thành 1 mô tả duy nhất
-      const allNotes = [];
+      const notesSource = notesByPage ?? annotatorNotes
+
+      // Đồng bộ note lên BE trước khi gom payload (Assistant đọc GET /pages/:id/notes)
+      const syncedNotes = await syncChapterNotes(chapter.id, pages, notesSource)
+
+      // Gom ghi chú để đính kèm revision_notes (string) + revision_annotations (array có toạ độ)
+      const allNotes = []
+      const annotationMap = {}  // pageIndex → array of annotation objects with coords
+
       for (let pageIndex = 0; pageIndex < pages.length; pageIndex += 1) {
-        const page = pages[pageIndex];
-        if (!page?.id) continue;
-        const pageKey = `${chapter.id}-${pageIndex}`;
-        const pageNotes = annotatorNotes[pageKey]?.length
-          ? annotatorNotes[pageKey]
-          : await loadPageNotes(page.id, pageKey);
+        const page = pages[pageIndex]
+        if (!page?.id) continue
+        const pageKey = `${chapter.id}-${pageIndex}`
+        const pageNotes = syncedNotes[pageKey]?.length
+          ? syncedNotes[pageKey]
+          : await loadPageNotes(page.id, pageKey)
+
+        const annotations = []
         for (const note of pageNotes) {
-          allNotes.push({ pageNum: pageIndex + 1, note });
+          const text = String(note.text ?? '').trim()
+          allNotes.push({ pageNum: pageIndex + 1, note, text })
+          // Chỉ ghi annotation nếu note có toạ độ cụ thể (không phải full-canvas)
+          const hasCoords = Number(note.x) || Number(note.y) || Number(note.w) || Number(note.h)
+          if (hasCoords) {
+            annotations.push({
+              text,
+              x: Number(note.x) || 0,
+              y: Number(note.y) || 0,
+              w: Number(note.w) || 0,
+              h: Number(note.h) || 0,
+              taskType: note.taskType ?? 'other',
+              error_type: uiTaskTypeToErrorType(note.taskType),
+            })
+          }
+        }
+        if (annotations.length > 0) {
+          annotationMap[`page_${pageIndex}`] = annotations
         }
       }
 
-      const summary = allNotes.length
+      const revisionNotes = allNotes.length
         ? allNotes
             .map(({ pageNum, note }) => {
               const taskLabel = note.taskType ? `[${note.taskType}] ` : ''
@@ -621,13 +964,13 @@ export default function Mangaka() {
             .join('\n')
         : `Xử lý toàn bộ chapter ${chapter.num} (${pages.length} trang).`
 
-      // Đảm bảo chapter đã gán assistant
+      // Bước 1 — đảm bảo gán assistant
       if (!currentAssistantId || currentAssistantId !== targetAssistantId) {
         try {
-          await assignChapter(chapter.id, targetAssistantId);
+          await assignChapter(chapter.id, targetAssistantId)
         } catch (err) {
-          const status = err?.response?.status;
-          const message = String(err?.response?.data?.message ?? '');
+          const status = err?.response?.status
+          const message = String(err?.response?.data?.message ?? '')
           const alreadyAssigned = status === 400 && /assistant|đã có/i.test(message)
           if (alreadyAssigned) {
             await chaptersService.unassignAssistant(chapter.id).catch(() => null)
@@ -638,36 +981,34 @@ export default function Mangaka() {
         }
       }
 
-      // Tạo DUY NHẤT 1 task cho cả chapter
-      const firstPage = pages.find(p => p?.id) ?? null
-      const dominantTaskType = (() => {
-        const counts = {}
-        for (const { note } of allNotes) {
-          const tt = note?.taskType
-          if (!tt) continue
-          counts[tt] = (counts[tt] ?? 0) + 1
-        }
-        const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1])
-        return sorted[0]?.[0] ?? 'background'
-      })()
-      console.log('[SEND-ASSISTANT] about to create task', { firstPageId: firstPage?.id, workType: dominantTaskType, summaryLength: summary.length })
-      await tasksService.create(
-        uiChapterToTaskCreate({
-          chapterId: chapter.id,
-          pageId: firstPage?.id,
-          assignedTo: targetAssistantId,
-          workType: dominantTaskType,
-          description: summary,
-        }),
-      )
-      console.log('[SEND-ASSISTANT] task created')
+      // Bước 2 — PATCH action:submit (BE gắn PageNote → task.note_ids + xử lý revision_annotations)
+      const submitPayload = {
+        assigned_to: targetAssistantId,
+        revision_notes: revisionNotes,
+        ...(Object.keys(annotationMap).length > 0 ? { revision_annotations: annotationMap } : {}),
+      }
 
+      await chaptersService.update(chapter.id, {
+        action: 'submit',
+        ...submitPayload,
+      })
+
+      // Bước 3 — cập nhật UI
       await updateChapterStatus(chapter.id, 'assistant')
       await refreshMangakaTasks()
       await refreshWorkspace()
 
+      // Ẩn các ô ghi chú của chapter sau khi đã gửi cho Assistant
+      setAnnotatorNotes((prev) => {
+        const next = {}
+        for (const [key, value] of Object.entries(prev)) {
+          if (!key.startsWith(`${chapter.id}-`)) next[key] = value
+        }
+        return next
+      })
+
       toast.success(
-        `Đã gửi chapter ${chapter.num} (${pages.length} trang) cho Assistant — tổng ${allNotes.length} ghi chú.`,
+        `Đã gửi chapter ${chapter.num} (${pages.length} trang) cho Assistant.`,
       )
     } catch (err) {
       console.error('[SEND-ASSISTANT] error', err)
@@ -697,6 +1038,13 @@ export default function Mangaka() {
             : r,
         ),
       );
+      setAnnotatorNotes((prev) => {
+        const next = {};
+        for (const [key, value] of Object.entries(prev)) {
+          if (!key.startsWith(`${chapter.id}-`)) next[key] = value;
+        }
+        return next;
+      });
       toast.success(
         res.message || `Đã gửi Ch. ${chapter.num} sang ${LABEL_TANTOU_EDITOR}.`,
       );
@@ -725,68 +1073,55 @@ export default function Mangaka() {
     });
   }
 
-  async function handleApproveChapter() {
-    if (!pendingReview?.chapter) return;
-    const tasks = pendingReview.task ? [pendingReview.task] : (pendingReview.tasks ?? [])
-    if (!tasks.length) return;
-    try {
-      await approveChapterTasks(tasks);
-      await updateChapterStatus(pendingReview.chapter.id, "done");
-      const approvedChapter = pendingReview.chapter;
-      setLastApprovedChapter(approvedChapter);
-      toast.success(
-        `Đã phê duyệt chapter ${approvedChapter.num} — ${approvedChapter.series}.`,
-      );
-      await refreshMangakaTasks();
-      await refreshWorkspace();
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, "Phê duyệt chapter thất bại."));
-    }
-  }
-
-  async function handleConfirmChapterRevision() {
-    if (!pendingReview?.chapter) return;
-    const tasks = pendingReview.task ? [pendingReview.task] : (pendingReview.tasks ?? [])
-    if (!tasks.length) return;
-    setRevisionBusy(true);
-    try {
-      const note =
-        revisionNote.trim()
-        || "Mangaka yêu cầu chỉnh sửa — xem ghi chú trên từng trang.";
-      await requestRevision(tasks, note);
-      await updateChapterStatus(pendingReview.chapter.id, "assistant");
-      setRevisionOpen(false);
-      setRevisionNote("");
-      toast.success(
-        "Đã trả chapter cho Assistant. Thêm ghi chú trên trang cần sửa rồi bấm Gửi cả chapter.",
-      );
-      openAnnotate(pendingReview.chapter.series, pendingReview.chapter.id);
-      await refreshMangakaTasks();
-      await refreshWorkspace();
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, "Gửi yêu cầu sửa thất bại."));
-    } finally {
-      setRevisionBusy(false);
-    }
-  }
-
   const tantouRevisions = useMemo(
-    () => listTantouSubmissions().filter((s) => s.status === "revision"),
-    [tantouTick],
+    () =>
+      chapterRows
+        .filter((row) => String(row.apiStatus ?? "").toLowerCase() === "te_revision")
+        .map((row) => ({
+          id: row.id,
+          chapterId: row.id,
+          seriesTitle: row.series,
+          chapterNum: row.num,
+          pageLabel: row.title ? String(row.title) : `Chapter ${row.num}`,
+          editorialComment: row.revisionNotes ?? "",
+        })),
+    [chapterRows],
   );
 
+  const unreadTeRevisions = useMemo(() => {
+    void teRevisionSeenTick;
+    return tantouRevisions.filter(
+      (item) => !isTeRevisionSeen(item.chapterId ?? item.id),
+    );
+  }, [tantouRevisions, teRevisionSeenTick]);
+
   useEffect(() => {
-    const onTantou = () => setTantouTick((t) => t + 1);
-    window.addEventListener("mk-tantou-storage", onTantou);
-    return () => window.removeEventListener("mk-tantou-storage", onTantou);
+    if (HERO_IMAGES.length < 2) return undefined;
+    const timer = window.setInterval(() => {
+      setHeroSlide((index) => (index + 1) % HERO_IMAGES.length);
+    }, HERO_SLIDE_MS);
+    return () => window.clearInterval(timer);
   }, []);
 
-  const workflowSteps = useMemo(() => {
-    if (!pipelineSeries) return PIPELINE_DEBUT_STEPS;
-    return pipelineSeries.needsFullDebutPipeline
-      ? PIPELINE_DEBUT_STEPS
-      : PIPELINE_RECURRING_STEPS;
-  }, [pipelineSeries]);
+  useEffect(() => {
+    // Tránh prune khi chưa load xong (tantouRevisions = []) — sẽ xóa sạch localStorage "đã xem".
+    if (workspaceLoading) return;
+    pruneTeRevisionSeen(
+      tantouRevisions.map((item) => item.chapterId ?? item.id),
+    );
+  }, [tantouRevisions, workspaceLoading]);
+
+  useEffect(() => {
+    function bumpSeen() {
+      setTeRevisionSeenTick((t) => t + 1);
+    }
+    window.addEventListener(TE_REVISION_SEEN_EVENT, bumpSeen);
+    window.addEventListener("storage", bumpSeen);
+    return () => {
+      window.removeEventListener(TE_REVISION_SEEN_EVENT, bumpSeen);
+      window.removeEventListener("storage", bumpSeen);
+    };
+  }, []);
 
   useEffect(() => {
     const pending = seriesList
@@ -974,12 +1309,14 @@ export default function Mangaka() {
     if (typeof st.chapterId === "string" && st.chapterId) {
       setAnnotatorActiveChapterId(st.chapterId);
       setAnnotatorPageIndex(0);
+      setRevisionChapterId(st.revision === true ? st.chapterId : null);
     }
   }, [location.state]);
 
   function openAnnotate(seriesTitle, chapterLocalId) {
     setAnnotateSeries(seriesTitle);
     setTab("annotate");
+    setRevisionChapterId(null);
     if (chapterLocalId) {
       setAnnotatorActiveChapterId(chapterLocalId);
       setAnnotatorPageIndex(0);
@@ -992,78 +1329,152 @@ export default function Mangaka() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-background">
+    <div className="ws-page--mangaka flex min-h-screen flex-col bg-background">
       <Header links={NAV_LINKS} onLogout={user ? handleLogout : undefined} />
 
-      <WorkspaceHero
-        className="from-rose-950 to-zinc-950"
-        label="Mangaka Workspace"
-        title={`Xin chào${user?.name ? `, ${user.name.split(" ")[0]}` : ""}`}
-        description={`Tạo hồ sơ giới thiệu & nộp bản thảo lên ${LABEL_EDITOR_BOARD} · đánh dấu vùng giao việc cho Assistant · duyệt bản tổng hợp ngay trên trang.`}
-      >
-        <div className="mt-6 flex flex-wrap gap-3">
-          <Button
-            onClick={openAddSeriesModal}
-            className="bg-white text-zinc-900 hover:bg-zinc-100"
-          >
-            <Plus className="size-4" />
-            Đăng ký series
-          </Button>
-          <Button
-            variant="outline"
-            className="border-white/20 bg-white/5 text-white hover:bg-white/10 hover:text-white"
-            disabled={seriesList.length === 0}
-            onClick={() => seriesList[0] && openAnnotate(seriesList[0].title)}
-          >
-            <Upload className="size-4" />
-            Upload chapter
-          </Button>
-          <Button
-            variant="outline"
-            className="border-white/20 bg-white/5 text-white hover:bg-white/10 hover:text-white"
-            onClick={() => setTab("assistants")}
-          >
-            <UserPlus className="size-4" />
-            Thuê Assistant
-          </Button>
+      <section className="ws-hero--mangaka mk-hero-slideshow relative overflow-hidden border-b border-white/5 text-white">
+        <div className="mk-hero-slides" aria-hidden>
+          {HERO_IMAGES.map((src, index) => (
+            <img
+              key={src}
+              src={src}
+              alt=""
+              className={cn(
+                "mk-hero-slides__img",
+                index === heroSlide && "mk-hero-slides__img--active",
+              )}
+            />
+          ))}
         </div>
-      </WorkspaceHero>
-
-      <main className="page-container flex-1 py-8">
-        {tab !== "annotate" ? (
-          <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {STAT_DEFS.map((def, i) => (
-              <StatCard
-                key={def.label}
-                def={def}
-                value={statValues[i].value}
-                trend={statValues[i].trend}
-              />
-            ))}
+        <div className="mk-hero-slides__veil" aria-hidden />
+        <div className="page-container relative py-10 md:py-14">
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div className="max-w-2xl space-y-3">
+              <Badge
+                variant="secondary"
+                className="bg-white/10 text-white hover:bg-white/15"
+              >
+                Mangaka Workspace
+              </Badge>
+              <h1 className="text-3xl font-bold tracking-tight md:text-4xl">
+                {`Xin chào${user?.name ? `, ${user.name.split(" ")[0]}` : ""}`}
+              </h1>
+              <p className="leading-relaxed text-zinc-300">
+                {`Quản lý series, upload chapter và phối hợp Assistant · ${LABEL_TANTOU_EDITOR} · ${LABEL_EDITOR_BOARD}.`}
+              </p>
+            </div>
+            <div className="hidden items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 backdrop-blur-sm md:flex">
+              <div className="flex size-10 items-center justify-center rounded-lg bg-gradient-to-br from-rose-500 to-rose-700 text-sm font-bold text-white shadow-lg shadow-rose-900/30">
+                {userInitials}
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-white">{mangakaName}</p>
+                <p className="text-xs text-zinc-400">Tác giả · Workspace</p>
+              </div>
+            </div>
           </div>
+        </div>
+      </section>
+
+      <main className="page-container mk-main flex-1 py-8">
+        {tab !== "annotate" ? (
+          <WorkspaceActionBar
+            pendingReviewCount={pendingReviews.length}
+            teReadyCount={teReadyChapters.length}
+            tantouRevisionCount={unreadTeRevisions.length}
+            incompleteSeriesCount={incompleteSeriesCount}
+            onOpenChaptersTab={() => setTab("chapters")}
+            onOpenSeriesTab={() => setTab("series")}
+            onOpenAssistantsTab={() => setTab("assistants")}
+            onOpenRevisionInbox={() => setTeRevisionInboxOpen((open) => !open)}
+          />
         ) : null}
 
-        <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
-          <div>
+        <div
+          className={cn(
+            'mk-layout grid gap-6',
+            tab !== 'annotate' && 'mk-layout--with-sidebar lg:grid-cols-[1fr_300px]',
+          )}
+        >
+          <div className="mk-content min-w-0">
             <Tabs value={tab} onValueChange={setTab}>
-              <TabsList className="mb-5 h-auto flex-wrap">
-                {TAB_ITEMS.map((t) => {
-                  const Icon = t.icon;
-                  return (
-                    <TabsTrigger key={t.id} value={t.id} className="gap-2">
-                      <Icon className="size-4" />
-                      {t.label}
-                    </TabsTrigger>
-                  );
-                })}
-              </TabsList>
+              <div className="mb-5 flex flex-wrap items-center gap-2">
+                <TabsList className="mk-tabs h-auto min-w-0 flex-1 flex-wrap justify-start gap-1 bg-muted/40 p-1">
+                  {TAB_ITEMS.map((t) => {
+                    const Icon = t.icon;
+                    return (
+                      <TabsTrigger
+                        key={t.id}
+                        value={t.id}
+                        className="gap-2 data-[state=active]:shadow-sm"
+                      >
+                        <Icon className="size-4" />
+                        {t.label}
+                        {t.id === "chapters" && pendingReviews.length > 0 ? (
+                          <Badge
+                            variant="secondary"
+                            className="h-5 min-w-5 justify-center px-1.5 text-[10px]"
+                          >
+                            {pendingReviews.length}
+                          </Badge>
+                        ) : null}
+                      </TabsTrigger>
+                    );
+                  })}
+                </TabsList>
+                <DropdownMenu
+                  open={teRevisionInboxOpen}
+                  onOpenChange={setTeRevisionInboxOpen}
+                >
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className={cn(
+                        "h-9 shrink-0 gap-1.5",
+                        unreadTeRevisions.length > 0
+                          && "border-amber-200 bg-amber-50/70 text-amber-950 hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100",
+                        unreadTeRevisions.length > 0
+                          && teRevisionInboxOpen
+                          && "border-amber-300 bg-amber-100 dark:border-amber-500/40 dark:bg-amber-500/15",
+                      )}
+                    >
+                      <Bell className="size-3.5" />
+                      Thông báo chỉnh sửa
+                      {unreadTeRevisions.length > 0 ? (
+                        <Badge
+                          variant="secondary"
+                          className="h-5 min-w-5 justify-center bg-amber-600 px-1.5 text-[10px] text-white hover:bg-amber-600"
+                        >
+                          {unreadTeRevisions.length}
+                        </Badge>
+                      ) : null}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    sideOffset={8}
+                    className="w-[min(calc(100vw-2rem),24rem)] p-3"
+                    onCloseAutoFocus={(e) => e.preventDefault()}
+                  >
+                    <TeRevisionInboxPanel
+                      revisions={unreadTeRevisions}
+                      onClose={() => setTeRevisionInboxOpen(false)}
+                      onMarkRead={(chapterId) => {
+                        markTeRevisionSeen(chapterId);
+                      }}
+                    />
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
 
-              <TabsContent value="series" className="space-y-4">
+              <TabsContent value="series" className="mk-panel space-y-4">
                 <div className="flex flex-wrap items-end justify-between gap-3">
                   <div>
-                    <h2 className="text-xl font-semibold">Series của tôi</h2>
+                    <h2 className="text-xl font-semibold tracking-tight">Series của tôi</h2>
                     <p className="text-sm text-muted-foreground">
-                      Quản lý draft và luồng duyệt
+                      Quản lý hồ sơ từng series
                     </p>
                   </div>
                   <Button
@@ -1077,19 +1488,24 @@ export default function Mangaka() {
                 </div>
 
                 {seriesList.length === 0 ? (
-                  <Card>
-                    <CardContent className="py-12 text-center text-muted-foreground">
-                      Chưa có series nào — bấm "Đăng ký series" để bắt đầu.
-                    </CardContent>
-                  </Card>
+                  <EmptyWorkspaceState
+                    icon={BookOpen}
+                    title="Chưa có series nào"
+                    description="Đăng ký series đầu tiên để bắt đầu upload chapter và gửi cho Assistant."
+                    action={(
+                      <Button onClick={openAddSeriesModal}>
+                        <Plus className="size-4" />
+                        Đăng ký series
+                      </Button>
+                    )}
+                  />
                 ) : (
-                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  <div className="mk-series-grid grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
                     {seriesList.map((s) => (
                       <SeriesCard
                         key={s.id}
                         series={s}
                         ebApproved={!!ebApprovedMap[s.title]}
-                        uploadPct={uploadPctBySeries[s.title] ?? 0}
                         onOpenAnnotate={() => openAnnotate(s.title)}
                         onOpenEdit={() => openEditSeriesModal(s)}
                         onDelete={() => deleteSeriesById(s.id)}
@@ -1100,121 +1516,209 @@ export default function Mangaka() {
                 )}
               </TabsContent>
 
-              <TabsContent value="chapters" className="space-y-4">
-                <div>
-                  <h2 className="text-xl font-semibold">Chapter đã upload</h2>
-                  <p className="text-sm text-muted-foreground">
-                    Bấm tên truyện hoặc chapter để xem trang chi tiết.
-                  </p>
+              <TabsContent value="chapters" className="mk-panel space-y-4">
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                  <div>
+                    <h2 className="text-xl font-semibold tracking-tight">Chapter đã upload</h2>
+                    <p className="text-sm text-muted-foreground">
+                      {chapterRows.length} chapter · {chapterRowsBySeries.length} series
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={seriesList.length === 0}
+                    onClick={() => seriesList[0] && openAnnotate(seriesList[0].title)}
+                  >
+                    <Upload className="size-4" />
+                    Upload mới
+                  </Button>
                 </div>
 
                 {chapterRowsBySeries.length === 0 ? (
-                  <Card>
-                    <CardContent className="py-12 text-center text-muted-foreground">
-                      Chưa có chapter — upload ở tab Upload & Ghi chú.
-                    </CardContent>
-                  </Card>
+                  <EmptyWorkspaceState
+                    icon={FileText}
+                    title="Chưa có chapter"
+                    description="Vào tab Upload & ghi chú để tạo chapter và tải ảnh trang lên."
+                    action={(
+                      <Button
+                        disabled={seriesList.length === 0}
+                        onClick={() => setTab("annotate")}
+                      >
+                        <PenSquare className="size-4" />
+                        Mở Upload & ghi chú
+                      </Button>
+                    )}
+                  />
                 ) : (
-                  <div className="space-y-3">
-                    {chapterRowsBySeries.map(
-                      ({ series, chapters: groupChapters }) => {
-                        const seriesMeta = seriesList.find(
-                          (x) => x.title === series,
-                        );
-                        const slug =
-                          seriesMeta?.slug ?? slugifySeriesTitle(series);
-                        return (
-                          <Card key={series} className="overflow-hidden p-0">
-                            <Link
-                              to={`/mangaka/series/${slug}`}
-                              className="flex items-center gap-2 border-b bg-muted/30 px-5 py-3 transition-colors hover:bg-muted/50"
+                  <div className="mk-chapter-registry space-y-8">
+                    {chapterRowsBySeries.map(({ series, chapters: groupChapters }) => {
+                      const seriesMeta = seriesList.find(x => x.title === series);
+                      const slug = seriesMeta?.slug ?? slugifySeriesTitle(series);
+                      const color = seriesMeta?.color ?? '#6366f1';
+                      return (
+                        <div
+                          key={series}
+                          className="mk-chapter-registry__series overflow-hidden rounded-xl border bg-card shadow-sm"
+                        >
+                          <Link
+                            to={`/mangaka/series/${slug}`}
+                            className="mk-chapter-registry__series-head group flex items-center gap-3 px-4 py-3.5 transition-colors hover:bg-muted/40"
+                          >
+                            <span
+                              className="flex size-10 shrink-0 items-center justify-center rounded-xl text-lg font-extrabold text-white shadow-sm"
+                              style={{ background: color }}
                             >
-                              <span
-                                className="size-2.5 shrink-0 rounded-full"
-                                style={{
-                                  background: seriesMeta?.color ?? "#999",
-                                }}
-                              />
-                              <strong className="text-sm">{series}</strong>
-                              {seriesMeta?.needsFullDebutPipeline ? (
-                                <Sparkles className="size-3.5 text-amber-500" />
-                              ) : null}
-                              <span className="ml-auto text-xs text-muted-foreground">
+                              {(series[0] || '?').toUpperCase()}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <p className="font-semibold group-hover:underline">{series}</p>
+                              <p className="text-xs text-muted-foreground">
                                 {groupChapters.length} chapter
-                              </span>
-                              <ChevronRight className="size-3.5 text-muted-foreground" />
-                            </Link>
-                            <div className="divide-y">
-                              {groupChapters.map((c) => {
-                                const annot = resolveAnnotatorChapter(
-                                  c,
-                                  annotatorChapters,
-                                );
-                                const thumbUrl = annot?.pages?.find(
-                                  (p) => p?.url,
-                                )?.url;
-                                const statusBadge =
-                                  STATUS_BADGE[c.status] ?? STATUS_BADGE.draft;
-                                return (
-                                  <Fragment key={c.id}>
+                                {seriesMeta?.needsFullDebutPipeline ? (
+                                  <span className="ml-1.5 inline-flex items-center gap-0.5 text-amber-600">
+                                    <Sparkles className="size-2.5" /> Lần đầu
+                                  </span>
+                                ) : null}
+                              </p>
+                            </div>
+                            <span className="text-xs text-muted-foreground transition-colors group-hover:text-foreground">
+                              Xem series
+                              <ChevronRight className="ml-0.5 inline size-3.5" />
+                            </span>
+                          </Link>
+
+                          <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
+                            {groupChapters.map((c) => {
+                              const annot = resolveAnnotatorChapter(c, annotatorChapters);
+                              const review = pendingReviewByChapter.get(String(c.id));
+                              const pageCompare = chapterPagesToCompareUrls(annot?.pages ?? []);
+                              const resultUrls = pageCompare.results.filter(Boolean);
+                              const hasSubmittedImages = Boolean(review && pageCompare.resultCount > 0);
+                              const firstResultUrl = hasSubmittedImages ? resultUrls[0] : null;
+                              const originalUrl = annot?.pages?.find(p => p?.url)?.url;
+                              // Đã có ảnh assistant → hiện ảnh kết quả làm thumbnail, đánh dấu "đã chỉnh"
+                              const thumbUrl = hasSubmittedImages ? firstResultUrl : originalUrl;
+                              const statusBadge = hasSubmittedImages
+                                ? { label: 'Đã gửi ảnh', className: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400' }
+                                : (STATUS_BADGE[c.status] ?? STATUS_BADGE.draft);
+                              const canSendTe = canMangakaSendToTe(c.apiStatus);
+                              return (
+                                <div
+                                  key={c.id}
+                                  className="group/card relative flex flex-col overflow-hidden rounded-lg border bg-background transition-all hover:-translate-y-0.5 hover:shadow-md"
+                                >
                                   <Link
                                     to={`/mangaka/series/${slug}/chapter/${c.id}`}
-                                    className="flex items-center gap-3 px-5 py-3 text-sm transition-colors hover:bg-muted/30"
+                                    className="flex flex-1 flex-col"
                                   >
-                                    {thumbUrl ? (
-                                      <span className="manga-page manga-page--thumb-sm shrink-0 overflow-hidden rounded">
+                                    <div className="relative aspect-[4/3] w-full overflow-hidden bg-muted">
+                                      {thumbUrl ? (
                                         <img
                                           src={thumbUrl}
                                           alt=""
-                                          className="manga-page__media"
+                                          className="size-full object-cover transition-transform duration-300 group-hover/card:scale-105"
                                         />
-                                      </span>
-                                    ) : (
-                                      <span className="flex size-[52px] shrink-0 items-center justify-center rounded bg-muted text-xs text-muted-foreground">
-                                        Ch.{c.num}
-                                      </span>
-                                    )}
-                                    <span className="font-medium">
-                                      Ch. {c.num}
-                                    </span>
-                                    <Badge
-                                      variant="outline"
-                                      className="text-[10px]"
-                                    >
-                                      {c.type}
-                                    </Badge>
-                                    <span className="text-xs text-muted-foreground">
-                                      {c.pages} trang
-                                    </span>
-                                    <Badge
-                                      className={statusBadge.className}
-                                      variant="secondary"
-                                    >
-                                      {statusBadge.label}
-                                    </Badge>
-                                    <span className="ml-auto text-xs text-muted-foreground">
-                                      {c.date}
-                                    </span>
-                                    <ChevronRight className="size-3.5 text-muted-foreground" />
+                                      ) : (
+                                        <div className="flex size-full items-center justify-center text-muted-foreground">
+                                          <BookOpen className="size-8 opacity-30" />
+                                        </div>
+                                      )}
+                                      <div className="absolute inset-x-0 top-0 flex items-start justify-between gap-1 p-2">
+                                        {hasSubmittedImages ? (
+                                          <Badge
+                                            variant="secondary"
+                                            className="bg-black/65 text-[10px] text-white hover:bg-black/65"
+                                          >
+                                            Assistant · {resultUrls.length}
+                                          </Badge>
+                                        ) : (
+                                          <span />
+                                        )}
+                                        <Badge className={cn("shadow-sm", statusBadge.className)} variant="secondary">
+                                          {statusBadge.label}
+                                        </Badge>
+                                      </div>
+                                    </div>
+
+                                    <div className="flex flex-1 flex-col gap-1 p-3">
+                                      <div className="flex items-start justify-between gap-2">
+                                        <p className="text-sm font-semibold leading-tight">
+                                          Ch. {c.num}
+                                          {c.title ? (
+                                            <span className="ml-1 font-normal text-muted-foreground">
+                                              · {c.title}
+                                            </span>
+                                          ) : null}
+                                        </p>
+                                        <Badge variant="outline" className="shrink-0 text-[10px]">
+                                          {c.type}
+                                        </Badge>
+                                      </div>
+                                      <p className="text-xs text-muted-foreground">
+                                        {c.pages} trang
+                                        {c.assistantName ? ` · ${c.assistantName}` : ""}
+                                      </p>
+                                      <p className="mt-auto text-[11px] text-muted-foreground">
+                                        {c.date}
+                                      </p>
+                                    </div>
                                   </Link>
-                                  <ChapterPipeline status={c.status} className="px-5 pb-3 pt-1" />
-                                  </Fragment>
-                                );
-                              })}
-                            </div>
-                          </Card>
-                        );
-                      },
-                    )}
+
+                                  {/* Hành động cho chapter chờ Mangaka duyệt */}
+                                  {review ? (
+                                    <div className="flex gap-2 border-t bg-muted/30 px-3 py-2">
+                                      <Button
+                                        size="xs"
+                                        variant="default"
+                                        className="flex-1"
+                                        asChild
+                                      >
+                                        <Link to={`/mangaka/review/chapter/${c.id}`}>
+                                          <ClipboardCheck className="size-3" />
+                                          Xem & duyệt
+                                        </Link>
+                                      </Button>
+                                      <Button
+                                        size="xs"
+                                        variant="outline"
+                                        className="flex-1"
+                                        onClick={() => openCardRevision(c, review)}
+                                      >
+                                        <Send className="size-3" />
+                                        Gửi lại
+                                      </Button>
+                                    </div>
+                                  ) : null}
+                                  {canSendTe ? (
+                                    <div className="border-t bg-sky-50/40 px-3 py-2 dark:bg-sky-500/5">
+                                      <Button
+                                        size="xs"
+                                        variant="secondary"
+                                        className="w-full"
+                                        onClick={() => openTeSelector(c)}
+                                      >
+                                        <Users className="size-3" />
+                                        Gửi cho {LABEL_TANTOU_EDITOR}
+                                      </Button>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </TabsContent>
 
-              <TabsContent value="assistants">
+              <TabsContent value="assistants" className="mk-panel">
                 <MangakaAssistants />
               </TabsContent>
 
-              <TabsContent value="annotate">
+              <TabsContent value="annotate" className="mk-panel">
                 <ChapterAnnotator
                   selectedSeriesTitle={annotateSeries}
                   onSelectedSeriesTitleChange={setAnnotateSeries}
@@ -1225,7 +1729,6 @@ export default function Mangaka() {
                   }))}
                   chapterNum={annotatorChapterNum}
                   onChapterNumChange={setAnnotatorChapterNum}
-                  chapterNumHint={annotateChapterHint}
                   chapters={annotatorChapters}
                   setChapters={setAnnotatorChapters}
                   activeChapterId={annotatorActiveChapterId}
@@ -1238,259 +1741,125 @@ export default function Mangaka() {
                   onOpenAssistantsTab={() => setTab("assistants")}
                   onUploadProgress={handleUploadProgress}
                   onSendToAssistant={handleSendToAssistant}
-                  onSendToTantou={handleSendToTantou}
+                  onSendRevision={handleSendRevisionFromAnnotator}
                   workspaceApi={workspaceApi}
+                  pendingReviewCount={pendingReviews.length}
+                  revisionMode={
+                    Boolean(revisionChapterId)
+                    && String(revisionChapterId) === String(annotatorActiveChapterId)
+                  }
                 />
               </TabsContent>
             </Tabs>
           </div>
 
-          <aside className="space-y-4">
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Workflow className="size-4 text-primary" />
-                  Quy trình làm việc
-                </CardTitle>
-                <CardDescription>
-                  Theo series{" "}
-                  <strong className="text-foreground">
-                    {pipelineSeries?.title ?? "—"}
-                  </strong>
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <Badge
-                  className={
-                    pipelineSeries?.needsFullDebutPipeline
-                      ? "bg-amber-100 text-amber-700 hover:bg-amber-100 dark:bg-amber-500/15 dark:text-amber-400"
-                      : "bg-emerald-100 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400"
-                  }
-                  variant="secondary"
-                >
-                  {pipelineSeries?.needsFullDebutPipeline
-                    ? `✦ Lần đầu · có ${LABEL_EDITOR_BOARD}`
-                    : `Lần 2+ · chỉ ${LABEL_TANTOU_EDITOR}`}
-                </Badge>
-
-                {pipelineSeries?.needsFullDebutPipeline &&
-                pipelineSeries.title &&
-                !ebApprovedMap[pipelineSeries.title] ? (
-                  <p className="text-xs text-muted-foreground">
-                    Chờ {LABEL_EDITOR_BOARD} duyệt vòng đầu —{" "}
-                    <Link
-                      to={PATH_EDITOR_BOARD}
-                      className="font-medium text-primary hover:underline"
-                    >
-                      mở trang {LABEL_EDITOR_BOARD}
-                    </Link>
-                  </p>
-                ) : null}
-
-                <ol className="relative space-y-3 border-l border-muted pl-5">
-                  {workflowSteps.map((w, i) => {
-                    const isActive = i === 0;
-                    return (
-                      <li key={w.step} className="relative">
-                        <span
-                          className={cn(
-                            "absolute -left-[26px] flex size-5 items-center justify-center rounded-full text-[10px] font-bold ring-2 ring-card",
-                            isActive
-                              ? "bg-primary text-primary-foreground"
-                              : "bg-muted text-muted-foreground",
-                          )}
-                        >
-                          {w.step}
-                        </span>
-                        <p className="text-sm font-medium">{w.title}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {w.desc}
-                        </p>
-                      </li>
-                    );
-                  })}
-                </ol>
-              </CardContent>
-            </Card>
-
-            {pendingCompositeReview ? (
-              <Card className="border-primary/30 shadow-md">
+          {tab !== "annotate" ? (
+          <aside className="mk-sidebar space-y-4">
+            {(lastApprovedChapter
+              || teReadyChapters.length > 0
+              || tantouRevisions.length > 0
+              || pendingReviews.length > 0) ? (
+              <Card className="mk-sidebar-card border-primary/15 shadow-sm">
                 <CardHeader className="pb-3">
                   <CardTitle className="flex items-center gap-2 text-base">
-                    <ClipboardCheck className="size-4 text-primary" />
-                    Bản tổng hợp từ Assistant
+                    <ListChecks className="size-4 text-primary" />
+                    Việc tiếp theo
                   </CardTitle>
-                  <CardDescription>
-                    <strong className="text-foreground">
-                      {pendingCompositeReview.series}
-                    </strong>{" "}
-                    · Ch. {pendingCompositeReview.num}
-                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  <Badge
-                    className={STATUS_BADGE.review.className}
-                    variant="secondary"
-                  >
-                    Chờ duyệt
-                  </Badge>
-
-                  <div className="overflow-hidden rounded-lg border bg-muted">
-                    {pendingResultUrls.length > 0 ? (
-                      <ImageCompareGrid
-                        originals={pendingOriginalUrls}
-                        results={pendingResultUrls}
-                      />
-                    ) : (
-                      <div className="flex flex-col items-center justify-center gap-1 p-6 text-center text-xs text-muted-foreground">
-                        <ImageIcon className="size-6 opacity-40" />
-                        <span>
-                          {tasksLoading
-                            ? "Đang tải chapter từ Assistant..."
-                            : "Chờ Assistant nộp đủ ảnh các trang"}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-
-                  {pendingSubmittedTasks.length > 0 ? (
-                    <p className="text-xs text-muted-foreground">
-                      {pendingResultUrls.length} trang kết quả · 1 task = 1 chapter
-                      {pendingChapterTask?.revisionNote
-                        ? ` · yêu cầu sửa trước: "${pendingChapterTask.revisionNote}"`
-                        : ''}
-                    </p>
-                  ) : null}
-
-                  {pendingChapterTask?.revisionHistory?.length ? (
-                    <div className="rounded-lg border border-amber-200/70 bg-amber-50/40 p-3 text-xs dark:border-amber-500/20 dark:bg-amber-500/5">
-                      <p className="mb-1.5 font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-400">
-                        Lịch sử yêu cầu sửa · {pendingChapterTask.revisionHistory.length} lần
+                  {pendingReviews.length > 0 ? (
+                    <div className="flex items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2.5">
+                      <p className="text-sm">
+                        <strong>{pendingReviews.length}</strong> chapter chờ duyệt Assistant
                       </p>
-                      <ol className="space-y-1.5">
-                        {pendingChapterTask.revisionHistory.map((h, i) => (
-                          <li key={i} className="flex items-start gap-2 text-foreground/80">
-                            <span className="mt-0.5 size-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden />
-                            <div className="min-w-0 flex-1">
-                              <p className="break-words">{h.note || '(không có ghi chú)'}</p>
-                              {h.at ? (
-                                <p className="text-[10px] text-muted-foreground">
-                                  {new Date(h.at).toLocaleString('vi-VN')}
-                                </p>
-                              ) : null}
-                            </div>
-                          </li>
-                        ))}
-                      </ol>
+                      <Button size="xs" asChild>
+                        <Link to="/mangaka/review">Duyệt</Link>
+                      </Button>
                     </div>
                   ) : null}
 
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      className="flex-1"
-                      onClick={() => void handleApproveChapter()}
-                    >
-                      <CheckCircle2 className="size-3.5" />
-                      Phê duyệt chapter
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="flex-1"
-                      onClick={() => setRevisionOpen(true)}
-                    >
-                      Yêu cầu sửa
-                    </Button>
-                  </div>
-
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="w-full"
-                    disabled={seriesList.length === 0}
-                    onClick={() => openAnnotate(pendingCompositeReview.series)}
-                  >
-                    Mở trên trang
-                    <ArrowRight className="size-3.5" />
-                  </Button>
-                </CardContent>
-              </Card>
-            ) : null}
-
-            {lastApprovedChapter ? (
-              <Card className="border-emerald-200 bg-emerald-50/50 shadow-sm dark:border-emerald-500/30 dark:bg-emerald-500/5">
-                <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
-                  <div className="min-w-0 space-y-0.5">
-                    <p className="flex items-center gap-1.5 text-sm font-semibold text-emerald-700 dark:text-emerald-400">
-                      <CheckCircle2 className="size-4" />
-                      Đã duyệt chapter {lastApprovedChapter.num} — {lastApprovedChapter.series}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Gửi sang {LABEL_TANTOU_EDITOR} để hoàn tất pipeline.
-                    </p>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setLastApprovedChapter(null)}
-                    >
-                      Để sau
-                    </Button>
-                    <Button
-                      size="sm"
-                      onClick={() => {
-                        handleSendToTantou({
-                          chapter: lastApprovedChapter,
-                          pageIndex: 0,
-                        })
-                        setLastApprovedChapter(null)
-                      }}
-                    >
-                      <Send className="size-3.5" />
-                      Gửi {LABEL_TANTOU_EDITOR} ngay
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ) : null}
-
-            {tantouRevisions.length > 0 ? (
-              <Card className="border-amber-200 bg-amber-50/50 dark:border-amber-500/30 dark:bg-amber-500/5">
-                <CardHeader className="pb-3">
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <ListChecks className="size-4 text-amber-600" />
-                    Nhận xét từ {LABEL_TANTOU_EDITOR}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {tantouRevisions.slice(0, 3).map((s) => (
-                    <div key={s.id} className="rounded-lg border bg-card p-3">
-                      <p className="text-sm font-semibold">{s.seriesTitle}</p>
-                      <p className="text-xs text-muted-foreground">
-                        Ch. {s.chapterNum} · {s.pageLabel}
+                  {lastApprovedChapter ? (
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3 dark:border-emerald-500/30 dark:bg-emerald-500/5">
+                      <p className="flex items-center gap-1.5 text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+                        <CheckCircle2 className="size-4 shrink-0" />
+                        Đã duyệt Ch. {lastApprovedChapter.num}
                       </p>
-                      {s.editorialComment ? (
-                        <p className="mt-1.5 line-clamp-3 text-xs">
-                          {s.editorialComment}
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {lastApprovedChapter.series}
+                      </p>
+                      <div className="mt-2 flex gap-2">
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          onClick={() => setLastApprovedChapter(null)}
+                        >
+                          Để sau
+                        </Button>
+                        <Button
+                          size="xs"
+                          onClick={() => openTeSelector(lastApprovedChapter)}
+                        >
+                          Gửi {LABEL_TANTOU_EDITOR}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {teReadyChapters.slice(0, 3).map(({ chapter, submission }) => (
+                    <div
+                      key={chapter.id}
+                      className="flex items-center justify-between gap-2 rounded-lg border bg-card px-3 py-2"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">
+                          {chapter.series} · Ch. {chapter.num}
                         </p>
-                      ) : null}
-                      <Link
-                        to={PATH_TANTOU_EDITOR}
-                        className="mt-2 inline-flex items-center text-xs font-medium text-primary hover:underline"
+                        <p className="text-[10px] text-muted-foreground">
+                          Sẵn sàng gửi {LABEL_TANTOU_EDITOR}
+                        </p>
+                      </div>
+                      <Button
+                        size="xs"
+                        variant="secondary"
+                        onClick={() =>
+                          openTeSelector({
+                            ...chapter,
+                            apiStatus: submission?.status ?? chapter.apiStatus,
+                            te_id: submission?.te_id,
+                          })
+                        }
                       >
-                        Xem chi tiết
-                        <ChevronRight className="size-3" />
-                      </Link>
+                        Gửi
+                      </Button>
                     </div>
                   ))}
+
+                  {tantouRevisions.slice(0, 2).map((s) => {
+                    const revisionPath = getMangakaTeRevisionPath(s.chapterId ?? s.id);
+                    return (
+                      <div key={s.id} className="rounded-lg border bg-card p-3">
+                        <p className="text-sm font-medium">{s.seriesTitle}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Ch. {s.chapterNum} · nhận xét {LABEL_TANTOU_EDITOR}
+                        </p>
+                        {revisionPath ? (
+                          <Link
+                            to={revisionPath}
+                            className="mt-2 inline-flex items-center text-xs font-medium text-primary hover:underline"
+                          >
+                            Xem chi tiết
+                            <ChevronRight className="size-3" />
+                          </Link>
+                        ) : null}
+                      </div>
+                    );
+                  })}
                 </CardContent>
               </Card>
             ) : null}
 
             {tab !== "annotate" && seriesRankings.length > 0 ? (
-              <Card>
+              <Card className="mk-sidebar-card shadow-sm">
                 <CardHeader className="pb-3">
                   <CardTitle className="flex items-center gap-2 text-base">
                     <TrendingUp className="size-4 text-emerald-600" />
@@ -1541,7 +1910,7 @@ export default function Mangaka() {
             ) : null}
 
             {tab !== "annotate" ? (
-              <Card className="border-primary/20 bg-primary/5">
+              <Card className="mk-sidebar-card mk-sidebar-card--tip border-primary/20 shadow-sm">
                 <CardHeader className="pb-2">
                   <CardTitle className="flex items-center gap-2 text-base">
                     <Lightbulb className="size-4 text-primary" />
@@ -1569,40 +1938,147 @@ export default function Mangaka() {
               </Card>
             ) : null}
           </aside>
+          ) : null}
         </div>
       </main>
 
       <Footer />
 
-      <Dialog open={revisionOpen} onOpenChange={setRevisionOpen}>
+      <Dialog open={Boolean(cardRevision)} onOpenChange={(o) => { if (!o) closeCardRevision() }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Yêu cầu sửa chapter</DialogTitle>
+            <DialogTitle>
+              Gửi lại cho Assistant
+              {cardRevision?.row ? (
+                <span className="ml-1 font-normal text-muted-foreground">
+                  · Ch. {cardRevision.row.num} — {cardRevision.row.series}
+                </span>
+              ) : null}
+            </DialogTitle>
             <DialogDescription>
-              Ghi chú chung (tuỳ chọn), sau đó thêm ghi chú trên từng trang chưa đạt
-              rồi <strong>gửi lại cả chapter</strong> cho Assistant.
+              Mô tả lỗi sai để Assistant chỉnh lại ảnh. Ảnh gốc và ghi chú trên từng trang sẽ được giữ nguyên.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            <Label htmlFor="revision-note">Ghi chú cho Assistant</Label>
+            <Label htmlFor="card-revision-note">Ghi chú lỗi</Label>
             <Textarea
-              id="revision-note"
+              id="card-revision-note"
               rows={4}
-              placeholder="VD: Trang 3–5 cần tô bóng lại, trang 7 màu nền chưa khớp..."
-              value={revisionNote}
-              onChange={(e) => setRevisionNote(e.target.value)}
+              placeholder="VD: Trang 3–5 tô bóng chưa đều, trang 7 màu nền lệch..."
+              value={cardRevision?.note ?? ""}
+              onChange={(e) =>
+                setCardRevision((s) => (s ? { ...s, note: e.target.value } : s))
+              }
             />
+            <p className="text-[10px] text-muted-foreground">
+              Bỏ trống sẽ dùng ghi chú mặc định.
+            </p>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setRevisionOpen(false)}>
+            <Button variant="outline" onClick={closeCardRevision} disabled={cardRevision?.busy}>
               Huỷ
             </Button>
             <Button
-              disabled={revisionBusy}
-              onClick={() => void handleConfirmChapterRevision()}
+              disabled={cardRevision?.busy}
+              onClick={() => void handleCardSendBack()}
             >
-              {revisionBusy ? "Đang gửi..." : "Trả chapter & mở ghi chú"}
+              <Send className="size-3.5" />
+              {cardRevision?.busy ? "Đang gửi..." : "Gửi lại cho Assistant"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* TE Selector Dialog — luồng mới */}
+      <Dialog open={teSelectorOpen} onOpenChange={setTeSelectorOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Users className="size-4" />
+              Chọn {LABEL_TANTOU_EDITOR}
+            </DialogTitle>
+            <DialogDescription>
+              {teTargetChapter
+                ? `Ch. ${teTargetChapter.num} — ${teTargetChapter.series}. Chọn TE (tuỳ chọn) rồi gán hoặc gửi. Không chọn TE → gửi cho tất cả TE active.`
+                : "Chọn TE để gán cho chapter này."}
+            </DialogDescription>
+          </DialogHeader>
+
+          {teLoading ? (
+            <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
+              <span>Đang tải danh sách TE...</span>
+            </div>
+          ) : teUsers.length === 0 ? (
+            <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+              <Users className="mx-auto mb-2 size-8 opacity-30" />
+              <p>Không tìm thấy TE nào đang active.</p>
+              <p className="mt-1 text-xs">
+                Vui lòng liên hệ admin để thêm TE vào hệ thống.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-[300px] overflow-y-auto">
+              {teUsers.map((te) => (
+                <button
+                  key={te._id}
+                  className={cn(
+                    "w-full flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors",
+                    "hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+                    selectedTeId === te._id
+                      ? "border-primary bg-primary/5"
+                      : "border-transparent bg-muted/30",
+                  )}
+                  onClick={() => setSelectedTeId(te._id)}
+                >
+                  <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold">
+                    {(te.full_name || te.username || 'TE')[0].toUpperCase()}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium">
+                      {te.full_name || te.username || 'TE'}
+                    </p>
+                    {te.email ? (
+                      <p className="truncate text-xs text-muted-foreground">{te.email}</p>
+                    ) : null}
+                  </div>
+                  {selectedTeId === te._id ? (
+                    <CheckCircle2 className="size-4 shrink-0 text-primary" />
+                  ) : null}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-between">
+            <Button
+              variant="outline"
+              onClick={() => setTeSelectorOpen(false)}
+              disabled={teAssigning || teSending}
+            >
+              Huỷ
+            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="secondary"
+                disabled={!selectedTeId || teAssigning || teSending || teLoading}
+                onClick={() => void handleAssignTe(selectedTeId)}
+              >
+                {teAssigning ? "Đang gán..." : "Gán TE"}
+              </Button>
+              <Button
+                variant="outline"
+                disabled={teSending || teLoading}
+                onClick={() => void handleSubmitToTe(null)}
+              >
+                {teSending ? "Đang gửi..." : "Gửi tất cả TE"}
+              </Button>
+              <Button
+                disabled={teSending || teLoading}
+                onClick={() => void handleSubmitToTe(selectedTeId || undefined)}
+              >
+                {teSending ? "Đang gửi..." : selectedTeId ? "Gửi cho TE đã chọn" : "Gửi cho TE"}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

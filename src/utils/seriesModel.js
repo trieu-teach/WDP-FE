@@ -2,9 +2,24 @@
 
 import { LABEL_EDITOR_BOARD, LABEL_TANTOU_EDITOR } from '../constants/roleTerminology.js'
 
+// 45 thể loại — khớp với BE (models/Series.js GENRES constant)
 export const SERIES_GENRES = [
-  'Hành động', 'Phiêu lưu', 'Hài hước', 'Drama', 'Lãng mạn', 'Giả tưởng',
-  'Kinh dị', 'Thể thao', 'Đời thường', 'Huyền ảo', 'Võ thuật', 'Isekai',
+  // Demographics / Format
+  'Anime', 'Drama', 'Josei', 'Manhwa', 'One Shot', 'Shounen', 'Webtoons', 'Shoujo',
+  // Content themes
+  'Harem', 'Ecchi', 'Mature', 'Slice of Life', 'Isekai', 'Manga', 'Manhua',
+  // Genre (action/battle)
+  'Hành Động', 'Võ Thuật', 'Huyền Bí', 'Thể Thao', 'Học Đường', 'Lịch Sử',
+  // Genre (other)
+  'Phiêu Lưu', 'Hài Hước', 'Lãng Mạn', 'Kinh Dị', 'Siêu Nhiên', 'Bi Kịch',
+  // Sub-genres
+  'Trùng Sinh', 'Game', 'Viễn Tưởng', 'Khoa Học', 'Truyện Màu',
+  // Sensitive
+  'Người Lớn', 'Boylove', 'Hầm Ngục', 'Săn Bắn',
+  // Doujinshi & edge
+  'Ngôn Từ Nhạy Cảm', 'Doujinshi', 'Bạo Lực', 'Ngôn Tình',
+  // Special
+  'Nữ Cường', 'Gender Bender', 'Murim', 'Leo Tháp', 'Nấu Ăn',
 ]
 
 export const SERIES_DEMOGRAPHICS = [
@@ -31,9 +46,10 @@ export const SERIES_LANGUAGES = [
 ]
 
 export const SERIES_CONTENT_RATINGS = [
-  { value: 'all', label: 'Mọi lứa tuổi' },
-  { value: 'teen', label: '13+' },
-  { value: 'mature', label: '16+ / có cảnh báo' },
+  { value: 'All ages', label: 'Mọi lứa tuổi' },
+  { value: 'Teens 13+', label: 'Tuổi teen' },
+  { value: 'Mature 17+', label: 'Người lớn' },
+  { value: 'Adults Only 18+', label: 'Chỉ 18+' },
 ]
 
 export const SERIES_TAGS = [
@@ -44,12 +60,37 @@ export const SERIES_TAGS = [
   'Ecchi', 'Harem', 'Gore', 'Post-Apocalyptic', 'Cyberpunk', 'Dark Fantasy',
 ]
 
+/**
+ * Trạng thái phát hành (BE: Series.publication_status).
+ * null = chưa xác định (series mới, chưa phát hành).
+ * Flow: null → EB duyệt → upcoming → job → ongoing → TE: hiatus/completed/dropped
+ */
 export const SERIES_PUBLICATION_STATUSES = [
-  { value: 'preparing', label: 'Chuẩn bị phát hành' },
-  { value: 'ongoing', label: 'Đang ra' },
-  { value: 'hiatus', label: 'Tạm dừng' },
+  { value: 'upcoming', label: 'Chuẩn bị phát hành' },
+  { value: 'ongoing', label: 'Đang phát hành' },
+  { value: 'hiatus', label: 'Tạm ngưng' },
   { value: 'completed', label: 'Hoàn thành' },
+  { value: 'dropped', label: 'Bị drop' },
 ]
+
+/** Transition TE được phép (khớp PATCH /te-reviews/series/:id/publication-status). */
+export const TE_PUBLICATION_TRANSITIONS = {
+  ongoing: ['hiatus', 'completed', 'dropped'],
+  hiatus: ['ongoing'],
+  dropped: ['ongoing'],
+  // completed, upcoming: read-only
+}
+
+const PUB_LABEL = Object.fromEntries(SERIES_PUBLICATION_STATUSES.map((p) => [p.value, p.label]))
+
+export function getPublicationStatusLabel(value) {
+  if (value == null || value === '') return 'Chưa xác định'
+  return PUB_LABEL[value] ?? String(value)
+}
+
+export function getAllowedTePublicationStatuses(current) {
+  return TE_PUBLICATION_TRANSITIONS[current] ?? []
+}
 
 export const SERIES_PUBLISH_TYPES = [
   {
@@ -70,7 +111,6 @@ const DEMOGRAPHIC_LABEL = Object.fromEntries(SERIES_DEMOGRAPHICS.map((d) => [d.v
 const FORMAT_LABEL = Object.fromEntries(SERIES_FORMATS.map((f) => [f.value, f.label]))
 const LANGUAGE_LABEL = Object.fromEntries(SERIES_LANGUAGES.map((l) => [l.value, l.label]))
 const RATING_LABEL = Object.fromEntries(SERIES_CONTENT_RATINGS.map((r) => [r.value, r.label]))
-const PUB_LABEL = Object.fromEntries(SERIES_PUBLICATION_STATUSES.map((p) => [p.value, p.label]))
 
 export function slugifySeriesTitle(title) {
   const base = String(title)
@@ -88,11 +128,11 @@ export function createEmptySeriesForm(authorName = '') {
   return {
     name: '',
     description: '',
-    genre: '',
+    genre: [],
     target_audience: '',
-    category: '',
     tags: [],
     age_rating: 'All ages',
+    cover: null,
   }
 }
 
@@ -116,7 +156,7 @@ export function normalizeSeries(raw, index = 0) {
     format: s.format ?? 'manga',
     language: s.language ?? 'vi',
     contentRating: s.contentRating ?? 'all',
-    publicationStatus: s.publicationStatus ?? 'ongoing',
+    publicationStatus: s.publicationStatus ?? null,
     publishType,
     needsFullDebutPipeline,
     authorName: String(s.authorName ?? '').trim() || 'Mangaka',
@@ -147,11 +187,11 @@ export function normalizeSeriesList(list) {
 }
 
 export function buildWorkflowStatusLabel(s) {
-  const pub = PUB_LABEL[s.publicationStatus] ?? 'Chuẩn bị'
+  const pub = getPublicationStatusLabel(s.publicationStatus)
   if (s.status === 'assistant') return 'Đang vẽ ngoại cảnh'
   if (s.status === 'review') return 'Chờ bạn duyệt'
   if (s.status === 'draft') {
-    if (s.publicationStatus === 'preparing') return `Bản nháp · ${pub}`
+    if (s.publicationStatus == null) return `Bản nháp · ${pub}`
     return 'Bản nháp'
   }
   return pub
@@ -174,7 +214,7 @@ export function formatSeriesCardLine(series) {
 }
 
 export function formatSeriesRating(series) {
-  return RATING_LABEL[series.contentRating] ?? series.contentRating
+  return RATING_LABEL[series.age_rating] ?? RATING_LABEL[series.contentRating] ?? series.age_rating ?? series.contentRating
 }
 
 /** Payload gửi Editor Board / Assistant — không cần toàn bộ workspace. */
@@ -198,7 +238,7 @@ export function seriesToExternalSummary(series) {
     altTitle: s.altTitle,
     publishType: s.publishType,
     publicationStatus: s.publicationStatus,
-    publicationLabel: PUB_LABEL[s.publicationStatus],
+    publicationLabel: getPublicationStatusLabel(s.publicationStatus),
     catalogLine: formatSeriesCatalogLine(s),
     category: s.category,
     tags: s.tags,
@@ -208,15 +248,17 @@ export function seriesToExternalSummary(series) {
 
 export function seriesToForm(series) {
   const s = normalizeSeries(series)
-  return {
+  const form = {
     name: s.title || '',
     description: s.synopsis || '',
-    genre: (s.genres || []).join(', '),
+    genre: Array.isArray(s.genres) ? s.genres : [],
     target_audience: s.demographic || '',
-    category: s.category || '',
     tags: Array.isArray(s.tags) ? s.tags : [],
     age_rating: s.age_rating || 'All ages',
+    cover: s.coverImage || null,
+    coverPreview: s.coverImage || null,
   }
+  return form
 }
 
 export function validateSeriesForm(form, existingTitles = [], options = {}) {
@@ -232,17 +274,14 @@ export function validateSeriesForm(form, existingTitles = [], options = {}) {
     errors.name = 'Đã có series trùng tên.'
   }
   if (!String(form.description ?? '').trim()) errors.description = 'Vui lòng nhập mô tả.'
-  if (!String(form.genre ?? '').trim()) errors.genre = 'Vui lòng nhập thể loại.'
+  if (!Array.isArray(form.genre) || form.genre.length === 0) errors.genre = 'Vui lòng chọn ít nhất 1 thể loại.'
   if (!String(form.target_audience ?? '').trim()) errors.target_audience = 'Vui lòng chọn đối tượng.'
   return { ok: Object.keys(errors).length === 0, errors }
 }
 
 export function buildSeriesFromForm(form, { id, authorName, authorId }) {
   const name = String(form.name).trim()
-  const genres = String(form.genre ?? '')
-    .split(/[,;]+/)
-    .map(t => t.trim())
-    .filter(Boolean)
+  const genres = Array.isArray(form.genre) ? form.genre.filter(Boolean) : []
 
   const series = normalizeSeries({
     id,
@@ -251,7 +290,7 @@ export function buildSeriesFromForm(form, { id, authorName, authorId }) {
     synopsis: String(form.description ?? '').trim(),
     genres,
     demographic: form.target_audience || 'shonen',
-    publicationStatus: 'preparing',
+    publicationStatus: null,
     publishType: 'debut',
     needsFullDebutPipeline: true,
     authorName: authorName || 'Mangaka',
@@ -263,7 +302,6 @@ export function buildSeriesFromForm(form, { id, authorName, authorId }) {
     updated: 'Vừa tạo',
     progress: 0,
     metadataComplete: true,
-    category: form.category ?? '',
     tags: Array.isArray(form.tags) ? form.tags : [],
     age_rating: form.age_rating ?? 'All ages',
   })
@@ -278,10 +316,7 @@ export function buildSeriesFromForm(form, { id, authorName, authorId }) {
 export function applySeriesFormUpdate(existing, form) {
   const base = normalizeSeries(existing)
   const name = String(form.name).trim()
-  const genres = String(form.genre ?? '')
-    .split(/[,;]+/)
-    .map(t => t.trim())
-    .filter(Boolean)
+  const genres = Array.isArray(form.genre) ? form.genre.filter(Boolean) : []
 
   const merged = normalizeSeries({
     ...base,
@@ -292,7 +327,6 @@ export function applySeriesFormUpdate(existing, form) {
     demographic: form.target_audience || base.demographic,
     metadataComplete: Boolean(form.description?.trim()),
     updated: 'Vừa cập nhật hồ sơ',
-    category: form.category ?? base.category ?? '',
     tags: Array.isArray(form.tags) ? form.tags : (base.tags ?? []),
     age_rating: form.age_rating ?? base.age_rating ?? 'All ages',
   })
@@ -311,7 +345,7 @@ export function buildSeriesFromUploadTitle(title, { id, authorName, colorIndex =
     slug: slugifySeriesTitle(title),
     synopsis: '',
     genres: [],
-    publicationStatus: 'preparing',
+    publicationStatus: null,
     publishType: 'debut',
     needsFullDebutPipeline: true,
     authorName: authorName || 'Mangaka',

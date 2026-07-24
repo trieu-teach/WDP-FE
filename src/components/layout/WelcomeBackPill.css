@@ -1,0 +1,98 @@
+/* Toast treo từ mép trên giữa viewport — chỉ dùng trên trang chủ. */
+
+.welcome-back-pill {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: max-content;
+  max-width: calc(100vw - 1.5rem);
+  padding: 0.55rem 1.35rem 0.6rem 0.5rem;
+  border-radius: 0 0 1.25rem 1.25rem;
+  background: #171717;
+  color: #fff;
+  box-shadow:
+    0 12px 28px rgb(0 0 0 / 0.32),
+    0 1px 0 rgb(255 255 255 / 0.06);
+  transform: translateX(-50%) translateY(-100%);
+  opacity: 0;
+  animation: welcome-back-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  pointer-events: auto;
+}
+
+.welcome-back-pill--leave {
+  animation: welcome-back-out 0.35s ease forwards;
+}
+
+.welcome-back-pill__avatar {
+  flex-shrink: 0;
+  overflow: hidden;
+  transition:
+    transform 0.25s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.25s ease,
+    border-color 0.25s ease;
+  cursor: default;
+}
+
+.welcome-back-pill__avatar:hover {
+  transform: scale(1.12);
+  border-color: rgb(255 255 255 / 0.55) !important;
+  box-shadow:
+    0 0 0 3px rgb(255 255 255 / 0.18),
+    0 6px 16px rgb(0 0 0 / 0.35);
+}
+
+.welcome-back-pill__text {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 0.55rem;
+  margin: 0;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.welcome-back-pill__label {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgb(255 255 255 / 0.65);
+  line-height: 1;
+}
+
+.welcome-back-pill__name {
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes welcome-back-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+@keyframes welcome-back-out {
+  from {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-100%);
+  }
+}

@@ -8,6 +8,7 @@ type ChapterListTableProps = {
   rows: ChapterRow[];
   activeId: string;
   viewingId: string | null;
+  loading?: boolean;
   onOpen: (id: string) => void;
 };
 
@@ -30,6 +31,7 @@ export function ChapterListTable({
   rows,
   activeId,
   viewingId,
+  loading = false,
   onOpen,
 }: ChapterListTableProps) {
   return (
@@ -37,13 +39,7 @@ export function ChapterListTable({
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <BookOpen className="size-4 text-primary" />
-          <div>
-            <h3 className="font-semibold text-foreground">Danh sách chương</h3>
-            <p className="text-xs text-muted-foreground">
-              Bấm <strong className="font-medium">Mở</strong> chương — lật trang
-              bằng mũi tên phía dưới ảnh
-            </p>
-          </div>
+          <h3 className="font-semibold text-foreground">Danh sách chương</h3>
         </div>
         <Badge variant="outline">{rows.length}</Badge>
       </div>
@@ -62,7 +58,16 @@ export function ChapterListTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-border bg-background/60">
-            {rows.length === 0 ? (
+            {loading ? (
+              <tr>
+                <td
+                  colSpan={5}
+                  className="px-3 py-8 text-center text-muted-foreground"
+                >
+                  Đang tải chapter của truyện…
+                </td>
+              </tr>
+            ) : rows.length === 0 ? (
               <tr>
                 <td
                   colSpan={5}

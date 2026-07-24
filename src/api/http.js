@@ -52,7 +52,7 @@ http.interceptors.request.use(config => {
 
   config.metadata = { startTime: Date.now() }
   const method = (config.method ?? 'get').toUpperCase()
-  console.log(`[API] → Gửi request: ${method} ${formatApiUrl(config)}`)
+  console.debug(`[API] → ${method} ${formatApiUrl(config)}`)
 
   return config
 })
@@ -62,9 +62,8 @@ http.interceptors.response.use(
     const duration = Date.now() - (res.config.metadata?.startTime ?? Date.now())
     const method = (res.config.method ?? 'get').toUpperCase()
     const url = formatApiUrl(res.config)
-    console.log(
-      `[API] ✓ Kết nối thành công: ${method} ${url} — HTTP ${res.status} (${duration}ms)`,
-      res.data,
+    console.debug(
+      `[API] ✓ ${method} ${url} — HTTP ${res.status} (${duration}ms)`,
     )
     return res.data
   },
@@ -89,6 +88,20 @@ http.interceptors.response.use(
       )
     }
 
+    if (status === 401 && localStorage.getItem('token')) {
+      localStorage.removeItem('token')
+      sessionStorage.removeItem('manga_user')
+    }
+
+    // Đánh dấu lỗi 5xx để caller (vd useAssistantTasks) suppress log spam
+    if (status >= 500) {
+      err.isServerError = true
+    }
+    // Đánh dấu lỗi 4xx để caller biết đây là lỗi phía client/BE validation (không phải crash)
+    if (status >= 400 && status < 500) {
+      err.isClientError = true
+    }
+
     return Promise.reject(err)
   },
 )
@@ -106,8 +119,82 @@ export function getApiErrorMessage(err, fallback = 'Có lỗi xảy ra. Vui lòn
   return translated[message] ?? message
 }
 
-console.log('[API] Base URL:', API_BASE_URL)
-console.log(
-  '[API] Môi trường:',
-  import.meta.env.DEV ? 'development (Vite proxy → backend)' : 'production',
-)
+/** Lấy tên file từ header Content-Disposition (hỗ trợ filename*=UTF-8''). */
+export function parseContentDispositionFilename(header) {
+  if (!header || typeof header !== 'string') return null
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(header)
+  if (star?.[1]) {
+    try {
+      return decodeURIComponent(star[1].trim())
+    } catch {
+      return star[1].trim()
+    }
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(header)
+  return plain?.[1]?.trim() ?? null
+}
+
+async function parseBlobErrorResponse(blob) {
+  if (!(blob instanceof Blob)) return null
+  try {
+    const text = await blob.text()
+    return JSON.parse(text)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Tải file binary qua BE (stream) — dùng auth token, trigger save-as trên browser.
+ * Không đi qua interceptor JSON của `http`.
+ */
+export async function downloadAuthenticatedFile(path, fallbackFilename) {
+  const token = localStorage.getItem('token')
+  const url = path.startsWith('http') ? path : `${API_BASE_URL}${path}`
+
+  let res
+  try {
+    res = await axios.get(url, {
+      responseType: 'blob',
+      timeout: 60000,
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    })
+  } catch (err) {
+    const blob = err?.response?.data
+    const parsed = await parseBlobErrorResponse(blob)
+    if (parsed) {
+      err.response = { ...err.response, data: parsed }
+    }
+    throw err
+  }
+
+  const contentType = res.headers['content-type'] ?? ''
+  if (res.data instanceof Blob && contentType.includes('application/json')) {
+    const parsed = await parseBlobErrorResponse(res.data)
+    const e = new Error(parsed?.message ?? 'Tải file thất bại.')
+    e.response = { status: res.status, data: parsed }
+    throw e
+  }
+
+  const filename =
+    parseContentDispositionFilename(res.headers['content-disposition']) ??
+    fallbackFilename ??
+    'download.bin'
+
+  const objectUrl = URL.createObjectURL(res.data)
+  try {
+    const a = document.createElement('a')
+    a.href = objectUrl
+    a.download = filename
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+
+  return filename
+}

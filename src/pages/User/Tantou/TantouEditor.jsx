@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
-import { Calendar, FileText, Sparkles } from "lucide-react";
+import { ArrowLeft, FileText, Sparkles } from "lucide-react";
 import Header from "@/components/User/Header/Header.jsx";
 import Footer from "@/components/User/Footer/Footer.jsx";
 import { WorkspaceHero } from "@/components/layout/WorkspaceHero.jsx";
@@ -15,31 +15,71 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { getSession, logout } from "@/lib/auth.js";
+import { seriesService } from "@/api/series.service.js";
+import {
+  buildTeAnnotationCreatePayload,
+  teReviewsService,
+} from "@/api/teReviews.service.js";
+import { getApiErrorMessage, resolveMediaUrl } from "@/api/http.js";
+import { cn } from "@/lib/utils";
+import { apiSeriesToUi } from "@/utils/apiMappers.js";
+import {
+  getAllowedTePublicationStatuses,
+  getPublicationStatusLabel,
+} from "@/utils/seriesModel.js";
 import {
   LABEL_EDITOR_BOARD,
   LABEL_TANTOU_EDITOR,
   PATH_EDITOR_BOARD,
+  PATH_TANTOU_EDITOR,
 } from "@/constants/roleTerminology.js";
+import {
+  getTantouSection,
+  TANTOU_SECTION_IDS,
+} from "@/constants/tantouSections.js";
 import { readEbDebutApproved } from "@/utils/ebDebutStorage.js";
 import {
+  phaseToPipeline,
+  resolveTePhase,
+} from "@/utils/teReviewPhase.js";
+import {
+  enrichTeSubmissionAssignment,
+  flattenTePendingSections,
+  isTeChapterLevelSubmission,
+  isTeSeriesLevelSubmission,
+  mapTePendingChapterToSubmission,
+  parseTePendingResponse,
+  resolveTeEntityId,
+  sortTePendingSubmissionsNewestFirst,
+} from "@/utils/teReviewPending.js";
+import {
   applyScheduleForEbApprovedSeries,
-  approveRecurringSubmission,
-  forwardSubmissionToEb,
   isSeriesEbApproved,
   listPublishSchedules,
-  listTantouSubmissions,
-  rejectSubmissionToMangaka,
-  seedTantouDemoIfEmpty,
+  listTantouReviewHistory,
+  pushTantouReviewHistory,
   suggestPublishCadence,
-  updateTantouSubmission,
 } from "@/utils/tantouWorkspaceStorage.js";
 import TantouPageReview from "./TantouPageReview.jsx";
 
 const NAV_LINKS = [
   { to: "/", label: "Trang chủ" },
-  { to: "/mangaka", label: "Mangaka" },
   { to: PATH_EDITOR_BOARD, label: LABEL_EDITOR_BOARD },
 ];
 
@@ -60,11 +100,43 @@ function statusLabel(status) {
   return map[status] ?? status;
 }
 
+function reviewStatusLabel(status) {
+  const map = {
+    draft: "Nháp",
+    reject: "Yêu cầu chỉnh",
+    publish: "Đã duyệt",
+  };
+  return map[status] ?? status;
+}
+
+function formatReviewedAt(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("vi-VN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
 function SubmissionCard({ sub, onReview, onQuickApprove, showQuickApprove }) {
+  const canReview = sub.canReview !== false;
+  const assignmentVariant =
+    sub.teAssignmentStatus === "mine"
+      ? "default"
+      : sub.teAssignmentStatus === "other"
+        ? "destructive"
+        : "outline";
+
   return (
-    <Card className="group transition-all hover:shadow-md">
-      <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
-        <div className="flex size-16 shrink-0 overflow-hidden rounded-lg bg-muted sm:size-20">
+    <Card
+      className={cn(
+        "gap-0 py-0 transition-all hover:shadow-md",
+        !canReview && "opacity-75",
+      )}
+    >
+      <CardContent className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:p-3.5">
+        <div className="flex size-14 shrink-0 overflow-hidden rounded-lg bg-muted sm:size-16">
           {sub.mangakaImageUrl ? (
             <img
               src={sub.mangakaImageUrl}
@@ -83,16 +155,33 @@ function SubmissionCard({ sub, onReview, onQuickApprove, showQuickApprove }) {
             <Badge variant={statusVariant(sub.status)}>
               {statusLabel(sub.status)}
             </Badge>
+            {sub.teAssignmentStatus ? (
+              <Badge variant={assignmentVariant} className="text-[10px]">
+                {sub.teAssignmentStatus === "unassigned"
+                  ? "Chưa ai nhận"
+                  : sub.teAssignmentStatus === "mine"
+                    ? "Của bạn"
+                    : "TE khác"}
+              </Badge>
+            ) : null}
           </div>
           <p className="text-sm text-muted-foreground">
             Ch. {sub.chapterNum} · {sub.pageLabel} · {sub.mangakaName}
           </p>
+          {sub.teAssignmentLabel ? (
+            <p className="text-xs text-muted-foreground">{sub.teAssignmentLabel}</p>
+          ) : null}
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={() => onReview(sub)}>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!canReview}
+            onClick={() => onReview(sub)}
+          >
             Mở & nhận xét
           </Button>
-          {showQuickApprove && sub.status === "pending" ? (
+          {showQuickApprove && sub.status === "pending" && canReview ? (
             <Button size="sm" onClick={() => onQuickApprove(sub.id)}>
               Duyệt nhanh
             </Button>
@@ -105,31 +194,171 @@ function SubmissionCard({ sub, onReview, onQuickApprove, showQuickApprove }) {
 
 export default function TantouEditor() {
   const navigate = useNavigate();
+  const { section: sectionId } = useParams();
+  const sectionMeta = getTantouSection(sectionId);
   const user = getSession();
-  const [tick, setTick] = useState(0);
+  const currentTeId = user?.id ?? null;
+  const [submissions, setSubmissions] = useState([]);
+  const [pendingSections, setPendingSections] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [tick, setTick] = useState(0);
+  const [publicationSeries, setPublicationSeries] = useState([]);
+  const [publicationLoading, setPublicationLoading] = useState(false);
+  const [publicationSavingId, setPublicationSavingId] = useState(null);
+  const [publicationConfirm, setPublicationConfirm] = useState(null);
+
+  const needsQueue =
+    sectionId === "series-pending"
+    || sectionId === "series-approved"
+    || sectionId === "schedule";
+  const needsPublication = sectionId === "publication-status";
 
   const refresh = useCallback(() => setTick((n) => n + 1), []);
 
-  useEffect(() => {
-    seedTantouDemoIfEmpty();
-    refresh();
-  }, [refresh]);
+  const loadPublicationSeries = useCallback(async () => {
+    setPublicationLoading(true);
+    try {
+      // Lấy series đã có publication_status (upcoming/ongoing/hiatus/completed/dropped)
+      const statuses = ["upcoming", "ongoing", "hiatus", "completed", "dropped"];
+      const batches = await Promise.all(
+        statuses.map((publication_status) =>
+          seriesService.getAll({ publication_status }).catch(() => null),
+        ),
+      );
+      const byId = new Map();
+      for (const batch of batches) {
+        const list = Array.isArray(batch)
+          ? batch
+          : (Array.isArray(batch?.items) ? batch.items : (Array.isArray(batch?.data) ? batch.data : []));
+        for (const raw of list) {
+          const ui = apiSeriesToUi(raw);
+          if (!ui?.id) continue;
+          byId.set(String(ui.id), {
+            id: String(ui.id),
+            title: ui.title,
+            publicationStatus: ui.publicationStatus,
+            coverImage: ui.coverImage,
+          });
+        }
+      }
+      setPublicationSeries(
+        [...byId.values()].sort((a, b) =>
+          String(a.title).localeCompare(String(b.title), "vi"),
+        ),
+      );
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không tải được trạng thái phát hành."));
+      setPublicationSeries([]);
+    } finally {
+      setPublicationLoading(false);
+    }
+  }, []);
+
+  const loadQueue = useCallback(async () => {
+    setLoading(true);
+    try {
+      const raw = await teReviewsService.getPending();
+      const parsed = parseTePendingResponse(raw);
+      setPendingSections(parsed);
+
+      const flat = flattenTePendingSections(parsed);
+      const baseMapped = flat.map(({ chapter, series, tabType }) =>
+        enrichTeSubmissionAssignment(
+          mapTePendingChapterToSubmission(chapter, series, tabType, null),
+          currentTeId,
+        ),
+      );
+      setSubmissions(baseMapped);
+      setLoading(false);
+
+      if (!flat.length) return;
+
+      const enriched = await Promise.all(
+        flat.map(async (entry, index) => {
+          const chapterId = resolveTeEntityId(entry.chapter);
+          if (!chapterId) return enrichTeQueueItemWithSeriesDetail(baseMapped[index]);
+          let preview = null;
+          try {
+            preview = await teReviewsService.getAllChapterPages(chapterId);
+          } catch {
+            preview = null;
+          }
+          return enrichTeQueueItemWithSeriesDetail(
+            enrichTeSubmissionAssignment(
+              mapTePendingChapterToSubmission(
+                entry.chapter,
+                entry.series,
+                entry.tabType,
+                preview,
+              ),
+              currentTeId,
+            ),
+          );
+        }),
+      );
+      setSubmissions(enriched);
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không tải được hàng chờ Tantou."));
+      setSubmissions([]);
+      setPendingSections(null);
+      setLoading(false);
+    }
+  }, [currentTeId]);
 
   useEffect(() => {
-    const onSync = () => refresh();
-    window.addEventListener("mk-tantou-storage", onSync);
-    window.addEventListener("mk-eb-approved-update", onSync);
-    return () => {
-      window.removeEventListener("mk-tantou-storage", onSync);
-      window.removeEventListener("mk-eb-approved-update", onSync);
-    };
-  }, [refresh]);
+    if (!needsQueue) return;
+    void loadQueue();
+  }, [loadQueue, tick, needsQueue]);
 
-  const submissions = useMemo(() => listTantouSubmissions(), [tick]);
+  useEffect(() => {
+    if (!needsPublication) return;
+    void loadPublicationSeries();
+  }, [loadPublicationSeries, tick, needsPublication]);
+
+  async function handlePublicationStatusChange(seriesId, nextStatus) {
+    const id = String(seriesId ?? "").trim();
+    if (!id || !nextStatus) return;
+    setPublicationSavingId(id);
+    try {
+      const res = await teReviewsService.updatePublicationStatus(id, nextStatus);
+      const updated =
+        res?.series?.publication_status
+        ?? res?.publication_status
+        ?? nextStatus;
+      setPublicationSeries((prev) =>
+        prev.map((row) =>
+          row.id === id ? { ...row, publicationStatus: updated } : row,
+        ),
+      );
+      setPublicationConfirm(null);
+      toast.success(
+        res?.message
+          ?? `Đã cập nhật trạng thái phát hành → ${getPublicationStatusLabel(updated)}.`,
+      );
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không cập nhật được trạng thái phát hành."));
+    } finally {
+      setPublicationSavingId(null);
+    }
+  }
+
+  function requestPublicationStatusChange(row, nextStatus) {
+    if (!row?.id || !nextStatus) return;
+    if (nextStatus === row.publicationStatus) return;
+    setPublicationConfirm({
+      seriesId: row.id,
+      title: row.title,
+      fromStatus: row.publicationStatus,
+      toStatus: nextStatus,
+    });
+  }
+
   const schedules = useMemo(() => listPublishSchedules(), [tick]);
   const ebApproved = useMemo(() => readEbDebutApproved(), [tick]);
+  const reviewHistory = useMemo(() => listTantouReviewHistory(), [tick]);
 
   const selected = useMemo(
     () => submissions.find((s) => s.id === selectedId) ?? null,
@@ -138,20 +367,22 @@ export default function TantouEditor() {
 
   const debutQueue = useMemo(
     () =>
-      submissions.filter(
-        (s) => s.pipeline === "debut" && s.status !== "approved_publish",
+      sortTePendingSubmissionsNewestFirst(
+        submissions.filter((s) => isTeSeriesLevelSubmission(s)),
       ),
     [submissions],
   );
 
   const recurringQueue = useMemo(
     () =>
-      submissions.filter(
-        (s) =>
-          (s.pipeline === "recurring" || isSeriesEbApproved(s.seriesTitle)) &&
-          s.status === "pending",
+      sortTePendingSubmissionsNewestFirst(
+        submissions.filter(
+          (s) =>
+            isTeChapterLevelSubmission(s)
+            && (s.status === "pending" || s.status === "revision"),
+        ),
       ),
-    [submissions, tick],
+    [submissions],
   );
 
   const scheduleSeries = useMemo(() => {
@@ -183,6 +414,12 @@ export default function TantouEditor() {
   }
 
   function openReview(sub) {
+    if (sub?.canReview === false) {
+      toast.error(
+        sub?.teAssignmentLabel ?? "Chapter này đã được gán cho TE khác.",
+      );
+      return;
+    }
     setSelectedId(sub.id);
     setReviewOpen(true);
   }
@@ -192,119 +429,362 @@ export default function TantouEditor() {
     refresh();
   }
 
-  function handleSaveReview(reviewData, options = {}) {
+  async function handleQuickApprove(chapterId) {
+    const sub = submissions.find((s) => s.id === chapterId);
+    if (!sub || !isTeChapterLevelSubmission(sub) || !sub.seriesId) return;
+    if (sub.canReview === false) {
+      toast.error(
+        sub.teAssignmentLabel ?? "Chapter này đã được gán cho TE khác.",
+      );
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const res = await teReviewsService.reviewChapter(sub.seriesId, {
+        chapter_id: String(chapterId),
+        action: "approve",
+        feedback: "OK",
+      });
+      toast.success(res?.message ?? "Chapter đã được publish.");
+      refresh();
+    } catch (err) {
+      const fallback =
+        err?.response?.status === 403
+          ? "Chapter này đã được gán cho TE khác."
+          : "Duyệt nhanh thất bại.";
+      toast.error(getApiErrorMessage(err, fallback));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+function parseSeriesGenres(series) {
+  const genreRaw = series?.genre ?? series?.genres;
+  if (Array.isArray(genreRaw)) return genreRaw.filter(Boolean);
+  if (genreRaw) {
+    return String(genreRaw)
+      .split(/[,;|]/)
+      .map((g) => g.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function isSeriesApprovedByEb(series, seriesTitle) {
+  const apiStatus = String(series?.status ?? "").toLowerCase();
+  if (
+    apiStatus === "approved_by_eb"
+    || apiStatus === "approved"
+    || apiStatus === "published"
+    || series?.is_public === true
+  ) {
+    return true;
+  }
+  return isSeriesEbApproved(seriesTitle);
+}
+
+function submissionIsSeriesLevel(submission) {
+  return isTeSeriesLevelSubmission(submission);
+}
+
+async function enrichTeQueueItemWithSeriesDetail(mapped) {
+  if (!mapped?.seriesId) return mapped;
+
+  const seriesLevel = submissionIsSeriesLevel(mapped);
+
+  try {
+    if (seriesLevel) {
+      const profile = await teReviewsService.getSeriesProfile(mapped.seriesId);
+      const series = profile?.series ?? profile ?? {};
+      const tabType =
+        mapped.tabType
+        ?? resolveTePhase({
+          phase: mapped.phase,
+          seriesStatus: series?.status ?? mapped.seriesMeta?.seriesApiStatus,
+        });
+      const authorObj = series?.author_id ?? series?.author;
+      const authorId =
+        authorObj && typeof authorObj === "object" ? authorObj._id : authorObj;
+      return {
+        ...mapped,
+        tabType,
+        phase: tabType,
+        pipeline: phaseToPipeline(tabType),
+        seriesTitle: series?.name || mapped.seriesTitle,
+        seriesMeta: {
+          ...mapped.seriesMeta,
+          genres: parseSeriesGenres(series).length
+            ? parseSeriesGenres(series)
+            : mapped.seriesMeta.genres,
+          tags: Array.isArray(series?.tags) ? series.tags : mapped.seriesMeta.tags,
+          synopsis:
+            String(series?.synopsis ?? series?.description ?? "").trim()
+            || mapped.seriesMeta.synopsis,
+          coverImageUrl:
+            resolveMediaUrl(series?.cover_image_url ?? null)
+            || mapped.seriesMeta.coverImageUrl,
+          authorId: authorId ? String(authorId) : mapped.seriesMeta.authorId,
+          authorName:
+            authorObj && typeof authorObj === "object"
+              ? (authorObj.full_name ?? authorObj.username ?? "")
+              : mapped.seriesMeta.authorName,
+          seriesApiStatus: series?.status ?? mapped.seriesMeta.seriesApiStatus,
+          publicationStatus:
+            series?.publication_status
+            ?? mapped.seriesMeta?.publicationStatus
+            ?? null,
+          ebApproved: tabType === "chapter_level",
+        },
+      };
+    }
+
+    const raw = await seriesService.getById(mapped.seriesId);
+    const series = apiSeriesToUi(raw);
+    const tabType =
+      mapped.tabType
+      ?? resolveTePhase({
+        phase: mapped.phase,
+        seriesStatus: raw?.status,
+      });
+    return {
+      ...mapped,
+      tabType,
+      phase: tabType,
+      pipeline: phaseToPipeline(tabType),
+      seriesTitle: series.title || mapped.seriesTitle,
+      seriesMeta: {
+        ...mapped.seriesMeta,
+        genres: series.genres?.length ? series.genres : mapped.seriesMeta.genres,
+        tags: series.tags?.length ? series.tags : mapped.seriesMeta.tags,
+        synopsis: series.synopsis || mapped.seriesMeta.synopsis,
+        coverImageUrl: series.coverImage || mapped.seriesMeta.coverImageUrl,
+        authorId: series.authorId
+          ? String(series.authorId)
+          : mapped.seriesMeta.authorId,
+        authorName: series.authorName || mapped.seriesMeta.authorName,
+        seriesApiStatus: raw?.status ?? null,
+        publicationStatus: series.publicationStatus ?? raw?.publication_status ?? null,
+        ebApproved: tabType === "chapter_level",
+      },
+    };
+  } catch {
+    return mapped;
+  }
+}
+
+  async function syncChapterAnnotations(chapter) {
+    if (!chapter?.chapterId) return;
+
+    const existing = await teReviewsService.getAnnotations(chapter.chapterId);
+    const list = Array.isArray(existing) ? existing : [];
+    await Promise.all(
+      list.map((annotation) =>
+        teReviewsService.deleteAnnotation(chapter.chapterId, annotation._id),
+      ),
+    );
+  }
+
+  async function createChapterAnnotations(chapter, editorialNotesByPage, pagesMetaOverride) {
+    if (!chapter?.chapterId) return;
+    const pages = Array.isArray(pagesMetaOverride)
+      ? pagesMetaOverride
+      : (Array.isArray(chapter.pagesMeta) ? chapter.pagesMeta : []);
+    if (!pages.length) {
+      toast.error("Thiếu danh sách page để lưu annotation.");
+      return;
+    }
+
+    const notesMap = editorialNotesByPage ?? {};
+    const createJobs = [];
+
+    pages.forEach((page, pageIndex) => {
+      const notes = Array.isArray(notesMap[pageIndex]) ? notesMap[pageIndex] : [];
+      notes.forEach((note) => {
+        const payload = buildTeAnnotationCreatePayload(note, page);
+        if (!payload) return;
+        createJobs.push(
+          teReviewsService.createAnnotation(chapter.chapterId, payload),
+        );
+      });
+    });
+
+    if (createJobs.length) {
+      await Promise.all(createJobs);
+    }
+  }
+
+  async function handleSaveReview(reviewData, options = {}) {
     if (!selected) return;
 
-    const advanceNext = options.advanceNext === true;
-    const nextStatus = reviewData.reviewStatus ?? "draft";
-    const nextText = String(reviewData.reviewText ?? "").trim();
-    const nextAverage = Number(reviewData.averageScore ?? 0);
-    const nextTitle =
-      String(reviewData.storyTitle ?? selected.seriesTitle).trim() ||
-      selected.seriesTitle;
-    const nextAuthor =
-      String(reviewData.authorName ?? selected.mangakaName).trim() ||
-      selected.mangakaName;
-    const nextGenres = Array.isArray(reviewData.genres)
-      ? reviewData.genres
-      : [];
-    const nextSynopsis = String(reviewData.synopsis ?? "").trim();
+    if (!options.saveDraftOnly && selected.canReview === false) {
+      toast.error(
+        selected.teAssignmentLabel ?? "Chapter này đã được gán cho TE khác.",
+      );
+      return;
+    }
 
-    if (nextStatus === "reject" && !nextText) {
+    const nextStatus =
+      options.submitAction ?? reviewData.reviewStatus ?? "publish";
+    const nextText = String(reviewData.reviewText ?? "").trim();
+    const nextQuickNotes = String(reviewData.quickNotes ?? "").trim();
+    const nextRevisionFeedback = String(reviewData.revisionFeedback ?? "").trim();
+    const nextAverage = Number(reviewData.averageScore ?? 0);
+    const nextChapterId = String(
+      reviewData.chapter_id ?? selected.chapterId ?? selected.id ?? "",
+    ).trim();
+    const nextSeriesId = String(
+      reviewData.series_id ?? selected.seriesId ?? "",
+    ).trim();
+    const nextChapterNumber = String(
+      reviewData.chapter_number ?? selected.chapterNum ?? "",
+    ).trim();
+    const nextSeriesName =
+      String(reviewData.series_name ?? selected.seriesTitle).trim() ||
+      selected.seriesTitle;
+    const nextSeriesAuthorName = String(
+      reviewData.series_author_name ??
+        selected.seriesMeta?.authorName ??
+        selected.mangakaName ??
+        "",
+    ).trim();
+    const editorialNotesByPage = reviewData.editorialNotesByPage ?? {};
+    const pagesMeta =
+      reviewData.pagesMeta ??
+      selected.pagesMeta ??
+      [];
+
+    if (options.saveDraftOnly) {
+      if (!nextSeriesId) {
+        toast.error("Thiếu series_id để lưu nháp.");
+        return;
+      }
+      setSaving(true);
+      try {
+        await teReviewsService.saveSeriesReviewDraft(nextSeriesId, {
+          feedback: nextText,
+          quick_notes: nextQuickNotes || nextText,
+        });
+        toast.success("Đã lưu nháp Series Review.");
+      } catch (err) {
+        toast.error(getApiErrorMessage(err, "Không lưu được nháp."));
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
+    if (nextStatus === "reject" && !nextText && !nextRevisionFeedback) {
       toast.error("Nhập lý do trước khi gửi Mangaka chỉnh.");
       return;
     }
 
-    const editorialNotes = Array.isArray(reviewData.editorialNotes)
-      ? reviewData.editorialNotes
-      : [];
-    const editorialNotesByPage = reviewData.editorialNotesByPage ?? undefined;
-
-    updateTantouSubmission(selected.id, {
-      seriesTitle: nextTitle,
-      mangakaName: nextAuthor,
-      mangakaImageUrl: reviewData.coverImageUrl ?? selected.mangakaImageUrl,
-      seriesMeta: {
-        ...(selected.seriesMeta ?? {}),
-        genres: nextGenres,
-        authorName: nextAuthor,
-        synopsis: nextSynopsis,
-      },
-      reviewStatus: nextStatus,
-      reviewRatings: reviewData.ratings ?? {},
-      reviewAverageScore: nextAverage,
-      reviewText: nextText,
-      editorialComment: nextText,
-      editorialNotes,
-      editorialNotesByPage,
-      reviewedAt: new Date().toISOString(),
-    });
-
-    const pool = submissions.filter((s) => s.status === "pending");
-    const currentIndex = pool.findIndex((s) => s.id === selected.id);
-    const nextInQueue =
-      currentIndex >= 0 && currentIndex < pool.length - 1
-        ? pool[currentIndex + 1]
-        : pool.find((s) => s.id !== selected.id) ?? null;
-
-    function maybeAdvance() {
-      if (advanceNext && nextInQueue) {
-        setSelectedId(nextInQueue.id);
-        toast.success(`Đã lưu · chuyển sang Ch. ${nextInQueue.chapterNum}`);
-        refresh();
-        return true;
-      }
-      return false;
+    if (!nextChapterId) {
+      toast.error("Thiếu chapter_id để gửi review.");
+      return;
     }
 
-    if (nextStatus === "reject") {
-      rejectSubmissionToMangaka(selected.id, {
-        editorialComment: nextText,
-        reviewNotes: reviewData.ratings ?? {},
-        editorialNotes,
+    setSaving(true);
+    try {
+      await syncChapterAnnotations({
+        chapterId: nextChapterId,
       });
-      toast.success("Đã gửi review và lý do về Mangaka.");
-      if (!maybeAdvance()) {
-        setReviewOpen(false);
-        refresh();
-      }
-      return;
-    }
+      await createChapterAnnotations(
+        { chapterId: nextChapterId },
+        editorialNotesByPage,
+        pagesMeta,
+      );
 
-    if (nextStatus === "publish") {
-      if (selected.pipeline === "debut") {
-        forwardSubmissionToEb(selected.id);
-        toast.success(
-          "Đã lưu review và chuyển series lần đầu sang Editor Board.",
+      if (nextStatus === "publish" || nextStatus === "reject") {
+        const seriesLevel = submissionIsSeriesLevel(selected);
+        const action = nextStatus === "reject" ? "reject" : "approve";
+        const rejectNotes = [nextText, nextRevisionFeedback]
+          .filter(Boolean)
+          .flatMap((t) => t.split("\n").map((l) => l.trim()).filter(Boolean));
+        const noteLines = rejectNotes.length
+          ? rejectNotes
+          : (nextText ? [nextText] : []);
+
+        if (!nextSeriesId) {
+          toast.error("Thiếu series_id để gửi review.");
+          return;
+        }
+
+        if (seriesLevel && (nextText || nextQuickNotes) && action === "approve") {
+          await teReviewsService
+            .saveSeriesReviewDraft(nextSeriesId, {
+              feedback: nextText,
+              quick_notes: nextQuickNotes || nextText,
+            })
+            .catch(() => null);
+        }
+
+        const reviewBody = {
+          chapter_id: nextChapterId,
+          action,
+          ...(nextText || nextRevisionFeedback
+            ? { feedback: nextText || nextRevisionFeedback }
+            : {}),
+          ...(noteLines.length ? { notes: noteLines } : {}),
+          ...(action === "reject"
+            ? {
+                revision_notes:
+                  nextRevisionFeedback || nextText || noteLines.join("\n"),
+              }
+            : {}),
+        };
+
+        const res = await teReviewsService.reviewChapter(
+          nextSeriesId,
+          reviewBody,
         );
-      } else {
-        approveRecurringSubmission(selected.id);
-        toast.success("Đã lưu review và duyệt chapter phát hành.");
-      }
-      if (!maybeAdvance()) {
-        setReviewOpen(false);
-        refresh();
-      }
-      return;
-    }
 
-    toast.success("Đã lưu bản nháp review.");
-    if (!maybeAdvance()) {
+        if (action === "approve") {
+          toast.success(
+            `Đã publish thành công "${nextSeriesName}"${
+              nextChapterNumber ? ` · Ch.${nextChapterNumber}` : ""
+            }.`,
+          );
+        } else {
+          toast.success(
+            res?.message ?? "Đã yêu cầu Mangaka sửa chapter.",
+          );
+        }
+      }
+
+      pushTantouReviewHistory({
+        id: `${nextChapterId}-${Date.now()}`,
+        chapterId: nextChapterId,
+        chapterNumber: nextChapterNumber,
+        seriesName: nextSeriesName,
+        authorName: nextSeriesAuthorName,
+        status: nextStatus,
+        averageScore: nextAverage,
+        feedback: nextText,
+        reviewedAt: new Date().toISOString(),
+      });
+
       setReviewOpen(false);
       refresh();
+    } catch (err) {
+      const fallback =
+        err?.response?.status === 403
+          ? "Chapter này đã được gán cho TE khác."
+          : "Không lưu được review.";
+      toast.error(getApiErrorMessage(err, fallback));
+    } finally {
+      setSaving(false);
     }
-  }
-
-  function handleApproveRecurring(id) {
-    approveRecurringSubmission(id);
-    toast.success("Chapter đã duyệt — sẵn sàng phát hành.");
-    refresh();
   }
 
   function handleSetSchedule(title, q, p, cadence) {
     applyScheduleForEbApprovedSeries(title, q, p, cadence);
     toast.success(`Đã đặt lịch ${title}.`);
     refresh();
+  }
+
+  if (!sectionMeta || !TANTOU_SECTION_IDS.includes(sectionId)) {
+    return <Navigate to={PATH_TANTOU_EDITOR} replace />;
   }
 
   if (reviewOpen && selected) {
@@ -315,12 +795,15 @@ export default function TantouEditor() {
           <TantouPageReview
             submission={selected}
             relatedSubmissions={submissions.filter(
-              (s) => s.seriesTitle === selected.seriesTitle,
+              (s) =>
+                (selected.seriesId && s.seriesId === selected.seriesId)
+                || s.seriesTitle === selected.seriesTitle,
             )}
             allSubmissions={submissions}
             onCancel={closeReview}
             onSaveReview={handleSaveReview}
             onSelectChapter={(submissionId) => setSelectedId(submissionId)}
+            saving={saving}
           />
         </main>
         <Footer />
@@ -335,142 +818,349 @@ export default function TantouEditor() {
       <WorkspaceHero
         className="from-sky-950 to-zinc-950"
         label={LABEL_TANTOU_EDITOR}
-        title={`Xin chào${user?.name ? `, ${user.name}` : ""}`}
-        description={`Nhận bản thảo từ Mangaka · viết nhận xét · chuyển ${LABEL_EDITOR_BOARD} hoặc duyệt phát hành.`}
+        title={sectionMeta.title}
+        description={sectionMeta.description}
       />
 
-      <main className="page-container flex-1 space-y-8 py-8">
-        <section className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Sparkles className="size-5 text-amber-500" />
-                Duyệt series riêng
-              </CardTitle>
-              <CardDescription>
-                Xét chuyển {LABEL_EDITOR_BOARD} hoặc gửi Mangaka chỉnh (kèm nhận
-                xét).
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {debutQueue.length === 0 ? (
-                <Card>
-                  <CardContent className="py-12 text-center text-muted-foreground">
-                    Không có series chờ duyệt.
-                  </CardContent>
-                </Card>
-              ) : (
-                debutQueue.map((sub) => (
-                  <SubmissionCard
-                    key={sub.id}
-                    sub={sub}
-                    onReview={openReview}
-                    onQuickApprove={handleApproveRecurring}
-                  />
-                ))
-              )}
-            </CardContent>
-          </Card>
+      <main className="page-container flex-1 space-y-6 py-8">
+        <Button type="button" variant="ghost" size="sm" asChild>
+          <Link to={PATH_TANTOU_EDITOR}>
+            <ArrowLeft className="size-4" />
+            Về khu vực làm việc
+          </Link>
+        </Button>
 
-          <SidebarFlow />
-        </section>
-
-        <section className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FileText className="size-5 text-sky-500" />
-                Duyệt chapter riêng
-              </CardTitle>
-              <CardDescription>
-                Series đã qua EB — chỉ cần Tantou duyệt chapter để phát hành.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {recurringQueue.length === 0 ? (
-                <Card>
-                  <CardContent className="py-12 text-center text-muted-foreground">
-                    Không có chapter chờ duyệt.
-                  </CardContent>
-                </Card>
-              ) : (
-                recurringQueue.map((sub) => (
-                  <SubmissionCard
-                    key={sub.id}
-                    sub={sub}
-                    onReview={openReview}
-                    onQuickApprove={handleApproveRecurring}
-                    showQuickApprove
-                  />
-                ))
-              )}
-            </CardContent>
-          </Card>
-        </section>
-
-        <section className="space-y-4">
-          <div>
-            <h2 className="text-xl font-semibold">Lịch phát hành</h2>
-            <p className="text-sm text-muted-foreground">
-              Series đã được {LABEL_EDITOR_BOARD} chấp nhận.
-            </p>
-          </div>
-          {scheduleSeries.length === 0 ? (
-            <Card>
-              <CardContent className="py-12 text-center text-muted-foreground">
-                Chưa có series qua {LABEL_EDITOR_BOARD}.
+        {sectionId === "series-pending" ? (
+          <section className="space-y-4">
+            <Card className="flex flex-col gap-0 overflow-hidden py-0 shadow-sm">
+              <CardHeader className="shrink-0 px-6 py-4">
+                <CardTitle className="flex items-center gap-2">
+                  <Sparkles className="size-5 text-amber-500" />
+                  {pendingSections?.seriesLevel?.label ?? "Series chưa được duyệt"}
+                  <Badge variant="secondary" className="font-normal">
+                    {debutQueue.length || pendingSections?.seriesLevel?.count || 0}
+                  </Badge>
+                </CardTitle>
+              </CardHeader>
+              {/* Cao tối đa ~4 card; từ chapter thứ 5 trở đi cuộn (ẩn scrollbar) */}
+              <CardContent className="scrollbar-hide max-h-[min(460px,calc(100vh-280px))] space-y-3 overflow-y-auto px-6 pb-4">
+                {debutQueue.length === 0 ? (
+                  <Card>
+                    <CardContent className="py-12 text-center text-muted-foreground">
+                      {loading ? "Đang tải hàng chờ..." : "Không có series chờ duyệt."}
+                    </CardContent>
+                  </Card>
+                ) : (
+                  debutQueue.map((sub) => (
+                    <SubmissionCard
+                      key={sub.id}
+                      sub={sub}
+                      onReview={openReview}
+                    />
+                  ))
+                )}
               </CardContent>
             </Card>
-          ) : (
-            scheduleSeries.map((row) => (
-              <Card key={row.title}>
-                <CardHeader>
-                  <CardTitle>{row.title}</CardTitle>
-                  <CardDescription>
-                    Chất lượng {row.qualityScore}% · Độ nổi{" "}
-                    {row.popularityScore}%{" · Gợi ý: "}
-                    {row.suggested === "weekly"
-                      ? "Theo tuần"
-                      : row.suggested === "biweekly"
-                        ? "2 tuần/lần"
-                        : "Theo tháng"}
-                    {row.label ? ` · Đang: ${row.label}` : ""}
-                  </CardDescription>
-                </CardHeader>
-                <CardFooter className="gap-2">
+          </section>
+        ) : null}
+
+        {sectionId === "series-approved" ? (
+          <section className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="size-5 text-sky-500" />
+                  {pendingSections?.chapterLevel?.label ?? "Series đã được duyệt"}
+                  <Badge variant="secondary" className="font-normal">
+                    {recurringQueue.length || pendingSections?.chapterLevel?.count || 0}
+                  </Badge>
+                </CardTitle>
+                <CardDescription>
+                  {pendingSections?.chapterLevel?.description
+                    ?? "Series đã EB-approved — TE duyệt chapter để publish ngay."}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {recurringQueue.length === 0 ? (
+                  <Card>
+                    <CardContent className="py-12 text-center text-muted-foreground">
+                      {loading ? "Đang tải hàng chờ..." : "Không có chapter chờ duyệt."}
+                    </CardContent>
+                  </Card>
+                ) : (
+                  recurringQueue.map((sub) => (
+                    <SubmissionCard
+                      key={sub.id}
+                      sub={sub}
+                      onReview={openReview}
+                      onQuickApprove={(id) => void handleQuickApprove(id)}
+                      showQuickApprove
+                    />
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          </section>
+        ) : null}
+
+        {sectionId === "publication-status" ? (
+          <>
+            <Dialog
+              open={Boolean(publicationConfirm)}
+              onOpenChange={(open) => {
+                if (!open && !publicationSavingId) setPublicationConfirm(null);
+              }}
+            >
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Xác nhận đổi trạng thái</DialogTitle>
+                  <DialogDescription>
+                    Bạn có chắc muốn đổi trạng thái phát hành của series{" "}
+                    <span className="font-medium text-foreground">
+                      {publicationConfirm?.title}
+                    </span>
+                    ?
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
+                  <p>
+                    <span className="text-muted-foreground">Hiện tại: </span>
+                    {getPublicationStatusLabel(publicationConfirm?.fromStatus)}
+                  </p>
+                  <p>
+                    <span className="text-muted-foreground">Đổi thành: </span>
+                    <span className="font-medium">
+                      {getPublicationStatusLabel(publicationConfirm?.toStatus)}
+                    </span>
+                  </p>
+                </div>
+                <DialogFooter>
                   <Button
-                    variant={row.cadence === "weekly" ? "default" : "outline"}
-                    size="sm"
-                    onClick={() =>
-                      handleSetSchedule(
-                        row.title,
-                        row.qualityScore,
-                        row.popularityScore,
-                        "weekly",
-                      )
-                    }
+                    type="button"
+                    variant="outline"
+                    disabled={Boolean(publicationSavingId)}
+                    onClick={() => setPublicationConfirm(null)}
                   >
-                    Theo tuần
+                    Huỷ
                   </Button>
                   <Button
-                    variant={row.cadence === "monthly" ? "default" : "outline"}
-                    size="sm"
-                    onClick={() =>
-                      handleSetSchedule(
-                        row.title,
-                        row.qualityScore,
-                        row.popularityScore,
-                        "monthly",
-                      )
-                    }
+                    type="button"
+                    disabled={Boolean(publicationSavingId)}
+                    onClick={() => {
+                      if (!publicationConfirm) return;
+                      void handlePublicationStatusChange(
+                        publicationConfirm.seriesId,
+                        publicationConfirm.toStatus,
+                      );
+                    }}
                   >
-                    Theo tháng
+                    {publicationSavingId ? "Đang cập nhật..." : "Xác nhận đổi"}
                   </Button>
-                </CardFooter>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            <section className="space-y-4">
+              <div>
+                <h2 className="text-xl font-semibold">Trạng thái phát hành</h2>
+                <p className="text-sm text-muted-foreground">
+                  TE cập nhật sau khi series đã published: ongoing ↔ hiatus / completed / dropped.
+                  upcoming do job tự chuyển, completed chỉ đọc.
+                </p>
+              </div>
+              {publicationLoading && publicationSeries.length === 0 ? (
+                <Card>
+                  <CardContent className="py-12 text-center text-muted-foreground">
+                    Đang tải trạng thái phát hành...
+                  </CardContent>
+                </Card>
+              ) : publicationSeries.length === 0 ? (
+                <Card>
+                  <CardContent className="py-12 text-center text-muted-foreground">
+                    Chưa có series có publication_status.
+                  </CardContent>
+                </Card>
+              ) : (
+                publicationSeries.map((row) => {
+                  const allowed = getAllowedTePublicationStatuses(row.publicationStatus);
+                  const busy = publicationSavingId === row.id;
+                  return (
+                    <Card key={row.id}>
+                      <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
+                        <div className="flex size-14 shrink-0 overflow-hidden rounded-lg bg-muted">
+                          {row.coverImage ? (
+                            <img
+                              src={row.coverImage}
+                              alt=""
+                              className="size-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex size-full items-center justify-center text-xl">
+                              📚
+                            </div>
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="font-semibold">{row.title}</h3>
+                            <Badge variant="secondary">
+                              {getPublicationStatusLabel(row.publicationStatus)}
+                            </Badge>
+                          </div>
+                          {allowed.length === 0 ? (
+                            <p className="text-xs text-muted-foreground">
+                              {row.publicationStatus === "upcoming"
+                                ? "Chuẩn bị phát hành — chờ job tự chuyển sang đang phát hành."
+                                : row.publicationStatus === "completed"
+                                  ? "Đã hoàn thành — không đổi được."
+                                  : "Không có chuyển trạng thái khả dụng."}
+                            </p>
+                          ) : null}
+                        </div>
+                        {allowed.length > 0 ? (
+                          <Select
+                            key={`${row.id}-${row.publicationStatus}-${
+                              publicationConfirm?.seriesId === row.id ? "confirming" : "idle"
+                            }`}
+                            disabled={busy}
+                            onValueChange={(v) => {
+                              if (v) requestPublicationStatusChange(row, v);
+                            }}
+                          >
+                            <SelectTrigger className="w-[200px]">
+                              <SelectValue
+                                placeholder={busy ? "Đang cập nhật..." : "Đổi trạng thái"}
+                              />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {allowed.map((status) => (
+                                <SelectItem key={status} value={status}>
+                                  {getPublicationStatusLabel(status)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : null}
+                      </CardContent>
+                    </Card>
+                  );
+                })
+              )}
+            </section>
+          </>
+        ) : null}
+
+        {sectionId === "history" ? (
+          <section className="space-y-4">
+            <div>
+              <h2 className="text-xl font-semibold">Lịch sử duyệt</h2>
+              <p className="text-sm text-muted-foreground">
+                Các lần bạn lưu hoặc gửi nhận xét gần đây.
+              </p>
+            </div>
+            {reviewHistory.length === 0 ? (
+              <Card>
+                <CardContent className="py-12 text-center text-muted-foreground">
+                  Chưa có lịch sử duyệt.
+                </CardContent>
               </Card>
-            ))
-          )}
-        </section>
+            ) : (
+              reviewHistory.map((item) => (
+                <Card key={item.id} className="border-border/70">
+                  <CardContent className="space-y-2 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-medium">{item.seriesName}</p>
+                      <Badge variant="secondary">
+                        {reviewStatusLabel(item.status)}
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Ch. {item.chapterNumber}
+                      {item.authorName ? ` · ${item.authorName}` : ""}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {formatReviewedAt(item.reviewedAt)}
+                      {item.averageScore != null
+                        ? ` · Điểm TB ${Number(item.averageScore).toFixed(1)}`
+                        : ""}
+                    </p>
+                    {item.feedback ? (
+                      <p className="line-clamp-3 text-sm">{item.feedback}</p>
+                    ) : null}
+                  </CardContent>
+                </Card>
+              ))
+            )}
+          </section>
+        ) : null}
+
+        {sectionId === "schedule" ? (
+          <section className="space-y-4">
+            <div>
+              <h2 className="text-xl font-semibold">Lịch phát hành</h2>
+              <p className="text-sm text-muted-foreground">
+                Series đã được {LABEL_EDITOR_BOARD} chấp nhận.
+              </p>
+            </div>
+            {scheduleSeries.length === 0 ? (
+              <Card>
+                <CardContent className="py-12 text-center text-muted-foreground">
+                  {loading
+                    ? "Đang tải..."
+                    : `Chưa có series qua ${LABEL_EDITOR_BOARD}.`}
+                </CardContent>
+              </Card>
+            ) : (
+              scheduleSeries.map((row) => (
+                <Card key={row.title}>
+                  <CardHeader>
+                    <CardTitle>{row.title}</CardTitle>
+                    <CardDescription>
+                      Chất lượng {row.qualityScore}% · Độ nổi{" "}
+                      {row.popularityScore}%{" · Gợi ý: "}
+                      {row.suggested === "weekly"
+                        ? "Theo tuần"
+                        : row.suggested === "biweekly"
+                          ? "2 tuần/lần"
+                          : "Theo tháng"}
+                      {row.label ? ` · Đang: ${row.label}` : ""}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardFooter className="gap-2">
+                    <Button
+                      variant={row.cadence === "weekly" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() =>
+                        handleSetSchedule(
+                          row.title,
+                          row.qualityScore,
+                          row.popularityScore,
+                          "weekly",
+                        )
+                      }
+                    >
+                      Theo tuần
+                    </Button>
+                    <Button
+                      variant={row.cadence === "monthly" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() =>
+                        handleSetSchedule(
+                          row.title,
+                          row.qualityScore,
+                          row.popularityScore,
+                          "monthly",
+                        )
+                      }
+                    >
+                      Theo tháng
+                    </Button>
+                  </CardFooter>
+                </Card>
+              ))
+            )}
+          </section>
+        ) : null}
       </main>
 
       <Footer />
@@ -478,26 +1168,3 @@ export default function TantouEditor() {
   );
 }
 
-function SidebarFlow() {
-  return (
-    <Card className="h-fit">
-      <CardHeader>
-        <CardTitle className="text-base">Luồng công việc</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4 text-sm text-muted-foreground">
-        <div>
-          <p className="font-medium text-foreground">Lần đầu</p>
-          <p>Mangaka → Assistant → Mangaka → Tantou → {LABEL_EDITOR_BOARD}</p>
-        </div>
-        <Separator />
-        <div>
-          <p className="font-medium text-foreground">Lần 2+</p>
-          <p>Mangaka → chỉ Tantou duyệt → phát hành</p>
-        </div>
-        <Button variant="link" className="h-auto p-0" asChild>
-          <Link to={PATH_EDITOR_BOARD}>Mở {LABEL_EDITOR_BOARD} →</Link>
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}

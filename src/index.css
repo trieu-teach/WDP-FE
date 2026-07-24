@@ -146,6 +146,18 @@
     @apply mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8;
   }
 
+  /* Ẩn thanh cuộn nhưng vẫn cuộn được */
+  .scrollbar-hide {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
+  }
+
   .gradient-mesh {
     background:
       radial-gradient(ellipse 80% 50% at 50% -20%, oklch(0.577 0.245 27.325 / 0.18), transparent),

@@ -1,0 +1,131 @@
+/* Mangaka public-style profile — layout gợi ý từ trang creator (banner + avatar giữa + 2 cột). */
+
+.mk-profile__hero {
+  position: relative;
+  background: #fff;
+  border-bottom: 1px solid rgb(244 244 245);
+}
+
+.mk-profile__cover {
+  height: clamp(160px, 28vw, 280px);
+  width: 100%;
+  background:
+    radial-gradient(circle at 20% 30%, rgba(255, 255, 255, 0.35), transparent 45%),
+    linear-gradient(135deg, #7c3aed 0%, #a855f7 35%, #c084fc 55%, #6d28d9 100%);
+  background-size: cover;
+  background-position: center;
+}
+
+.mk-profile__identity {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: -4.5rem;
+  text-align: center;
+  padding-bottom: 0.5rem;
+}
+
+.mk-profile__avatar {
+  z-index: 1;
+}
+
+.mk-profile__tabs {
+  display: flex;
+  justify-content: center;
+  gap: 0.25rem;
+  margin-top: 1.5rem;
+  border-top: 1px solid rgb(244 244 245);
+  overflow-x: auto;
+}
+
+.mk-profile__tab {
+  position: relative;
+  padding: 0.9rem 1.15rem;
+  font-size: 0.925rem;
+  font-weight: 500;
+  color: rgb(113 113 122);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.mk-profile__tab:hover {
+  color: rgb(39 39 42);
+}
+
+.mk-profile__tab.is-active {
+  color: #6f3cff;
+  font-weight: 600;
+}
+
+.mk-profile__tab.is-active::after {
+  content: '';
+  position: absolute;
+  left: 0.75rem;
+  right: 0.75rem;
+  bottom: 0;
+  height: 3px;
+  border-radius: 999px 999px 0 0;
+  background: #6f3cff;
+}
+
+.mk-profile__card {
+  background: #fff;
+  border: 1px solid rgb(244 244 245);
+  border-radius: 1rem;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+}
+
+.mk-profile__feature {
+  display: flex;
+  gap: 0;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid rgb(244 244 245);
+  border-radius: 1rem;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+  transition: box-shadow 0.2s ease;
+}
+
+.mk-profile__feature:hover {
+  box-shadow: 0 8px 24px rgb(111 60 255 / 0.1);
+}
+
+.mk-profile__feature-thumb {
+  position: relative;
+  width: 140px;
+  min-height: 120px;
+  flex-shrink: 0;
+  background: rgb(244 244 245);
+}
+
+@media (min-width: 640px) {
+  .mk-profile__feature-thumb {
+    width: 168px;
+  }
+}
+
+.mk-profile__feature-badge {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  border-radius: 999px;
+  background: #6f3cff;
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 0.2rem 0.5rem;
+}
+
+@media (max-width: 639px) {
+  .mk-profile__feature {
+    flex-direction: column;
+  }
+
+  .mk-profile__feature-thumb {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    min-height: 0;
+  }
+}

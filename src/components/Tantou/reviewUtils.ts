@@ -1,3 +1,4 @@
+import { resolveTePageImageUrl } from "@/api/teReviews.service.js";
 import {
   readMangakaWorkspace,
   resolveAnnotatorChapter,
@@ -67,18 +68,125 @@ export function normalizePageNotes(raw: unknown): PageNote[] {
     }));
 }
 
+export function mapApiAnnotationsToPageNotes(annotations: unknown[]): PageNote[] {
+  if (!Array.isArray(annotations)) return [];
+  return annotations.map((raw, idx) => {
+    const ann = raw as Record<string, unknown>;
+    const region = ann.region as Record<string, number> | undefined;
+    return {
+      id: String(ann._id ?? `api-${idx}`),
+      x: Number(ann.x ?? region?.x ?? 0),
+      y: Number(ann.y ?? region?.y ?? 0),
+      w: Number(ann.w ?? region?.width ?? 0),
+      h: Number(ann.h ?? region?.height ?? 0),
+      text: String(ann.content ?? ""),
+      taskType: String(ann.error_type ?? ann.annotation_type ?? "other"),
+    };
+  });
+}
+
+export function mapApiAnnotationsToNotesByPage(
+  annotations: unknown[],
+  pagesMeta: Array<{ _id?: string; id?: string; page_number?: number; width?: number; height?: number }> = [],
+): Record<number, PageNote[]> {
+  const byPage: Record<number, PageNote[]> = {};
+  if (!Array.isArray(annotations)) return byPage;
+
+  annotations.forEach((raw, idx) => {
+    const ann = raw as Record<string, unknown>;
+    const pageId = ann.page_id;
+    const pageIdx = pagesMeta.findIndex(
+      (p) => {
+        const id = p._id ?? (p as { id?: string }).id;
+        return id && String(id) === String(pageId);
+      },
+    );
+    const index = pageIdx >= 0 ? pageIdx : 0;
+    const page = pagesMeta[index];
+    const [note] = mapApiAnnotationsToPageNotes([
+      normalizeRevisionAnnotationRecord(ann, page),
+    ]);
+    if (!note) return;
+    note.id = String(ann._id ?? `api-${idx}`);
+    if (!byPage[index]) byPage[index] = [];
+    byPage[index].push(note);
+  });
+
+  return byPage;
+}
+
+/** TE reject copy: region có thể là % hoặc pixel — chuẩn hóa về % cho canvas. */
+function normalizeRevisionAnnotationRecord(
+  ann: Record<string, unknown>,
+  page?: { width?: number; height?: number },
+) {
+  const region = ann.region as Record<string, number> | undefined;
+  const pageWidth = Number(page?.width ?? 728) || 728;
+  const pageHeight = Number(page?.height ?? 1030) || 1030;
+
+  let x = Number(ann.x ?? region?.x ?? 0);
+  let y = Number(ann.y ?? region?.y ?? 0);
+  let w = Number(ann.w ?? region?.width ?? 0);
+  let h = Number(ann.h ?? region?.height ?? 0);
+
+  const looksLikePixels =
+    x > 100 || y > 100 || w > 100 || h > 100 || x + w > pageWidth;
+
+  if (looksLikePixels) {
+    x = (x / pageWidth) * 100;
+    y = (y / pageHeight) * 100;
+    w = (w / pageWidth) * 100;
+    h = (h / pageHeight) * 100;
+  }
+
+  return {
+    ...ann,
+    x,
+    y,
+    w,
+    h,
+    region: {
+      x,
+      y,
+      width: w,
+      height: h,
+    },
+  };
+}
+
+/** Map chapter.revision_annotations (sau TE reject) sang notes theo page index. */
+export function mapChapterRevisionAnnotationsToNotesByPage(
+  annotations: unknown[],
+  pagesMeta: Array<{ _id?: string; id?: string; page_number?: number; width?: number; height?: number }> = [],
+): Record<number, PageNote[]> {
+  return mapApiAnnotationsToNotesByPage(annotations, pagesMeta);
+}
+
 export function createReviewDraft(submission: TantouSubmission | null): ReviewDraft {
   return {
-    storyTitle: submission?.seriesTitle ?? "",
-    authorName:
-      submission?.seriesMeta?.authorName ?? submission?.mangakaName ?? "",
-    synopsis: submission?.seriesMeta?.synopsis ?? "",
-    genres: Array.isArray(submission?.seriesMeta?.genres)
+    chapter_id: submission?.chapterId ?? submission?.id ?? "",
+    chapter_number: String(submission?.chapterNum ?? ""),
+    chapter_title: String(submission?.chapterTitle ?? ""),
+    series_id: String(submission?.seriesId ?? ""),
+    series_name: submission?.seriesTitle ?? "",
+    series_genre: Array.isArray(submission?.seriesMeta?.genres)
       ? [...submission.seriesMeta.genres]
       : [],
+    series_tags: Array.isArray(submission?.seriesMeta?.tags)
+      ? [...submission.seriesMeta.tags]
+      : [],
+    series_synopsis: submission?.seriesMeta?.synopsis ?? "",
+    series_cover_image_url: submission?.seriesMeta?.coverImageUrl ?? "",
+    series_author_id: String(submission?.seriesMeta?.authorId ?? ""),
+    series_author_name:
+      submission?.seriesMeta?.authorName ?? submission?.mangakaName ?? "",
     reviewText:
       submission?.reviewText ?? submission?.editorialComment ?? "",
-    reviewStatus: submission?.reviewStatus ?? "draft",
+    quickNotes: "",
+    revisionFeedback: "",
+    reviewStatus: submission?.reviewStatus === "draft"
+      ? "publish"
+      : (submission?.reviewStatus ?? "publish"),
     ratings: migrateRatings(submission?.reviewRatings),
     editorialNotes: normalizePageNotes(submission?.editorialNotes),
   };
@@ -180,6 +288,122 @@ export function groupSubmissionsByChapter(
     );
 }
 
+export type SeriesProfileChapter = {
+  _id?: string;
+  id?: string;
+  chapter_number?: number;
+  title?: string;
+  status?: string;
+  updatedAt?: string;
+  createdAt?: string;
+  sentAt?: string;
+};
+
+/** Chuẩn hoá chapter từ profile TE hoặc GET /series/:id/chapters */
+export function normalizeTeSeriesChapters(raw: unknown[]): SeriesProfileChapter[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const ch = item as Record<string, unknown>;
+      const id = ch._id ?? ch.id;
+      if (id == null) return null;
+      return {
+        _id: String(id),
+        id: String(id),
+        chapter_number: Number(
+          ch.chapter_number ?? ch.chapterNumber ?? ch.num ?? 0,
+        ) || undefined,
+        title: ch.title != null ? String(ch.title) : undefined,
+        status: ch.status != null ? String(ch.status) : undefined,
+        updatedAt:
+          (ch.updatedAt ?? ch.updated_at ?? ch.submitted_at) as string | undefined,
+        createdAt: (ch.createdAt ?? ch.created_at) as string | undefined,
+        sentAt: (ch.sentAt ?? ch.sent_at ?? ch.submitted_at) as string | undefined,
+      };
+    })
+    .filter((ch): ch is SeriesProfileChapter => ch != null);
+}
+
+export function mapTeProfileChapterStatus(status?: string): string {
+  const value = String(status ?? "").toLowerCase();
+  if (value === "pending_eb") return "forwarded_eb";
+  if (value.includes("publish") || value === "approved") return "approved_publish";
+  if (value.includes("revision")) return "revision";
+  return "pending";
+}
+
+/** Giai đoạn 1 — danh sách chapter từ GET /te-reviews/series/:id/profile */
+export function buildChapterRowsFromSeriesProfile(
+  profileChapters: SeriesProfileChapter[],
+  relatedSubmissions: TantouSubmission[],
+): ChapterRow[] {
+  if (!profileChapters.length) return [];
+
+  const subsByChapterId = new Map<string, TantouSubmission>();
+  for (const sub of relatedSubmissions) {
+    const cid = String(sub.chapterId ?? sub.id);
+    if (cid) subsByChapterId.set(cid, sub);
+  }
+
+  return [...profileChapters]
+    .sort(
+      (a, b) =>
+        Number(a.chapter_number ?? 0) - Number(b.chapter_number ?? 0),
+    )
+    .map((ch, index) => {
+      const chapterId = String(ch._id ?? ch.id ?? "");
+      const sub = subsByChapterId.get(chapterId);
+      return {
+        id: chapterId,
+        index: index + 1,
+        name: `Ch. ${ch.chapter_number ?? ch.title ?? index + 1}`,
+        releaseDate: formatReleaseDate(
+          sub?.sentAt ?? ch.sentAt ?? ch.updatedAt ?? ch.createdAt,
+        ),
+        status: sub?.status ?? mapTeProfileChapterStatus(ch.status),
+      };
+    });
+}
+
+export function resolveViewingSubmission(
+  viewingChapterId: string | null,
+  anchor: TantouSubmission,
+  relatedSubmissions: TantouSubmission[],
+  profileChapters: SeriesProfileChapter[] = [],
+): TantouSubmission {
+  const targetId = viewingChapterId ?? anchor.chapterId ?? anchor.id;
+
+  const fromQueue = relatedSubmissions.find(
+    (s) =>
+      String(s.id) === String(targetId)
+      || String(s.chapterId) === String(targetId),
+  );
+  if (fromQueue) return fromQueue;
+
+  const fromProfile = profileChapters.find(
+    (ch) => String(ch._id ?? ch.id) === String(targetId),
+  );
+  if (fromProfile) {
+    const chapterId = String(fromProfile._id ?? fromProfile.id);
+    return {
+      ...anchor,
+      id: chapterId,
+      chapterId,
+      chapterNum: String(fromProfile.chapter_number ?? ""),
+      chapterTitle: String(fromProfile.title ?? ""),
+      pageIndex: 0,
+      pageLabel: "Trang 1",
+      apiChapterStatus: fromProfile.status,
+      status: mapTeProfileChapterStatus(fromProfile.status),
+      pagesMeta: [],
+      mangakaImageUrl: undefined,
+    };
+  }
+
+  return anchor;
+}
+
 export function resolveStoryPagesForSubmission(
   submission: TantouSubmission,
 ): StoryPage[] {
@@ -232,6 +456,17 @@ export function resolveStoryPagesForChapter(
   submission: TantouSubmission,
   relatedSubmissions: TantouSubmission[],
 ): StoryPage[] {
+  const pagesMeta = submission?.pagesMeta;
+  if (Array.isArray(pagesMeta) && pagesMeta.length) {
+    return pagesMeta.map((page, index) => ({
+      pageIndex: index,
+      pageLabel: page.page_number
+        ? `Trang ${page.page_number}`
+        : `Trang ${index + 1}`,
+      imageUrl: resolveTePageImageUrl(page) ?? undefined,
+    }));
+  }
+
   const fromWorkspace = resolveStoryPagesForSubmission(submission);
   if (fromWorkspace.length) return fromWorkspace;
   const pageSubs = getChapterPageSubmissions(relatedSubmissions, submission);

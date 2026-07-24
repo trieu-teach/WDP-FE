@@ -16,7 +16,7 @@ import Footer from '@/components/User/Footer/Footer.jsx'
 import { getSession, logout } from '@/lib/auth.js'
 import { seriesService } from '@/api/series.service.js'
 import { chaptersService } from '@/api/chapters.service.js'
-import { getApiErrorMessage } from '@/api/http.js'
+import { getApiErrorMessage, resolveMediaUrl } from '@/api/http.js'
 import {
   apiChapterToAnnotator,
   apiChapterToRow,
@@ -37,8 +37,6 @@ import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
 import {
   formatSeriesCardLine,
-  formatSeriesCatalogLine,
-  formatSeriesRating,
   slugifySeriesTitle,
 } from '@/utils/seriesModel.js'
 import { LABEL_EDITOR_BOARD } from '@/constants/roleTerminology.js'
@@ -183,9 +181,20 @@ export default function SeriesUploadDetail() {
 
   const chapterCards = useMemo(() => chapterRows.map(row => {
     const annot = annotatorChapters.find(ch => ch.id === row.id)
-    const cover = annot?.cover?.url
-      ? { url: annot.cover.url, name: annot.cover.name ?? 'cover' }
-      : annot?.pages?.find(p => p?.url) ?? annot?.pages?.[0]
+    // 1) Ảnh bìa chapter (local / BE cover_url)
+    // 2) Fallback trang đầu — BE hiện chưa có API lưu cover chapter riêng
+    const pageThumb =
+      annot?.pages?.find((p) => p?.url)?.url
+      ?? annot?.pages?.[0]?.url
+      ?? null
+    const coverUrl =
+      annot?.cover?.url
+      || row.coverUrl
+      || pageThumb
+      || null
+    const cover = coverUrl
+      ? { url: coverUrl, name: annot?.cover?.name ?? 'cover' }
+      : null
     const uploaded = annot?.pages?.length ?? row.pages ?? 0
     return { row, annot, cover, uploaded }
   }), [chapterRows, annotatorChapters])
@@ -233,8 +242,9 @@ export default function SeriesUploadDetail() {
     const hasPrev = pageStart > 0
     const hasNext = pageStart + PAGE_LIMIT < pagesWithMedia.length
 
+    // Giống nút "Upload chapter" (series list): chỉ mở tab annotate + series, không ép chapterId
     const openAnnotate = () => navigate('/mangaka', {
-      state: { tab: 'annotate', series: series.title, chapterId: activeRow.id },
+      state: { tab: 'annotate', series: series.title },
     })
 
     return (
@@ -349,9 +359,9 @@ export default function SeriesUploadDetail() {
               {chapterCards.map(({ row, cover, uploaded }) => {
                 const badge = STATUS_BADGE[row.status] ?? STATUS_BADGE.draft
                 return (
-                  <Link key={row.id} to={`${basePath}/chapter/${row.id}`} className="group">
-                    <Card className="overflow-hidden transition-shadow hover:shadow-md">
-                      <div className="aspect-[16/9] bg-muted">
+                  <Link key={row.id} to={`${basePath}/chapter/${row.id}`} className="group block h-full">
+                    <Card className="flex h-full flex-col overflow-hidden transition-shadow hover:shadow-md">
+                      <div className="aspect-[3/4] w-full shrink-0 overflow-hidden bg-muted">
                         {cover?.url ? (
                           <img src={cover.url} alt="" className="size-full object-cover transition-transform group-hover:scale-[1.02]" />
                         ) : (
@@ -360,7 +370,7 @@ export default function SeriesUploadDetail() {
                           </div>
                         )}
                       </div>
-                      <CardContent className="p-3">
+                      <CardContent className="mt-auto p-3">
                         <div className="flex items-center justify-between gap-2">
                           <span className="font-medium">Ch. {row.num}</span>
                           <Badge className={cn('text-xs', badge.className)} variant="secondary">{badge.label}</Badge>
@@ -381,16 +391,25 @@ export default function SeriesUploadDetail() {
               <CardTitle className="text-base">Hồ sơ series</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
+              {series.coverImage ? (
+                <div className="overflow-hidden rounded-md">
+                  <img
+                    src={resolveMediaUrl(series.coverImage)}
+                    alt=""
+                    className="aspect-[3/4] w-full object-cover"
+                  />
+                </div>
+              ) : null}
               <p className="text-muted-foreground">{series.synopsis || 'Chưa có tóm tắt.'}</p>
               <Separator />
               <dl className="space-y-2">
                 <div className="flex justify-between gap-2">
-                  <dt className="text-muted-foreground">Định dạng</dt>
-                  <dd>{formatSeriesCatalogLine(series)}</dd>
+                  <dt className="text-muted-foreground">Thể loại</dt>
+                  <dd className="text-right">{series.genres?.join(', ') || '—'}</dd>
                 </div>
                 <div className="flex justify-between gap-2">
-                  <dt className="text-muted-foreground">Phân loại</dt>
-                  <dd>{formatSeriesRating(series)}</dd>
+                  <dt className="text-muted-foreground">Đối tượng</dt>
+                  <dd>{series.demographic || '—'}</dd>
                 </div>
                 <div className="flex justify-between gap-2">
                   <dt className="text-muted-foreground">Chapter</dt>

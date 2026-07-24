@@ -82,8 +82,9 @@ export function apiRequestToUi(item) {
   const r = item ?? {}
   const mangaka = r.mangaka_id ?? {}
   const assistant = r.assistant_id ?? {}
+  const requestId = pickUserId(r._id ?? r.id) ?? String(r._id ?? r.id ?? '').trim()
   return {
-    id: r._id ?? r.id,
+    id: requestId || null,
     mangakaId: pickUserId(mangaka),
     mangakaName: pickUserName(mangaka, 'Mangaka'),
     assistantId: pickUserId(assistant),

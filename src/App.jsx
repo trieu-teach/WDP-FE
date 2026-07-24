@@ -6,6 +6,7 @@ import AdminManga from '@/pages/Admin/Manga/Manga.jsx'
 import Chapters from '@/pages/Admin/Chapters/Chapters.jsx'
 import Users from '@/pages/Admin/Users/Users.jsx'
 import Profile from '@/pages/Admin/Profile/Profile.jsx'
+import EbRepresentative from '@/pages/Admin/EbRepresentative/EbRepresentative.jsx'
 import Home from '@/pages/User/Home/Home.jsx'
 import Login from '@/pages/User/Login/Login.jsx'
 import Register from '@/pages/User/Register/Register.jsx'
@@ -15,6 +16,14 @@ import SeriesUploadDetail from '@/pages/User/Mangaka/SeriesUploadDetail.jsx'
 import Assistant from '@/pages/User/Assistant/Assistant.jsx'
 import UserProfile from '@/pages/User/Profile/Profile.jsx'
 import Eb from '@/pages/User/Eb/Eb.jsx'
+import EbSeriesDetail from '@/pages/User/Eb/EbSeriesDetail.jsx'
+import EbPublish from '@/pages/User/Eb/EbPublish.jsx'
+import EbPublicationSchedule from '@/pages/User/Eb/EbPublicationSchedule.jsx'
+import MangakaTeRevision from '@/pages/User/Mangaka/MangakaTeRevision.jsx'
+import MangakaAssistantReview from '@/pages/User/Mangaka/MangakaAssistantReview.jsx'
+import MangakaAssistantReviewDetail from '@/pages/User/Mangaka/MangakaAssistantReviewDetail.jsx'
+import MangakaProfile from '@/pages/User/Mangaka/MangakaProfile.jsx'
+import TantouHub from '@/pages/User/Tantou/TantouHub.jsx'
 import TantouEditor from '@/pages/User/Tantou/TantouEditor.jsx'
 import SessionBootstrap from '@/components/auth/SessionBootstrap.jsx'
 
@@ -40,11 +49,21 @@ export default function App() {
         <Route path="/register" element={<Register />} />
         <Route path="/register/verify-otp" element={<RegisterVerifyOtp />} />
         <Route path="/mangaka" element={<Mangaka />} />
+        <Route path="/mangaka/profile" element={<MangakaProfile />} />
+        <Route path="/mangaka/profile/:authorId" element={<MangakaProfile />} />
+        <Route path="/mangaka/review" element={<MangakaAssistantReview />} />
+        <Route path="/mangaka/review/chapter/:chapterId" element={<MangakaAssistantReviewDetail />} />
         <Route path="/mangaka/series/:seriesSlug" element={<SeriesUploadDetail />} />
         <Route path="/mangaka/series/:seriesSlug/chapter/:chapterId" element={<SeriesUploadDetail />} />
         <Route path="/assistant" element={<Assistant />} />
         <Route path="/eb" element={<Eb />} />
-        <Route path="/tantou" element={<TantouEditor />} />
+        <Route path="/eb/series/:seriesId" element={<EbSeriesDetail />} />
+        <Route path="/eb/chapter/:chapterId" element={<Eb />} />
+        <Route path="/eb/chapter/:chapterId/publish" element={<EbPublish />} />
+        <Route path="/eb/schedule" element={<EbPublicationSchedule />} />
+        <Route path="/mangaka/chapter/:chapterId/te-revision" element={<MangakaTeRevision />} />
+        <Route path="/tantou" element={<TantouHub />} />
+        <Route path="/tantou/:section" element={<TantouEditor />} />
         <Route path="/profile" element={<UserProfile />} />
 
         <Route path="/admin" element={<AdminShell />}>
@@ -53,6 +72,7 @@ export default function App() {
           <Route path="manga" element={<AdminManga />} />
           <Route path="chapters" element={<Chapters />} />
           <Route path="users" element={<Users />} />
+          <Route path="eb-representative" element={<EbRepresentative />} />
           <Route path="profile" element={<Profile />} />
           <Route path="*" element={<Navigate to="dashboard" replace />} />
         </Route>

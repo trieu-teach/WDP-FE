@@ -3,7 +3,7 @@
  * Một tài khoản đại diện nhập điểm cho từng thành viên; hiển thị tổng hợp đủ cả HĐ.
  */
 
-export const EB_COUNCIL_SCORES_KEY = 'mk-eb-council-scores-v1'
+export const EB_COUNCIL_SCORES_KEY = 'mk-eb-council-scores-v2'
 
 export const EB_COUNCIL_MEMBERS = [
   { id: 'chair', name: 'PGS.TS. Trần Minh Khoa', title: 'Chủ tịch HĐ' },
@@ -36,18 +36,97 @@ export function readCouncilSeriesScores(seriesTitle) {
   return readAll()[key] ?? null
 }
 
+/** Danh sách thành viên HĐ đã thêm cho chapter/series đang chấm. */
+export function readCouncilRoster(seriesKey) {
+  const record = readCouncilSeriesScores(seriesKey)
+  if (Array.isArray(record?.roster)) return record.roster
+  return []
+}
+
+export function addCouncilMember(seriesKey, name) {
+  const key = String(seriesKey ?? '').trim()
+  const trimmed = String(name ?? '').trim()
+  if (!key || !trimmed) return null
+
+  const all = readAll()
+  const current = all[key] ?? { members: {}, roster: [] }
+  const roster = Array.isArray(current.roster) ? [...current.roster] : []
+
+  if (roster.some((m) => String(m.name ?? '').trim().toLowerCase() === trimmed.toLowerCase())) {
+    return null
+  }
+
+  const member = {
+    id: `member-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    name: trimmed,
+    title: 'Thành viên HĐ',
+  }
+  roster.push(member)
+  current.roster = roster
+  all[key] = current
+  writeAll(all)
+  return member
+}
+
+function resolveCouncilMembersForChapter(chapterItem) {
+  const key = String(chapterItem?.id ?? '').trim()
+  if (!key) return []
+  return readCouncilRoster(key)
+}
+
+/** Chapter đã chấm đủ Hội đồng (API hoặc localStorage) — ẩn khỏi hàng chờ duyệt. */
+export function isEbChapterFullyScored(chapterItem) {
+  if (!chapterItem?.id) return false
+
+  if (chapterItem.councilAverage != null) return true
+
+  const councilMembers = resolveCouncilMembersForChapter(chapterItem)
+  const requiredCount = councilMembers.length
+  if (!requiredCount) return false
+
+  if (
+    Array.isArray(chapterItem.memberScores)
+    && chapterItem.memberScores.length >= requiredCount
+  ) {
+    return true
+  }
+
+  const record = readCouncilSeriesScores(chapterItem.id)
+  if (!record?.members) return false
+
+  const requiredKeys = [
+    'story_dialogue',
+    'art_design',
+    'panel_camera',
+    'pacing_climax',
+    'color',
+  ]
+  const scoredCount = councilMembers.filter((member) => {
+    const scores = record.members[member.id]?.scores
+    if (!scores || typeof scores !== 'object') return false
+    return requiredKeys.every((key) => {
+      const raw = scores[key]
+      if (raw == null || String(raw).trim() === '') return false
+      return !Number.isNaN(Number.parseFloat(raw))
+    })
+  }).length
+
+  return scoredCount >= requiredCount && requiredCount > 0
+}
+
 export function saveCouncilMemberAssessment(seriesTitle, memberId, payload) {
   const key = String(seriesTitle ?? '').trim()
   if (!key || !memberId) return null
 
   const all = readAll()
-  const current = all[key] ?? { scoreType: payload.scoreType ?? 'color', members: {} }
-  current.scoreType = payload.scoreType ?? current.scoreType
+  const current = all[key] ?? { members: {} }
   current.members = {
     ...(current.members ?? {}),
     [memberId]: {
       scores: { ...payload.scores },
       criterionNotes: { ...(payload.criterionNotes ?? {}) },
+      overallComment: payload.overallComment ?? '',
+      notes: payload.notes ?? '',
       average: payload.average,
       assessedAt: payload.assessedAt ?? new Date().toISOString(),
       enteredBy: payload.enteredBy ?? null,
@@ -65,13 +144,14 @@ export function clampCouncilScore(value, max = 5) {
 }
 
 /** DTB từng thành viên + DTB hội đồng (trung bình các thành viên đã chấm). */
-export function buildCouncilAggregate(seriesRecord, scoreFieldKeys) {
+export function buildCouncilAggregate(seriesRecord, scoreFieldKeys, councilMembers = []) {
+  const membersList = Array.isArray(councilMembers) ? councilMembers : []
   const emptyCriterionAverages = Object.fromEntries(
     scoreFieldKeys.map((key) => [key, 0]),
   )
   if (!seriesRecord?.members) {
     return {
-      memberRows: EB_COUNCIL_MEMBERS.map((member) => ({
+      memberRows: membersList.map((member) => ({
         ...member,
         scored: false,
         scores: {},
@@ -85,20 +165,38 @@ export function buildCouncilAggregate(seriesRecord, scoreFieldKeys) {
     }
   }
 
-  const memberRows = EB_COUNCIL_MEMBERS.map((member) => {
+  const memberRows = membersList.map((member) => {
     const entry = seriesRecord.members[member.id]
-    if (!entry?.scores) {
+    const scores = entry?.scores
+    const requiredKeys = scoreFieldKeys.length
+      ? scoreFieldKeys
+      : [
+          'story_dialogue',
+          'art_design',
+          'panel_camera',
+          'pacing_climax',
+          'color',
+        ]
+    const fullyScored = Boolean(
+      scores
+      && requiredKeys.every((key) => {
+        const raw = scores[key]
+        if (raw == null || String(raw).trim() === '') return false
+        const parsed = Number.parseFloat(raw)
+        return !Number.isNaN(parsed)
+      }),
+    )
+    if (!fullyScored) {
       return {
         ...member,
         scored: false,
-        scores: {},
+        scores: scores ?? {},
         average: null,
         assessedAt: null,
         enteredBy: null,
       }
     }
 
-    const scores = entry.scores
     const total = scoreFieldKeys.reduce(
       (sum, key) => sum + clampCouncilScore(scores[key]),
       0,
@@ -110,6 +208,8 @@ export function buildCouncilAggregate(seriesRecord, scoreFieldKeys) {
       scored: true,
       scores,
       criterionNotes: entry.criterionNotes ?? {},
+      overallComment: entry.overallComment ?? '',
+      notes: entry.notes ?? '',
       average: Number(average.toFixed(1)),
       assessedAt: entry.assessedAt,
       enteredBy: entry.enteredBy,
@@ -139,38 +239,3 @@ export function buildCouncilAggregate(seriesRecord, scoreFieldKeys) {
   }
 }
 
-/** Demo: vài thành viên đã chấm sẵn để minh họa bảng tổng hợp. */
-export function seedCouncilDemoScores(seriesTitle, scoreType = 'color') {
-  const key = String(seriesTitle ?? '').trim()
-  if (!key || readCouncilSeriesScores(key)) return
-
-  const colorScores = {
-    chair: { plotDialogue: 4.5, artDesign: 4, panelingCamera: 4, pacingHook: 4.5, coloring: 4 },
-    'member-1': { plotDialogue: 3.5, artDesign: 4, panelingCamera: 3.5, pacingHook: 4, coloring: 3.5 },
-    'member-3': { plotDialogue: 4, artDesign: 3.5, panelingCamera: 4, pacingHook: 3.5, coloring: 4 },
-  }
-  const monoScores = {
-    chair: { plotDialogue: 4, artDesign: 4.5, panelingCamera: 4, pacingHook: 4, toneShading: 3.5 },
-    'member-1': { plotDialogue: 3.5, artDesign: 4, panelingCamera: 3.5, pacingHook: 3.5, toneShading: 4 },
-    'member-4': { plotDialogue: 4.5, artDesign: 4, panelingCamera: 4.5, pacingHook: 4, toneShading: 4 },
-  }
-
-  const presets = scoreType === 'mono' ? monoScores : colorScores
-  const all = readAll()
-  const members = {}
-
-  Object.entries(presets).forEach(([memberId, scores]) => {
-    const keys = Object.keys(scores)
-    const total = keys.reduce((s, k) => s + scores[k], 0)
-    members[memberId] = {
-      scores,
-      criterionNotes: {},
-      average: Number((total / keys.length).toFixed(1)),
-      assessedAt: new Date(Date.now() - 86400000).toISOString(),
-      enteredBy: 'Hệ thống demo',
-    }
-  })
-
-  all[key] = { scoreType, members }
-  writeAll(all)
-}

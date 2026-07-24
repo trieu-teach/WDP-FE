@@ -4,20 +4,24 @@ import { normalizeSeries, slugifySeriesTitle } from './seriesModel.js'
 const API_STATUS_TO_UI = {
   draft: 'draft',
   pending_assistant: 'assistant',
-  pending_TE: 'review',
+  submitted_by_assistant: 'review',
+  approved_by_mangaka: 'approved',
+  pending_TE: 'tantou',
   TE_revision: 'assistant',
   pending_EB: 'review',
   EB_revision: 'assistant',
   assigned: 'assistant',
   in_progress: 'assistant',
   submitted: 'review',
+  review: 'review',
   published: 'done',
 }
 
 const UI_STATUS_TO_API = {
   draft: 'draft',
   assistant: 'pending_assistant',
-  review: 'pending_TE',
+  approved: 'approved_by_mangaka',
+  review: 'review',
   tantou: 'pending_TE',
   done: 'published',
 }
@@ -37,10 +41,13 @@ export function apiSeriesToUi(raw, index = 0) {
   const s = raw && typeof raw === 'object' ? raw : {}
   const id = s._id ?? s.id
   const title = String(s.name ?? s.title ?? '').trim() || `Series ${index + 1}`
-  const genreStr = String(s.genre ?? '').trim()
-  const genres = genreStr
-    ? genreStr.split(/[,;|]/).map(g => g.trim()).filter(Boolean)
-    : (Array.isArray(s.genres) ? s.genres : [])
+  // BE trả genre là array; fallback để parse từ string (legacy)
+  const genreRaw = s.genre
+  const genres = Array.isArray(genreRaw)
+    ? genreRaw
+    : genreRaw
+      ? String(genreRaw).split(/[,;|]/).map(g => g.trim()).filter(Boolean)
+      : (Array.isArray(s.genres) ? s.genres : [])
 
   // author_id can be a populated object {_id, username, full_name} or a raw ObjectId string
   const authorObj = s.author_id
@@ -60,7 +67,12 @@ export function apiSeriesToUi(raw, index = 0) {
     format: s.format ?? 'manga',
     language: s.language ?? 'vi',
     contentRating: s.content_rating ?? s.contentRating ?? 'all',
-    publicationStatus: s.is_public ? 'ongoing' : (s.publication_status ?? 'preparing'),
+    // Ưu tiên publication_status từ BE; null = chưa xác định.
+    // is_public chỉ fallback legacy khi BE chưa có field.
+    publicationStatus:
+      s.publication_status != null
+        ? s.publication_status
+        : (s.is_public ? 'ongoing' : null),
     publishType: s.publish_type ?? 'debut',
     authorName,
     authorId,
@@ -75,21 +87,27 @@ export function apiSeriesToUi(raw, index = 0) {
     metadataComplete: Boolean(String(s.synopsis ?? s.description ?? '').trim()),
     category: String(s.category ?? '').trim(),
     tags: Array.isArray(s.tags) ? s.tags : [],
-    age_rating: s.age_rating ?? 'All ages',
+    age_rating: s.age_rating ?? s.ageRating ?? 'All ages',
   })
 }
 
+/**
+ * Tách payload gửi BE và cover file (binary) riêng.
+ * BE nhận `cover` là multipart field.
+ */
 export function uiSeriesFormToApi(form) {
-  return {
+  const genres = Array.isArray(form.genre) ? form.genre : []
+  const payload = {
     name: String(form.name ?? '').trim(),
     description: String(form.description ?? '').trim(),
-    genre: String(form.genre ?? '').trim(),
+    genre: genres,
     target_audience: String(form.target_audience ?? '').trim(),
     synopsis: String(form.description ?? '').trim(),
-    category: String(form.category ?? '').trim(),
     tags: Array.isArray(form.tags) ? form.tags : [],
     age_rating: String(form.age_rating ?? 'All ages').trim(),
   }
+  const coverFile = form.cover && typeof form.cover === 'object' ? form.cover : null
+  return { payload, coverFile }
 }
 
 export function apiChapterToRow(chapter, seriesTitle) {
@@ -100,6 +118,10 @@ export function apiChapterToRow(chapter, seriesTitle) {
   const assistantObj = c.assistant_id
   const assistantId = assistantObj && typeof assistantObj === 'object' ? assistantObj._id : assistantObj
 
+  const coverUrl = resolveMediaUrl(
+    c.cover_url ?? c.coverUrl ?? c.cover_image_url ?? c.coverImageUrl ?? null,
+  )
+
   return {
     id,
     seriesId: c.series_id?._id ?? c.series_id ?? null,
@@ -108,16 +130,23 @@ export function apiChapterToRow(chapter, seriesTitle) {
     type: 'PNG',
     pages: c.page_count ?? c.pages ?? 0,
     status: API_STATUS_TO_UI[c.status] ?? c.status ?? 'draft',
+    apiStatus: c.status ?? null,
+    revisionNotes: c.revision_notes ?? c.revisionNotes ?? '',
+    revisionSource: c.revision_source ?? c.revisionSource ?? '',
     date: formatRelativeDate(c.updatedAt ?? c.updated_at ?? c.createdAt),
     statusLabel: null,
     title: c.title ?? '',
     assistantId,
+    coverUrl: coverUrl || null,
   }
 }
 
 export function apiChapterToAnnotator(chapter, pages = [], seriesTitle) {
   const c = chapter ?? {}
   const id = c._id ?? c.id
+  const coverUrl = resolveMediaUrl(
+    c.cover_url ?? c.coverUrl ?? c.cover_image_url ?? c.coverImageUrl ?? null,
+  )
   return {
     id,
     seriesId: c.series_id?._id ?? c.series_id ?? null,
@@ -125,25 +154,68 @@ export function apiChapterToAnnotator(chapter, pages = [], seriesTitle) {
     num: c.chapter_number ?? c.num ?? 0,
     pages: pages.map(apiPageToUi),
     createdAt: formatRelativeDate(c.createdAt ?? c.created_at),
-    cover: null,
+    cover: coverUrl ? { url: coverUrl, name: 'cover' } : null,
   }
 }
 
 export function apiPageToUi(page, index = 0) {
   const p = page ?? {}
-  const rawUrl =
-    p.original_image_url
+  const pickUrl = (...candidates) => {
+    for (const v of candidates) {
+      if (v != null && String(v).trim() !== '') return v
+    }
+    return null
+  }
+  const originalRaw = pickUrl(
+    p.original_image_url,
+    p.originalImageUrl,
+    p.original_url,
+  )
+  const resultRaw = pickUrl(
+    p.result_image_url,
+    p.resultImageUrl,
+    p.result_url,
+    p.final_image_url,
+    p.finalImageUrl,
+  )
+  const fallbackRaw =
+    originalRaw
+    ?? resultRaw
     ?? p.image_url
     ?? p.url
     ?? p.imageUrl
-    ?? p.result_image_url
     ?? null
+  const pageNum = p.page_number ?? index + 1
+  const stableId = p._id ?? p.id ?? (p.page_number != null ? `p-${String(p.page_number)}` : null)
+  const id = stableId ? `${stableId}` : `fallback-${index}`
   return {
-    id: p._id ?? p.id ?? `page-${index}`,
-    name: p.name ?? p.filename ?? `Trang ${p.page_number ?? index + 1}`,
-    url: resolveMediaUrl(rawUrl),
-    pageNumber: p.page_number ?? index + 1,
+    id,
+    name: p.name ?? p.filename ?? `Trang ${pageNum}`,
+    url: resolveMediaUrl(resultRaw ?? fallbackRaw),
+    originalUrl: resolveMediaUrl(originalRaw),
+    resultUrl: resolveMediaUrl(resultRaw),
+    pageNumber: pageNum,
+    width: p.width ?? 800,
+    height: p.height ?? 1100,
   }
+}
+
+/**
+ * Luồng pages: ảnh gốc và kết quả Assistant lấy từ từng Page record.
+ * @param {Array<{ originalUrl?, resultUrl?, pageNumber? }>} pages
+ */
+export function chapterPagesToCompareUrls(pages) {
+  const sorted = [...(pages ?? [])].sort(
+    (a, b) => (a.pageNumber ?? 0) - (b.pageNumber ?? 0),
+  )
+  const originals = []
+  const results = []
+  for (const p of sorted) {
+    originals.push(p?.originalUrl || null)
+    results.push(p?.resultUrl || null)
+  }
+  const resultCount = results.filter(Boolean).length
+  return { originals, results, resultCount, pageCount: sorted.length }
 }
 
 export function apiRankingToUi(item, index) {
@@ -191,9 +263,225 @@ export function uiNoteToApi(note) {
 /** @deprecated Dùng uiNoteToApi */
 export const uiNoteToApiContent = uiNoteToApi
 
+/** Chuẩn hoá response GET /chapters/pages/:id/notes → mảng note. */
+export function extractPageNotesList(res) {
+  if (!res) return []
+  if (Array.isArray(res)) return res
+  if (Array.isArray(res.notes)) return res.notes
+  if (res.data) {
+    if (Array.isArray(res.data)) return res.data
+    if (Array.isArray(res.data.notes)) return res.data.notes
+  }
+  return []
+}
+
+/** Lấy page meta từ response GET /chapters/pages/:id/notes. */
+export function extractPageNotesPage(res) {
+  if (!res || typeof res !== 'object') return null
+  if (res.page && typeof res.page === 'object') return res.page
+  if (res.data?.page && typeof res.data.page === 'object') return res.data.page
+  return null
+}
+
+/**
+ * Parse đầy đủ GET /chapters/pages/:id/notes
+ * → { page, notes[] } với notes đã map sang UI shape (x, y, w, h %).
+ */
+export function parsePageNotesResponse(res) {
+  const page = extractPageNotesPage(res)
+  const notes = extractPageNotesList(res).map((n) => ({
+    ...apiNoteToUi(n),
+    source: 'api',
+  }))
+  return { page, notes }
+}
+
+export function sortPagesByNumber(pages) {
+  return [...(pages ?? [])].sort(
+    (a, b) =>
+      (a.pageNumber ?? a.page_number ?? 0) - (b.pageNumber ?? b.page_number ?? 0),
+  )
+}
+
+function mapAnnotationNoteToUi(n, pageIdx, noteIdx, source = 'chapterAnnotations') {
+  const region = n?.region ?? {}
+  const id = n?._id ?? n?.id ?? `${source}-${pageIdx}-${noteIdx}`
+  const round = Number(n?.revision_round ?? n?.revisionRound ?? n?.round)
+  return {
+    id,
+    clientKey: String(id),
+    text: n?.text ?? n?.content ?? '',
+    x: Number(n?.x ?? region.x ?? 0),
+    y: Number(n?.y ?? region.y ?? 0),
+    w: Number(n?.w ?? n?.width ?? region.width ?? region.w ?? 0),
+    h: Number(n?.h ?? n?.height ?? region.height ?? region.h ?? 0),
+    taskType: n?.taskType ?? n?.error_type ?? 'other',
+    status: n?.status ?? 'open',
+    revisionRound: Number.isFinite(round) ? round : null,
+    source,
+  }
+}
+
+/**
+ * Chỉ giữ note của revision round mới nhất (khi có nhiều vòng sửa).
+ * Note không có round (undefined/null) được giữ nguyên để không ảnh hưởng luồng cũ.
+ */
+export function keepLatestRevisionNotes(notes) {
+  const list = notes ?? []
+  const rounds = list
+    .map((n) => Number(n?.revisionRound ?? n?.revision_round))
+    .filter((r) => Number.isFinite(r) && r > 0)
+  if (!rounds.length) return list
+  const maxRound = Math.max(...rounds)
+  if (maxRound <= 1) return list
+  return list.filter((n) => {
+    const r = Number(n?.revisionRound ?? n?.revision_round)
+    return !Number.isFinite(r) || r >= maxRound
+  })
+}
+
+/** Note có vùng % thật do Mangaka khoanh — loại placeholder full-canvas từ revision_notes text. */
+export function isSpatialRegionNote(note) {
+  const x = Number(note?.x ?? 0)
+  const y = Number(note?.y ?? 0)
+  const w = Number(note?.w ?? note?.width ?? 0)
+  const h = Number(note?.h ?? note?.height ?? 0)
+  if (w <= 0 || h <= 0) return false
+  // Chỉ là text parse từ revision_notes string — không có toạ độ vùng
+  if (note?.source === 'parsed') return false
+  // Placeholder full-canvas (0,0,100,100) khi không có vùng cụ thể
+  if (w >= 90 && h >= 90 && x <= 5 && y <= 5) return false
+  return true
+}
+
+export function filterSpatialMangakaNotes(notes) {
+  const spatial = (notes ?? []).filter(isSpatialRegionNote)
+  if (!spatial.length) return []
+
+  // Ưu tiên nguồn có toạ độ chính xác từ DB / BE
+  const priority = ['api', 'taskNotes', 'chapterPageTasks', 'byPage', 'revisionMap', 'revisionArray', 'revisionParsed']
+  const sorted = [...spatial].sort((a, b) => {
+    const pa = priority.indexOf(a.source ?? '')
+    const pb = priority.indexOf(b.source ?? '')
+    return (pa === -1 ? 99 : pa) - (pb === -1 ? 99 : pb)
+  })
+
+  const seen = new Set()
+  const out = []
+  for (const n of sorted) {
+    const key = n.clientKey ?? n.id ?? `${n.x}-${n.y}-${n.w}-${n.h}-${n.text}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(n)
+  }
+  return out
+}
+
+const NOTE_SOURCE_PRIORITY = ['api', 'taskNotes', 'chapterPageTasks', 'byPage', 'revisionMap', 'revisionArray', 'revisionParsed']
+
+function noteMergeScore(note) {
+  let s = NOTE_SOURCE_PRIORITY.indexOf(note?.source ?? '')
+  if (s === -1) s = 99
+  if (isSpatialRegionNote(note)) s -= 20
+  return s
+}
+
+/** Gộp notes từ nhiều nguồn — ưu tiên API + toạ độ hợp lệ khi trùng id. */
+export function mergeMangakaNoteLists(...lists) {
+  const byKey = new Map()
+  for (const list of lists) {
+    for (const note of list ?? []) {
+      let key = note?.clientKey ?? note?.id
+      if (key == null && note?._id != null) key = String(note._id)
+      if (key == null && isSpatialRegionNote(note)) {
+        key = `spatial-${note.x}-${note.y}-${note.w}-${note.h}-${note.text ?? ''}`
+      }
+      if (!key) continue
+      const prev = byKey.get(key)
+      if (!prev || noteMergeScore(note) < noteMergeScore(prev)) {
+        byKey.set(key, note)
+      }
+    }
+  }
+  return Array.from(byKey.values())
+}
+
+/** Gom ghi chú Mangaka cho 1 trang (pageIdx 0-based, pages đã sort). */
+export function buildChapterPageAnnotations(chapter, pageIdx, sortedPages = []) {
+  const result = []
+  const activePageId = sortedPages[pageIdx]?.id ?? sortedPages[pageIdx]?._id ?? null
+
+  const byPage =
+    chapter?.revision_annotations_by_page
+    ?? chapter?.data?.revision_annotations_by_page
+  if (byPage && typeof byPage === 'object' && !Array.isArray(byPage)) {
+    const arr = byPage[`page_${pageIdx}`] ?? byPage[pageIdx]
+    if (Array.isArray(arr)) {
+      arr.forEach((n, i) => result.push(mapAnnotationNoteToUi(n, pageIdx, i, 'byPage')))
+    }
+  }
+
+  const raw = chapter?.revision_annotations ?? chapter?.data?.revision_annotations
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    const arr = raw[`page_${pageIdx}`] ?? raw[pageIdx]
+    if (Array.isArray(arr)) {
+      arr.forEach((n, i) => result.push(mapAnnotationNoteToUi(n, pageIdx, i, 'revisionMap')))
+    }
+  }
+
+  if (Array.isArray(raw)) {
+    raw.forEach((n, i) => {
+      const notePageId = n?.page_id?._id ?? n?.page_id ?? n?.pageId
+      if (notePageId && activePageId && String(notePageId) !== String(activePageId)) return
+      if (!notePageId && n?.pageIndex != null && Number(n.pageIndex) !== pageIdx) return
+      result.push(mapAnnotationNoteToUi(n, pageIdx, `arr-${i}`, 'revisionArray'))
+    })
+  }
+
+  // revision_notes_parsed — ghi chú có toạ độ từ revision_annotations (flatten)
+  const parsedList = chapter?.revision_notes_parsed ?? chapter?.data?.revision_notes_parsed ?? []
+  if (Array.isArray(parsedList)) {
+    parsedList.forEach((n, i) => {
+      if (n?.pageIndex != null && Number(n.pageIndex) !== pageIdx) return
+      if (n?.pageId && activePageId && String(n.pageId) !== String(activePageId)) return
+      result.push(mapAnnotationNoteToUi(n, pageIdx, i, 'revisionParsed'))
+    })
+  }
+
+  const pageData = sortedPages[pageIdx]
+  for (const task of pageData?.tasks ?? []) {
+    const noteIds = task?.note_ids ?? task?.noteIds ?? []
+    if (!Array.isArray(noteIds)) continue
+    noteIds.forEach((n, i) => {
+      const ui = typeof n === 'object' ? apiNoteToUi(n) : { text: '' }
+      const id = ui.id ?? `ptask-${pageIdx}-${i}`
+      result.push({
+        ...ui,
+        id,
+        clientKey: ui.clientKey ?? String(id),
+        source: 'chapterPageTasks',
+      })
+    })
+  }
+
+  return result
+}
+
+export function normalizeNoteCoords(note) {
+  const n = note ?? {}
+  const region = n.region ?? {}
+  return {
+    x: Number(n.x ?? region.x ?? 0),
+    y: Number(n.y ?? region.y ?? 0),
+    w: Number(n.w ?? n.width ?? region.width ?? region.w ?? 0),
+    h: Number(n.h ?? n.height ?? region.height ?? region.h ?? 0),
+  }
+}
+
 export function apiNoteToUi(raw) {
   const n = raw ?? {}
   const id = n._id ?? n.id
+  const coords = normalizeNoteCoords(n)
   const base = {
     clientKey: id ? String(id) : undefined,
     assignee: n.assignee ?? '',
@@ -203,16 +491,14 @@ export function apiNoteToUi(raw) {
       ...base,
       id,
       text: n.text ?? '',
-      x: n.x ?? 0,
-      y: n.y ?? 0,
-      w: n.w ?? 0,
-      h: n.h ?? 0,
+      ...coords,
       taskType: n.taskType ?? 'other',
       layerIndex: n.layerIndex ?? n.layer_index ?? null,
-      noteKind: n.noteKind ?? n.note_kind ?? 'paint',
+      noteKind: n.noteKind ?? n.note_kind ?? 'brief',
       status: n.status ?? 'open',
       pageId: n.pageId ?? n.page_id ?? null,
-      authorRole: n.authorRole ?? n.author_role ?? null,
+      authorRole: n.authorRole ?? n.author_role ?? 'mangaka',
+      revisionRound: n.revisionRound ?? n.revision_round ?? 1,
     }
   }
 
@@ -222,21 +508,20 @@ export function apiNoteToUi(raw) {
   } catch {
     parsed = { text: n.content ?? '' }
   }
+  const parsedCoords = normalizeNoteCoords({ ...n, ...parsed })
   return {
     ...base,
     id,
     text: parsed.text ?? n.content ?? '',
-    x: parsed.x ?? 0,
-    y: parsed.y ?? 0,
-    w: parsed.w ?? 0,
-    h: parsed.h ?? 0,
+    ...parsedCoords,
     taskType: parsed.taskType ?? 'other',
     assignee: parsed.assignee ?? '',
     layerIndex: parsed.layerIndex ?? parsed.layer_index ?? null,
-    noteKind: parsed.noteKind ?? parsed.note_kind ?? 'paint',
+    noteKind: parsed.noteKind ?? parsed.note_kind ?? 'brief',
     status: parsed.status ?? n.status ?? 'open',
     pageId: parsed.pageId ?? parsed.page_id ?? n.pageId ?? n.page_id ?? null,
-    authorRole: parsed.authorRole ?? parsed.author_role ?? n.authorRole ?? n.author_role ?? null,
+    authorRole: parsed.authorRole ?? parsed.author_role ?? n.authorRole ?? n.author_role ?? 'mangaka',
+    revisionRound: parsed.revisionRound ?? parsed.revision_round ?? n.revision_round ?? 1,
   }
 }
 
@@ -251,6 +536,47 @@ const UI_TASK_TYPE_TO_API = {
   effects: 'effects',
   details: 'details',
   other: 'other',
+}
+
+// BE enum cho revision_annotations.error_type
+const UI_TASK_TYPE_TO_ERROR_TYPE = {
+  background: 'art',
+  shading: 'art',
+  details: 'art',
+  fx: 'content',
+  effects: 'content',
+  paint: 'art',
+  layout: 'art',
+  dialogue: 'dialogue',
+  script: 'script',
+  art: 'art',
+  content: 'content',
+  other: 'other',
+}
+
+export function uiTaskTypeToErrorType(taskType) {
+  return UI_TASK_TYPE_TO_ERROR_TYPE[taskType] ?? 'other'
+}
+
+/** FE note → payload flat `revision_annotations` cho PATCH /tasks/:id/revision. */
+export function uiNotesToRevisionAnnotations(notes) {
+  return filterSpatialMangakaNotes(notes)
+    .map((n) => {
+      const content = String(n.text ?? '').trim() || 'Cần chỉnh sửa.'
+      const x = Number(n.x) || 0
+      const y = Number(n.y) || 0
+      const w = Number(n.w ?? n.width) || 0
+      const h = Number(n.h ?? n.height) || 0
+      return {
+        content,
+        error_type: uiTaskTypeToErrorType(n.taskType),
+        x,
+        y,
+        w,
+        h,
+      }
+    })
+    .filter((a) => a.w > 0 && a.h > 0 && a.x + a.w <= 100 && a.y + a.h <= 100)
 }
 
 export function uiTaskTypeToApi(taskType) {
@@ -278,34 +604,82 @@ export function uiNoteToTaskCreate(note, { pageId, assignedTo, price }) {
 }
 
 /**
- * Tạo 1 task duy nhất cho cả chapter (flow mới: 1 task = 1 chapter).
- * TODO backend: cập nhật `POST /tasks` để nhận `chapter_id` thay vì bắt buộc `page_id` + `region`.
- * Hiện tại gửi kèm page_id của trang đầu + region toàn ảnh làm fallback tạm thời.
+ * Tạo 1 task duy nhất cho cả chapter (luồng mới: 1 task = 1 chapter).
+ * Gửi chapter_id thay vì page_id.
  */
-export function uiChapterToTaskCreate({ chapterId, pageId, assignedTo, description, price, workType }) {
+export function uiChapterToTaskCreate({ chapterId, assignedTo, description, price, workType }) {
   return {
     chapter_id: chapterId,
-    page_id: pageId,
     assigned_to: assignedTo,
     work_type: workType ?? 'background',
-    region: { x: 0, y: 0, width: 1, height: 1 },
     description: description ?? '',
     ...(price != null ? { price } : {}),
   }
 }
 
+/**
+ * Chuyển region (%) từ BE thành pixel coordinates.
+ * @param {object} region - { x, y, width, height } tính bằng % (0-100)
+ * @param {number} imgWidth - chiều rộng thực của ảnh (px)
+ * @param {number} imgHeight - chiều cao thực của ảnh (px)
+ * @returns {{ x: number, y: number, width: number, height: number }} pixel coords
+ */
+export function regionToPixels(region, imgWidth, imgHeight) {
+  if (!region) return { x: 0, y: 0, width: imgWidth ?? 0, height: imgHeight ?? 0 }
+  return {
+    x: Math.round((region.x ?? 0) * (imgWidth || 1) / 100),
+    y: Math.round((region.y ?? 0) * (imgHeight || 1) / 100),
+    width: Math.round((region.width ?? 100) * (imgWidth || 1) / 100),
+    height: Math.round((region.height ?? 100) * (imgHeight || 1) / 100),
+  }
+}
+
 export function apiTaskToUi(raw) {
   const t = raw ?? {}
+  const region = t.region ?? null
   return {
     id: t._id ?? t.id,
     pageId: t.page_id?._id ?? t.page_id ?? null,
+    pageNumber:
+      t.page_number
+      ?? t.page_id?.page_number
+      ?? t.page_id?.pageNumber
+      ?? null,
     chapterId: t.chapter_id?._id ?? t.chapter_id ?? null,
+    seriesName: t.seriesName ?? t.series_name ?? t.chapter_id?.seriesName ?? t.chapter_id?.series_name ?? t.chapter_id?.series?.name ?? null,
     assignedBy: t.assigned_by?._id ?? t.assigned_by ?? null,
     assignedTo: t.assigned_to?._id ?? t.assigned_to ?? null,
     workType: t.work_type ?? 'other',
-    region: t.region ?? null,
+    /**
+     * region: BE trả { x, y, width, height } tính bằng % (0-100).
+     * Dùng regionToPixels(region, imgWidth, imgHeight) để chuyển sang pixel khi vẽ overlay.
+     */
+    region,
     description: t.description ?? '',
     revisionNote: t.revision_note ?? '',
+    revisionRound: t.revision_round ?? t.round ?? null,
+    /**
+     * Annotation vùng hiện tại (round đang revision) từ BE.
+     * Shape: [{ _id, page_id, content, error_type, region:{x,y,width,height}, note_kind, revision_round }]
+     */
+    revisionAnnotations: Array.isArray(t.revision_annotations)
+      ? t.revision_annotations
+      : [],
+    /**
+     * note_ids: mảng PageNote gắn với task.
+     * BE populate đầy đủ: [{ _id, text, x, y, w, h, taskType, status, createdAt }]
+     * FE nên dùng mảng này thay vì gọi riêng GET /pages/:id/notes.
+     */
+    noteIds: Array.isArray(t.note_ids)
+      ? t.note_ids.map((n, i) => {
+          const ui = apiNoteToUi(n)
+          return {
+            ...ui,
+            id: ui.id ?? `note-${i}`,
+            clientKey: ui.clientKey ?? String(ui.id ?? `note-${i}`),
+          }
+        })
+      : [],
     /**
      * Lịch sử các lần Mangaka yêu cầu chỉnh sửa.
      * TODO backend: BE nên trả về `revision_history: [{ at, by, note, request_revision_count }]`
@@ -345,9 +719,21 @@ export function apiSubmissionChapterToUi(raw, index = 0) {
     seriesName,
     status: c.status ?? '',
     chapterNumber: c.chapter_number ?? c.num ?? index + 1,
+    title: c.title ?? '',
+    te_id: c.te_id ?? null,
+    te_assigned_at: c.te_assigned_at ?? null,
+    revision_notes: c.revision_notes ?? '',
+    revision_history: Array.isArray(c.revision_history) ? c.revision_history : [],
     createdAt: c.createdAt ?? c.created_at,
     updatedAt: c.updatedAt ?? c.updated_at,
   }
+}
+
+/** Chapter statuses cho phép Mangaka gửi sang TE (Bước 7). */
+export const MANGAKA_TE_SENDABLE_STATUSES = ['approved_by_mangaka', 'TE_revision', 'review']
+
+export function canMangakaSendToTe(apiStatus) {
+  return MANGAKA_TE_SENDABLE_STATUSES.includes(String(apiStatus ?? ''))
 }
 
 function formatRelativeDate(iso) {

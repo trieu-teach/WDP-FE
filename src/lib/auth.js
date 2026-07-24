@@ -10,12 +10,14 @@ export const ROLE_OPTIONS = [
 export const ROLE_LABELS = {
   [ROLES.MANGAKA]: 'Mangaka',
   [ROLES.ASSISTANT]: 'Assistant',
+  admin: 'Admin',
   editor: 'Editor',
   eb: 'Editor Board',
   reader: 'Reader',
 }
 
 const API_ROLE_TO_APP = {
+  Admin: 'admin',
   Mangaka: ROLES.MANGAKA,
   Assistant: ROLES.ASSISTANT,
   Editor: 'editor',
@@ -29,6 +31,7 @@ const APP_ROLE_TO_API = {
 }
 
 const ROLE_PATH = {
+  admin: '/admin/dashboard',
   [ROLES.MANGAKA]: '/mangaka',
   [ROLES.ASSISTANT]: '/assistant',
   editor: '/tantou',
@@ -81,6 +84,12 @@ function normalizeUser(apiUser) {
     username,
     role: API_ROLE_TO_APP[apiUser.role] ?? apiUser.role?.toLowerCase?.() ?? apiUser.role,
     avatarUrl: apiUser.avatarUrl ?? apiUser.avatar_url ?? '',
+    bio: apiUser.bio ?? '',
+    socialLinks: {
+      facebook: apiUser.social_links?.facebook ?? apiUser.socialLinks?.facebook ?? '',
+      twitter: apiUser.social_links?.twitter ?? apiUser.socialLinks?.twitter ?? '',
+      website: apiUser.social_links?.website ?? apiUser.socialLinks?.website ?? '',
+    },
     isProMember: Boolean(apiUser.isProMember),
   }
 }
@@ -136,7 +145,7 @@ export async function login(usernameOrEmail, password) {
   }
 }
 
-export function buildRegisterPayload({ username, name, email, password, role }) {
+export function buildRegisterPayload({ username, name, email, password, role, phone }) {
   if (role !== ROLES.MANGAKA && role !== ROLES.ASSISTANT) {
     throw { message: 'Chỉ Mangaka và Assistant được phép đăng ký.' }
   }
@@ -145,17 +154,22 @@ export function buildRegisterPayload({ username, name, email, password, role }) 
   if (!normalizedUsername) {
     throw { message: 'Vui lòng nhập tên đăng nhập.' }
   }
-  return {
+  const payload = {
     username: normalizedUsername,
     password,
     full_name: name.trim(),
     email: normalizedEmail,
     role: APP_ROLE_TO_API[role],
   }
+  const normalizedPhone = (phone ?? '').replace(/[\s.-]/g, '').trim()
+  if (normalizedPhone) {
+    payload.phoneNumber = normalizedPhone
+  }
+  return payload
 }
 
-export async function register({ username, name, email, password, role }) {
-  const payload = buildRegisterPayload({ username, name, email, password, role })
+export async function register({ username, name, email, password, role, phone }) {
+  const payload = buildRegisterPayload({ username, name, email, password, role, phone })
   try {
     await authService.register(payload)
     return await login(payload.username, password)

@@ -1,5 +1,6 @@
 import {
   BookOpen,
+  Crown,
   FileText,
   LayoutDashboard,
   LogOut,
@@ -22,6 +23,7 @@ const NAV_ITEMS = [
     section: 'Quản lý',
     links: [
       { id: 'users', label: 'Người dùng', icon: UsersIcon },
+      { id: 'eb-representative', label: 'Đại diện EB', icon: Crown },
       { id: 'profile', label: 'Hồ sơ', icon: UserCircle },
     ],
   },

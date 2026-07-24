@@ -7,6 +7,7 @@ import { placeholderPageDataUrl } from './placeholderPageDataUrl.js'
 
 export const TANTOU_SUBMISSIONS_KEY = 'mk-tantou-submissions-v1'
 export const TANTOU_SCHEDULE_KEY = 'mk-tantou-publish-schedule-v1'
+export const TANTOU_REVIEW_HISTORY_KEY = 'mk-tantou-review-history-v1'
 
 const NOTIFY = 'mk-tantou-storage'
 
@@ -49,6 +50,16 @@ export function updateTantouSubmission(id, patch) {
 export function listPublishSchedules() {
   const raw = readJson(TANTOU_SCHEDULE_KEY, {})
   return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}
+}
+
+export function listTantouReviewHistory() {
+  return readJson(TANTOU_REVIEW_HISTORY_KEY, [])
+}
+
+export function pushTantouReviewHistory(entry) {
+  const list = listTantouReviewHistory()
+  list.unshift(entry)
+  writeJson(TANTOU_REVIEW_HISTORY_KEY, list.slice(0, 50))
 }
 
 export function setPublishSchedule(seriesTitle, schedule) {

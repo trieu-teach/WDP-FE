@@ -2,13 +2,16 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { notificationsService } from '@/api/notifications.service.js'
 import { getApiErrorMessage } from '@/api/http.js'
+import { resolveEntityId } from '@/utils/notificationTarget.js'
 
 const POLL_INTERVAL_MS = 45_000
 
 function normalize(raw) {
   if (!raw) return null
   const relatedType = raw.related_entity_type ?? raw.relatedEntityType ?? null
-  const relatedId = raw.related_entity_id ?? raw.relatedEntityId ?? null
+  const relatedId = resolveEntityId(raw.related_entity_id ?? raw.relatedEntityId)
+  const dataBag = typeof raw.data === 'object' && raw.data ? raw.data : {}
+  const metaBag = typeof raw.meta === 'object' && raw.meta ? raw.meta : {}
   return {
     id: String(raw._id ?? raw.id ?? raw.notificationId ?? ''),
     title: raw.title ?? raw.subject ?? 'Thông báo',
@@ -19,7 +22,7 @@ function normalize(raw) {
     link: raw.link ?? raw.url ?? raw.actionUrl ?? null,
     relatedEntityType: relatedType,
     relatedEntityId: relatedId,
-    meta: raw.meta ?? null,
+    meta: { ...dataBag, ...metaBag },
     raw,
   }
 }
@@ -30,6 +33,8 @@ export function useNotifications({ pollInterval = POLL_INTERVAL_MS, enabled = tr
   const [loading, setLoading] = useState(false)
   const timerRef = useRef(null)
   const seenIdsRef = useRef(new Set())
+  /** Bỏ qua onNew ở lần hydrate đầu — tránh toast lại toàn bộ list cũ khi vào trang. */
+  const hydratedRef = useRef(false)
   const onNewRef = useRef(onNew)
   onNewRef.current = onNew
 
@@ -39,13 +44,16 @@ export function useNotifications({ pollInterval = POLL_INTERVAL_MS, enabled = tr
     try {
       const res = await notificationsService.list({ limit: 20 })
       const list = (Array.isArray(res.items) ? res.items : []).map(normalize).filter(n => n.id)
-      // Phát hiện notification mới (chưa thấy id lần nào)
       const seen = seenIdsRef.current
       const fresh = list.filter(n => !seen.has(n.id))
       for (const n of list) seen.add(n.id)
       setItems(list)
       setUnreadCount(Number(res.unreadCount ?? list.filter(n => !n.isRead).length))
-      if (fresh.length) {
+
+      const isHydrated = hydratedRef.current
+      if (!isHydrated) {
+        hydratedRef.current = true
+      } else if (fresh.length) {
         const handler = onNewRef.current
         if (typeof handler === 'function') {
           for (const n of fresh) handler(n)
