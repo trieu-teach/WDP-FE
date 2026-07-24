@@ -179,7 +179,7 @@
   min-width: 100%;
   min-height: 100%;
   object-fit: cover;
-  object-position: center;
+  object-position: center 30%;
   transform: translate(-50%, -50%);
   transition: opacity 0.5s ease;
 }
