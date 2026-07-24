@@ -1,10 +1,8 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Eye, EyeOff } from 'lucide-react'
-import { RoleCard } from '@/components/layout/AuthShell.jsx'
 import { AuthBoxField, AuthSplitLayout } from '@/components/layout/AuthSplitLayout.jsx'
-import { ROLES, ROLE_OPTIONS, register, getRolePath, getSession } from '@/lib/auth.js'
-import '@/components/layout/AuthForm.css'
+import { ROLES, register, getRolePath, getSession } from '@/lib/auth.js'
 import './Register.css'
 
 export default function Register() {
@@ -16,7 +14,6 @@ export default function Register() {
     phone: '',
     password: '',
     confirmPassword: '',
-    role: ROLES.MANGAKA,
   })
   const [agree, setAgree] = useState(false)
   const [showPass, setShowPass] = useState(false)
@@ -52,7 +49,6 @@ export default function Register() {
         return 'Số điện thoại không hợp lệ (VD: 0912345678 hoặc +84912345678).'
       }
     }
-    if (!form.role) return 'Vui lòng chọn vai trò.'
     if (form.password.length < 6) return 'Mật khẩu phải có ít nhất 6 ký tự.'
     if (form.password !== form.confirmPassword) return 'Mật khẩu xác nhận không khớp.'
     if (!agree) return 'Bạn cần đồng ý với điều khoản sử dụng.'
@@ -80,7 +76,7 @@ export default function Register() {
         email,
         phone: form.phone,
         password: form.password,
-        role: form.role,
+        role: ROLES.MANGAKA,
       })
       navigate(getRolePath(user.role))
     } catch (err) {
@@ -93,20 +89,16 @@ export default function Register() {
   return (
     <AuthSplitLayout
       variant="register"
-      title={(
-        <>
-          Tham gia
-          <br />
-          MangaHub!
-        </>
-      )}
-      subtitle="Đăng ký Mangaka hoặc Assistant. Tantou Editor / Editor Board do Admin cấp tài khoản."
+      title="Bắt đầu hành trình"
+      subtitle="Đăng ký tài khoản Mangaka để tạo series và phối hợp trên MangaHub."
+      heroEyebrow="MangaHub"
+      heroCaption="Tạo series · Giao việc · Xuất bản"
     >
       <div className="auth-split-box auth-split-box--register">
-        <header className="auth-register-head">
-          <h2>Đăng ký</h2>
-          <p>Tạo tài khoản để bắt đầu làm việc trên nền tảng.</p>
-        </header>
+        <div className="auth-split-greeting">
+          <h2>Tạo tài khoản</h2>
+          <p>Đăng ký Mangaka để bắt đầu làm việc trên MangaHub</p>
+        </div>
 
         {error ? (
           <div className="auth-split-error" role="alert" aria-live="polite">
@@ -115,23 +107,6 @@ export default function Register() {
         ) : null}
 
         <form className="auth-register-form" onSubmit={handleSubmit} noValidate>
-          <section className="auth-register-section">
-            <p className="auth-register-section__title">Vai trò của bạn</p>
-            <div className="auth-form__roles auth-register-roles">
-              {ROLE_OPTIONS.map((opt) => (
-                <RoleCard
-                  key={opt.value}
-                  value={opt.value}
-                  active={form.role === opt.value}
-                  icon={opt.icon}
-                  title={opt.title}
-                  desc={opt.desc}
-                  onSelect={() => setField('role', opt.value)}
-                />
-              ))}
-            </div>
-          </section>
-
           <section className="auth-register-section">
             <p className="auth-register-section__title">Thông tin tài khoản</p>
             <div className="auth-register-grid">
@@ -177,7 +152,6 @@ export default function Register() {
           </section>
 
           <section className="auth-register-section">
-            <p className="auth-register-section__title">Bảo mật</p>
             <div className="auth-register-grid auth-register-grid--password">
               <AuthBoxField
                 id="reg-password"

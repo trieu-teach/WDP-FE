@@ -1,11 +1,11 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import { Edit, Loader2, User } from 'lucide-react'
 import { toast } from 'sonner'
 import Header from '@/components/User/Header/Header.jsx'
 import Footer from '@/components/User/Footer/Footer.jsx'
 import { api } from '@/api/index.js'
-import { getSession, logout, updateSession } from '@/lib/auth.js'
+import { getSession, logout, updateSession, ROLES, getRolePath } from '@/lib/auth.js'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -47,6 +47,24 @@ export default function UserProfile() {
     name: user?.name ?? '',
     email: user?.email ?? '',
   })
+
+  // Mangaka dùng trang hồ sơ riêng theo BE /mangaka/profile
+  if (user?.role === ROLES.MANGAKA) {
+    return <Navigate to="/mangaka/profile" replace />
+  }
+
+  // Assistant / Editor / EB không có trang Profile
+  const rolesWithoutProfile = new Set([
+    ROLES.ASSISTANT,
+    'assistant',
+    'editor',
+    'eb',
+    'editor_board',
+    'tantou_editor',
+  ])
+  if (user && rolesWithoutProfile.has(user.role)) {
+    return <Navigate to={getRolePath(user.role) || '/'} replace />
+  }
 
   if (!user) {
     return (

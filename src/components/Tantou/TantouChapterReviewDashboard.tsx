@@ -25,7 +25,6 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -773,9 +772,6 @@ export function TantouChapterReviewDashboard({
           <Card className="border-border/70 dark:bg-zinc-950/60">
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Thông tin truyện</CardTitle>
-              <CardDescription>
-                Thông tin do Mangaka khai báo khi tạo series.
-              </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-6 md:flex-row md:items-start md:gap-8">
               <div className="mx-auto w-full max-w-[200px] shrink-0 space-y-2 md:mx-0 md:w-[220px] lg:w-[240px]">

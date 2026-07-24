@@ -1,0 +1,21 @@
+.avatar-crop-dialog__stage {
+  position: relative;
+  width: 100%;
+  height: 280px;
+  overflow: hidden;
+  border-radius: 0.75rem;
+  background: #111;
+}
+
+.avatar-crop-dialog__zoom {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding-top: 0.25rem;
+}
+
+.avatar-crop-dialog__range {
+  width: 100%;
+  accent-color: #6f3cff;
+  cursor: pointer;
+}

@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -27,8 +26,6 @@ import "./Eb.css";
 
 const NAV_LINKS = [
   { to: "/", label: "Trang chủ" },
-  { to: "/mangaka", label: "Mangaka" },
-  { to: "/tantou", label: "Tantou Editor" },
 ];
 
 export default function EbSeriesDetail() {
@@ -204,12 +201,6 @@ export default function EbSeriesDetail() {
               <Card>
                 <CardHeader>
                   <CardTitle>Thông tin series</CardTitle>
-                  <CardDescription>
-                    Tóm tắt từ{" "}
-                    <code className="text-[10px]">
-                      GET /eb-evaluations/series/:id/detail
-                    </code>
-                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3 text-sm">
                   {series?.synopsis ? (
@@ -238,19 +229,10 @@ export default function EbSeriesDetail() {
             </section>
 
             <section className="space-y-4">
-              <div>
-                <h2 className="flex items-center gap-2 text-lg font-semibold">
-                  <BookOpen className="size-5 text-primary" />
-                  Chapters chờ duyệt
-                </h2>
-                <p className="text-sm text-muted-foreground">
-                  Chapter 1 tải cùng detail; chapter khác gọi{" "}
-                  <code className="text-[10px]">
-                    GET /eb-scores/chapter/:id/preview
-                  </code>
-                  .
-                </p>
-              </div>
+              <h2 className="flex items-center gap-2 text-lg font-semibold">
+                <BookOpen className="size-5 text-primary" />
+                Chapters chờ duyệt
+              </h2>
 
               <div className="flex flex-wrap gap-2">
                 {chapterTabs.map((ch) => (

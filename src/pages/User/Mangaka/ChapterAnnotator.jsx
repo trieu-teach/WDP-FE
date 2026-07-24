@@ -15,7 +15,6 @@ import {
   Upload,
   X,
 } from 'lucide-react'
-import { LABEL_EDITOR_BOARD, LABEL_TANTOU_EDITOR } from '@/constants/roleTerminology.js'
 import { NOTE_TASK_TYPES, noteTaskLabel } from '@/constants/workspaceTasks.js'
 import { fileToStorableDataUrl } from '@/utils/mangakaWorkspaceStorage.js'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -84,7 +83,6 @@ export default function ChapterAnnotator({
   seriesOptions = [],
   chapterNum,
   onChapterNumChange,
-  chapterNumHint,
   chapters,
   setChapters,
   activeChapterId,
@@ -98,7 +96,6 @@ export default function ChapterAnnotator({
   onUploadProgress,
   onSendToAssistant,
   onSendRevision,
-  onSendToTantou,
   workspaceApi = null,
   pendingReviewCount = 0,
   revisionMode = false,
@@ -734,8 +731,6 @@ export default function ChapterAnnotator({
     && !!uploadTargetChapter
     && (hiredAssistants.length === 0 || !!sendAssistantId)
 
-  const selectedSeriesPipeline = seriesOptions.find(s => s.title === selectedSeriesTitle.trim())
-
   function ToolButtons({ onDark = false }) {
     const outlineOnDark =
       'border-white/15 bg-zinc-800/90 text-zinc-100 shadow-none hover:border-white/25 hover:bg-zinc-700 hover:text-white'
@@ -1193,17 +1188,6 @@ export default function ChapterAnnotator({
         setSendingToAssistant(false)
       }
     }
-    const handleTantou = () => {
-      if (!activeChapter || !onSendToTantou) return
-      const page = pages[pageIndex]
-      onSendToTantou({
-        chapter: activeChapter,
-        pageIndex,
-        pageUrl: page?.url ?? null,
-        pageName: page?.name,
-        notes: pageNotes,
-      })
-    }
 
     const innerContent = (
       <div className={cn(
@@ -1236,22 +1220,6 @@ export default function ChapterAnnotator({
           </p>
         ) : null}
         <div className="flex w-full min-w-0 flex-col gap-1.5">
-          {onSendToTantou ? (
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!activeChapter || pages.length === 0 || !sendAssistantId}
-              title={`Gửi bản thảo sang ${LABEL_TANTOU_EDITOR}`}
-              onClick={handleTantou}
-              className={cn(
-                'h-8 w-full min-w-0 text-xs',
-                (inline || embedded) && 'border-white/15 bg-zinc-950/50 text-zinc-200 hover:bg-zinc-800',
-                compact && 'border-white/20 bg-transparent text-white hover:bg-white/10',
-              )}
-            >
-              Gửi {LABEL_TANTOU_EDITOR}
-            </Button>
-          ) : null}
           <Button
             size="sm"
             disabled={
@@ -1307,9 +1275,6 @@ export default function ChapterAnnotator({
             <Badge variant="outline" className="size-6 justify-center p-0 font-semibold">1</Badge>
             <CardTitle className="text-base">Chọn Assistant nhận chapter</CardTitle>
           </div>
-          <CardDescription>
-            Chọn assistant trước khi upload ảnh, tạo ghi chú và gửi chapter.
-          </CardDescription>
         </CardHeader>
         <CardContent>
           {assistantReady ? (
@@ -1402,9 +1367,6 @@ export default function ChapterAnnotator({
             <Badge variant="outline" className="size-6 justify-center p-0 font-semibold">2</Badge>
             <CardTitle className="text-base">Chapter & upload ảnh</CardTitle>
           </div>
-          <CardDescription>
-            Chọn chapter, nhập số trang — upload đúng bấy nhiêu ảnh (1 ảnh = 1 trang).
-          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5 pt-5">
           <div className="space-y-2">
@@ -1423,20 +1385,6 @@ export default function ChapterAnnotator({
                 ))}
               </SelectContent>
             </Select>
-            {chapterNumHint ? <p className="text-xs text-muted-foreground">{chapterNumHint}</p> : null}
-            {selectedSeriesPipeline?.needsFullDebutPipeline ? (
-              <Alert>
-                <AlertDescription className="text-xs">
-                  <strong>✦ Lần đầu:</strong> Assistant → bạn duyệt → {LABEL_TANTOU_EDITOR} → {LABEL_EDITOR_BOARD} biểu quyết → xuất bản.
-                </AlertDescription>
-              </Alert>
-            ) : selectedSeriesPipeline ? (
-              <Alert>
-                <AlertDescription className="text-xs">
-                  <strong>Lần 2+:</strong> {LABEL_TANTOU_EDITOR} duyệt trực tiếp → xuất bản.
-                </AlertDescription>
-              </Alert>
-            ) : null}
           </div>
 
           <div className="grid gap-5 lg:grid-cols-[280px_1fr]">

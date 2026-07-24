@@ -118,6 +118,10 @@ export function apiChapterToRow(chapter, seriesTitle) {
   const assistantObj = c.assistant_id
   const assistantId = assistantObj && typeof assistantObj === 'object' ? assistantObj._id : assistantObj
 
+  const coverUrl = resolveMediaUrl(
+    c.cover_url ?? c.coverUrl ?? c.cover_image_url ?? c.coverImageUrl ?? null,
+  )
+
   return {
     id,
     seriesId: c.series_id?._id ?? c.series_id ?? null,
@@ -133,12 +137,16 @@ export function apiChapterToRow(chapter, seriesTitle) {
     statusLabel: null,
     title: c.title ?? '',
     assistantId,
+    coverUrl: coverUrl || null,
   }
 }
 
 export function apiChapterToAnnotator(chapter, pages = [], seriesTitle) {
   const c = chapter ?? {}
   const id = c._id ?? c.id
+  const coverUrl = resolveMediaUrl(
+    c.cover_url ?? c.coverUrl ?? c.cover_image_url ?? c.coverImageUrl ?? null,
+  )
   return {
     id,
     seriesId: c.series_id?._id ?? c.series_id ?? null,
@@ -146,7 +154,7 @@ export function apiChapterToAnnotator(chapter, pages = [], seriesTitle) {
     num: c.chapter_number ?? c.num ?? 0,
     pages: pages.map(apiPageToUi),
     createdAt: formatRelativeDate(c.createdAt ?? c.created_at),
-    cover: null,
+    cover: coverUrl ? { url: coverUrl, name: 'cover' } : null,
   }
 }
 

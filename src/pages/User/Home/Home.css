@@ -120,6 +120,37 @@
   transform: translateY(-1px);
 }
 
+.home-header__avatar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  outline: none;
+}
+
+.home-header__avatar-btn:focus-visible {
+  box-shadow: 0 0 0 3px rgb(220 38 38 / 0.35);
+}
+
+.home-header__avatar {
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 2px rgb(220 38 38 / 0.25);
+  transition:
+    transform 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.2s ease;
+}
+
+.home-header__avatar-btn:hover .home-header__avatar {
+  transform: scale(1.08);
+  box-shadow:
+    0 0 0 3px rgb(220 38 38 / 0.35),
+    0 6px 14px rgb(153 27 27 / 0.25);
+}
+
 /* ===== Hero ===== */
 .home-hero {
   position: relative;

@@ -1,9 +1,16 @@
-import { Link } from 'react-router-dom'
-import { useNavigate } from 'react-router-dom'
-import { BookOpen, LogOut, Menu } from 'lucide-react'
-import { getSession, getRolePath, logout, ROLE_LABELS } from '@/lib/auth.js'
+import { useMemo } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import {
+  BookOpen,
+  Home,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  User,
+} from 'lucide-react'
+import { getSession, getRolePath, logout, ROLES } from '@/lib/auth.js'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,10 +21,22 @@ import {
 import { NotificationBell } from '@/components/layout/NotificationBell.jsx'
 import { cn } from '@/lib/utils'
 
+function getInitials(name = '') {
+  const parts = String(name).split(/\s+/).filter(Boolean)
+  if (parts.length >= 2) {
+    return `${parts[0][0] ?? ''}${parts[1][0] ?? ''}`.toUpperCase()
+  }
+  return String(name).slice(0, 2).toUpperCase() || 'U'
+}
+
 export default function Header({ links = [], onLogout, className, tone = 'default' }) {
   const navigate = useNavigate()
   const user = getSession()
   const workspacePath = user ? getRolePath(user.role) : null
+  const canOpenProfile = user?.role === ROLES.MANGAKA
+  const profilePath = '/mangaka/profile'
+  const displayName = user?.name || user?.username || 'Tài khoản'
+  const initials = useMemo(() => getInitials(displayName), [displayName])
 
   function handleLogoutClick() {
     if (onLogout) {
@@ -89,30 +108,63 @@ export default function Header({ links = [], onLogout, className, tone = 'defaul
           {user ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-2">
-                  <span className="max-w-[120px] truncate">{user.name || user.username || 'Tài khoản'}</span>
-                  <Badge variant="secondary" className="hidden sm:inline-flex">
-                    {ROLE_LABELS[user.role]}
-                  </Badge>
-                </Button>
+                <button
+                  type="button"
+                  aria-label={`Tài khoản ${displayName}`}
+                  className={cn(
+                    'rounded-full p-0 outline-none transition-transform',
+                    'hover:scale-105 focus-visible:ring-2 focus-visible:ring-primary/40',
+                    isLight && 'focus-visible:ring-white/50',
+                  )}
+                >
+                  <Avatar
+                    className={cn(
+                      'size-9 border-2 shadow-sm',
+                      isLight ? 'border-white/80' : 'border-background',
+                    )}
+                  >
+                    {user.avatarUrl ? (
+                      <AvatarImage src={user.avatarUrl} alt="" />
+                    ) : null}
+                    <AvatarFallback className="bg-primary text-xs font-semibold text-primary-foreground">
+                      {initials}
+                    </AvatarFallback>
+                  </Avatar>
+                </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuItem asChild>
+                  <Link to="/">
+                    <Home className="size-4" />
+                    Home
+                  </Link>
+                </DropdownMenuItem>
                 {workspacePath ? (
                   <DropdownMenuItem asChild>
-                    <Link to={workspacePath}>Workspace</Link>
+                    <Link to={workspacePath}>
+                      <LayoutDashboard className="size-4" />
+                      Workspace
+                    </Link>
+                  </DropdownMenuItem>
+                ) : null}
+                {canOpenProfile ? (
+                  <DropdownMenuItem asChild>
+                    <Link to={profilePath}>
+                      <User className="size-4" />
+                      Profile
+                    </Link>
                   </DropdownMenuItem>
                 ) : null}
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleLogoutClick} className="text-destructive focus:text-destructive">
+                <DropdownMenuItem
+                  onClick={handleLogoutClick}
+                  className="text-destructive focus:text-destructive"
+                >
                   <LogOut className="size-4" />
                   Đăng xuất
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-          ) : workspacePath ? (
-            <Button asChild size="sm">
-              <Link to={workspacePath}>Workspace</Link>
-            </Button>
           ) : (
             <>
               <Button

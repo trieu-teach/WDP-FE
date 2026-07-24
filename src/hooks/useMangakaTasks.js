@@ -75,6 +75,16 @@ export function useMangakaTasks(chapterRows) {
           return { chapter: row, submission, tasks, allTasks }
         }),
       )
+      // Chapter Assistant vừa nộp chờ Mangaka duyệt → ưu tiên đầu danh sách
+      reviews.sort((a, b) => {
+        const ta = Date.parse(a?.submission?.updatedAt ?? a?.submission?.updated_at ?? '') || 0
+        const tb = Date.parse(b?.submission?.updatedAt ?? b?.submission?.updated_at ?? '') || 0
+        if (tb !== ta) return tb - ta
+        const na = Number(a?.chapter?.num)
+        const nb = Number(b?.chapter?.num)
+        if (!Number.isNaN(na) && !Number.isNaN(nb) && na !== nb) return na - nb
+        return 0
+      })
       setPendingReviews(reviews)
 
       const teReady = subList

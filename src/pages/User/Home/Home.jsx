@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   ArrowRight,
   BookOpen,
@@ -7,15 +7,27 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
+  Home as HomeIcon,
   Layers,
+  LayoutDashboard,
+  LogOut,
   PenTool,
   Search,
   Sparkles,
   User,
 } from 'lucide-react'
 import Footer from '@/components/User/Footer/Footer.jsx'
+import { WelcomeBackPill } from '@/components/layout/WelcomeBackPill.jsx'
 import { LoginRequiredDialog } from '@/components/auth/LoginRequiredDialog.jsx'
-import { getRolePath } from '@/lib/auth.js'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { getRolePath, logout, ROLES } from '@/lib/auth.js'
 import { useLoginRequired } from '@/hooks/useLoginRequired.js'
 import {
   LABEL_EDITOR_BOARD,
@@ -28,7 +40,7 @@ import './Home.css'
 
 const HERO_SLIDES = [
   {
-    image: '/images/home-hero.png',
+    image: '/images/home4.png',
     badge: 'Nền tảng manga',
     title: 'Khám phá & xuất bản manga dễ dàng',
     desc: 'Kết nối Mangaka, Assistant, Tantou Editor và Editor Board trong một quy trình thống nhất.',
@@ -36,7 +48,7 @@ const HERO_SLIDES = [
     ctaLabel: 'Bắt đầu ngay',
   },
   {
-    image: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1400&q=80',
+    image: '/images/home3.png',
     badge: 'Mangaka Studio',
     title: 'Từ sketch đến chapter hoàn chỉnh',
     desc: 'Upload trang, ghi chú vùng và duyệt bản tổng hợp ngay trên workspace.',
@@ -44,12 +56,20 @@ const HERO_SLIDES = [
     ctaLabel: 'Vào Mangaka',
   },
   {
-    image: 'https://images.unsplash.com/photo-1578632767115-351597cf2477?auto=format&fit=crop&w=1400&q=80',
+    image: '/images/home4.png',
     badge: 'Editorial',
     title: 'Quy trình biên tập chuyên nghiệp',
     desc: 'Tantou Editor nhận xét, chuyển debut sang Editor Board và lên lịch phát hành.',
     cta: PATH_TANTOU_EDITOR,
     ctaLabel: 'Xem quy trình',
+  },
+  {
+    image: '/images/home5.png',
+    badge: LABEL_EDITOR_BOARD,
+    title: 'Chấm điểm & xác nhận phát hành',
+    desc: 'Editor Board đánh giá debut series, duyệt chapter và chốt lịch lên sóng.',
+    cta: PATH_EDITOR_BOARD,
+    ctaLabel: `Vào ${LABEL_EDITOR_BOARD}`,
   },
 ]
 
@@ -144,6 +164,7 @@ function HomeAuthLink({ to, className, children, guardClick }) {
 }
 
 export default function Home() {
+  const navigate = useNavigate()
   const {
     user,
     open: loginOpen,
@@ -155,7 +176,22 @@ export default function Home() {
     pendingPath,
   } = useLoginRequired()
   const workspacePath = user ? getRolePath(user.role) : null
+  const canOpenProfile = user?.role === ROLES.MANGAKA
+  const profilePath = '/mangaka/profile'
+  const displayName = user?.name || user?.username || 'Tài khoản'
+  const avatarInitials = useMemo(() => {
+    const parts = String(displayName).split(/\s+/).filter(Boolean)
+    if (parts.length >= 2) {
+      return `${parts[0][0] ?? ''}${parts[1][0] ?? ''}`.toUpperCase()
+    }
+    return String(displayName).slice(0, 2).toUpperCase() || 'U'
+  }, [displayName])
   const [heroIndex, setHeroIndex] = useState(0)
+
+  function handleLogout() {
+    logout()
+    navigate('/login')
+  }
 
   const heroSlides = useMemo(() => {
     if (!workspacePath) return HERO_SLIDES
@@ -180,6 +216,7 @@ export default function Home() {
 
   return (
     <div className="home">
+      <WelcomeBackPill />
       <div className="home-shell">
         <header className="home-header">
           <Link to="/" className="home-header__logo">
@@ -205,10 +242,56 @@ export default function Home() {
               <Search className="size-4" />
             </button>
             {user ? (
-              <Link to={workspacePath ?? '/'} className="home-header__cta">
-                <User className="size-4" />
-                Workspace
-              </Link>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="home-header__avatar-btn"
+                    aria-label={`Tài khoản ${displayName}`}
+                  >
+                    <Avatar className="home-header__avatar size-10">
+                      {user.avatarUrl ? (
+                        <AvatarImage src={user.avatarUrl} alt="" />
+                      ) : null}
+                      <AvatarFallback className="bg-[var(--home-green)] text-sm font-semibold text-white">
+                        {avatarInitials}
+                      </AvatarFallback>
+                    </Avatar>
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuItem asChild>
+                    <Link to="/">
+                      <HomeIcon className="size-4" />
+                      Home
+                    </Link>
+                  </DropdownMenuItem>
+                  {workspacePath ? (
+                    <DropdownMenuItem asChild>
+                      <Link to={workspacePath}>
+                        <LayoutDashboard className="size-4" />
+                        Workspace
+                      </Link>
+                    </DropdownMenuItem>
+                  ) : null}
+                  {canOpenProfile ? (
+                    <DropdownMenuItem asChild>
+                      <Link to={profilePath}>
+                        <User className="size-4" />
+                        Profile
+                      </Link>
+                    </DropdownMenuItem>
+                  ) : null}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={handleLogout}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <LogOut className="size-4" />
+                    Đăng xuất
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             ) : (
               <HomeAuthLink to="/register" className="home-header__cta" guardClick={guardClick}>
                 Bắt đầu
@@ -262,7 +345,7 @@ export default function Home() {
                 <div className="home-hero__dots">
                   {heroSlides.map((slide, i) => (
                     <button
-                      key={slide.title}
+                      key={`${slide.image}-${slide.title}`}
                       type="button"
                       className={cn('home-hero__dot', i === heroIndex && 'is-active')}
                       aria-label={`Slide ${i + 1}`}

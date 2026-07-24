@@ -94,11 +94,24 @@ export function isEbChapterFullyScored(chapterItem) {
   const record = readCouncilSeriesScores(chapterItem.id)
   if (!record?.members) return false
 
-  const scoredCount = councilMembers.filter(
-    (member) => record.members[member.id]?.scores,
-  ).length
+  const requiredKeys = [
+    'story_dialogue',
+    'art_design',
+    'panel_camera',
+    'pacing_climax',
+    'color',
+  ]
+  const scoredCount = councilMembers.filter((member) => {
+    const scores = record.members[member.id]?.scores
+    if (!scores || typeof scores !== 'object') return false
+    return requiredKeys.every((key) => {
+      const raw = scores[key]
+      if (raw == null || String(raw).trim() === '') return false
+      return !Number.isNaN(Number.parseFloat(raw))
+    })
+  }).length
 
-  return scoredCount >= requiredCount
+  return scoredCount >= requiredCount && requiredCount > 0
 }
 
 export function saveCouncilMemberAssessment(seriesTitle, memberId, payload) {
@@ -154,18 +167,36 @@ export function buildCouncilAggregate(seriesRecord, scoreFieldKeys, councilMembe
 
   const memberRows = membersList.map((member) => {
     const entry = seriesRecord.members[member.id]
-    if (!entry?.scores) {
+    const scores = entry?.scores
+    const requiredKeys = scoreFieldKeys.length
+      ? scoreFieldKeys
+      : [
+          'story_dialogue',
+          'art_design',
+          'panel_camera',
+          'pacing_climax',
+          'color',
+        ]
+    const fullyScored = Boolean(
+      scores
+      && requiredKeys.every((key) => {
+        const raw = scores[key]
+        if (raw == null || String(raw).trim() === '') return false
+        const parsed = Number.parseFloat(raw)
+        return !Number.isNaN(parsed)
+      }),
+    )
+    if (!fullyScored) {
       return {
         ...member,
         scored: false,
-        scores: {},
+        scores: scores ?? {},
         average: null,
         assessedAt: null,
         enteredBy: null,
       }
     }
 
-    const scores = entry.scores
     const total = scoreFieldKeys.reduce(
       (sum, key) => sum + clampCouncilScore(scores[key]),
       0,

@@ -84,6 +84,12 @@ function normalizeUser(apiUser) {
     username,
     role: API_ROLE_TO_APP[apiUser.role] ?? apiUser.role?.toLowerCase?.() ?? apiUser.role,
     avatarUrl: apiUser.avatarUrl ?? apiUser.avatar_url ?? '',
+    bio: apiUser.bio ?? '',
+    socialLinks: {
+      facebook: apiUser.social_links?.facebook ?? apiUser.socialLinks?.facebook ?? '',
+      twitter: apiUser.social_links?.twitter ?? apiUser.socialLinks?.twitter ?? '',
+      website: apiUser.social_links?.website ?? apiUser.socialLinks?.website ?? '',
+    },
     isProMember: Boolean(apiUser.isProMember),
   }
 }

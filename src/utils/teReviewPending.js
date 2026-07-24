@@ -137,7 +137,7 @@ function legacyFlatPendingToSections(items) {
   return {
     seriesLevel: {
       label: 'Series chưa được duyệt',
-      description: 'TE cần review toàn Series + Chapter trước khi gửi EB',
+      description: '',
       count: seriesLevelSeries.reduce((n, s) => n + (s.chapters?.length ?? 0), 0),
       series: seriesLevelSeries,
     },
@@ -236,9 +236,7 @@ export function teChapterAssignmentStatus(teId, currentTeId) {
 }
 
 export function teChapterAssignmentLabel(status) {
-  if (status === 'unassigned') {
-    return 'Chưa ai nhận — review sẽ tự gán cho bạn'
-  }
+  if (status === 'unassigned') return ''
   if (status === 'mine') return 'Đang review chapter của bạn'
   return 'Chapter đã gán cho TE khác'
 }

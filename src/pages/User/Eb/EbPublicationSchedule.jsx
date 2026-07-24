@@ -50,8 +50,6 @@ import "./Eb.css";
 
 const NAV_LINKS = [
   { to: "/", label: "Trang chủ" },
-  { to: "/mangaka", label: "Mangaka" },
-  { to: "/tantou", label: "Tantou Editor" },
 ];
 
 function ScheduleEventRow({ event }) {

@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import {
   AlertTriangle,
   ArrowRight,
+  Bell,
   BookOpen,
   CheckCircle2,
   ChevronRight,
@@ -21,11 +22,9 @@ import {
   Upload,
   UserPlus,
   Users,
-  Workflow,
 } from "lucide-react";
 import Header from "@/components/User/Header/Header.jsx";
 import Footer from "@/components/User/Footer/Footer.jsx";
-import { WorkspaceHero } from "@/components/layout/WorkspaceHero.jsx";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -67,6 +66,12 @@ import {
 } from "@/constants/roleTerminology.js";
 import { getMangakaTeRevisionPath } from "@/utils/notificationTarget.js";
 import {
+  isTeRevisionSeen,
+  markTeRevisionSeen,
+  pruneTeRevisionSeen,
+  TE_REVISION_SEEN_EVENT,
+} from "@/utils/teRevisionSeenStorage.js";
+import {
   readEbDebutApproved,
   removeEbDebutApproval,
   syncEbDebutPendingFromSeries,
@@ -94,6 +99,13 @@ import "@/styles/mangaPage.css";
 import "./Mangaka.css";
 
 const NAV_LINKS = [{ to: "/", label: "Trang chủ" }];
+
+const HERO_IMAGES = [
+  "/images/mangaka1.png",
+  "/images/mangaka2.png",
+  "/images/mangaka3.png",
+];
+const HERO_SLIDE_MS = 5000;
 
 const STATUS_BADGE = {
   draft: {
@@ -128,49 +140,6 @@ const STATUS_BADGE = {
   },
 };
 
-const PIPELINE_DEBUT_STEPS = [
-  { step: 1, title: "Mangaka → Assistant", desc: "Gửi ảnh + ghi chú gộp → 1 task = 1 chapter" },
-  {
-    step: 2,
-    title: "Assistant → Mangaka",
-    desc: "Nộp ảnh kết quả cả chapter, bạn duyệt / yêu cầu sửa",
-  },
-  {
-    step: 3,
-    title: `Mangaka → ${LABEL_TANTOU_EDITOR}`,
-    desc: "Chuyển bản đã duyệt sang Tantou Editor",
-  },
-  {
-    step: 4,
-    title: `${LABEL_TANTOU_EDITOR} → ${LABEL_EDITOR_BOARD}`,
-    desc: "Tantou Editor duyệt rồi đưa lên Editor Board",
-  },
-  {
-    step: 5,
-    title: `${LABEL_EDITOR_BOARD} biểu quyết`,
-    desc: "Editor Board chấp nhận → thông báo Mangaka",
-  },
-  {
-    step: 6,
-    title: "Xuất bản",
-    desc: "Phát hành sau khi Editor Board đồng thuận",
-  },
-];
-
-const PIPELINE_RECURRING_STEPS = [
-  {
-    step: 1,
-    title: `Mangaka → ${LABEL_TANTOU_EDITOR}`,
-    desc: "Gửi chapter / bản thảo",
-  },
-  {
-    step: 2,
-    title: `${LABEL_TANTOU_EDITOR} duyệt`,
-    desc: "Chỉnh sửa & phê duyệt",
-  },
-  { step: 3, title: "Xuất bản", desc: `Không cần vòng ${LABEL_EDITOR_BOARD}` },
-];
-
 const TAB_ITEMS = [
   { id: "series", label: "Series", icon: BookOpen },
   { id: "chapters", label: "Chapter", icon: FileText },
@@ -195,6 +164,108 @@ function EmptyWorkspaceState({ icon: Icon, title, description, action }) {
   );
 }
 
+function TeRevisionInboxPanel({ revisions, onClose, onMarkRead }) {
+  return (
+    <div className="space-y-3">
+      <div>
+        <p className="flex items-center gap-2 text-sm font-semibold">
+          <Bell className="size-4 text-amber-600" />
+          Thông báo chỉnh sửa
+        </p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Yêu cầu chỉnh sửa từ {LABEL_TANTOU_EDITOR} gửi về cho bạn.
+        </p>
+      </div>
+
+      {revisions.length === 0 ? (
+        <div className="rounded-xl border border-dashed bg-muted/20 px-4 py-8 text-center">
+          <p className="text-sm font-medium">Không có thông báo chưa đọc</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Khi TE gửi yêu cầu chỉnh sửa mới, thông báo sẽ hiện lại tại đây.
+          </p>
+        </div>
+      ) : (
+        <ul className="max-h-[min(24rem,55vh)] space-y-2 overflow-y-auto pr-1">
+          {revisions.map((item) => {
+            const revisionPath = getMangakaTeRevisionPath(
+              item.chapterId ?? item.id,
+            );
+            const comment = String(item.editorialComment ?? "").trim();
+            const chapterId = item.chapterId ?? item.id;
+            return (
+              <li
+                key={item.id}
+                className="rounded-xl border bg-background p-3 shadow-sm"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold">
+                      {item.seriesTitle}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Ch. {item.chapterNum}
+                      {item.pageLabel ? ` · ${item.pageLabel}` : ""}
+                    </p>
+                    {comment ? (
+                      <p className="mt-2 line-clamp-3 text-xs leading-relaxed text-foreground/80">
+                        {comment}
+                      </p>
+                    ) : (
+                      <p className="mt-2 text-xs italic text-muted-foreground">
+                        Không có ghi chú kèm theo.
+                      </p>
+                    )}
+                  </div>
+                  <Badge
+                    variant="outline"
+                    className="shrink-0 border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
+                  >
+                    Cần sửa
+                  </Badge>
+                </div>
+                <div className="mt-3 flex flex-col gap-2">
+                  {revisionPath ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 w-full gap-1.5"
+                      asChild
+                    >
+                      <Link
+                        to={revisionPath}
+                        onClick={() => {
+                          onMarkRead?.(chapterId);
+                          onClose?.();
+                        }}
+                      >
+                        Xem nhận xét & chỉnh sửa
+                        <ChevronRight className="size-3.5" />
+                      </Link>
+                    </Button>
+                  ) : null}
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-8 w-full gap-1.5 bg-amber-600 text-white hover:bg-amber-700"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onMarkRead?.(chapterId);
+                    }}
+                  >
+                    <CheckCircle2 className="size-3.5" />
+                    Xác nhận đã đọc
+                  </Button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function WorkspaceActionBar({
   pendingReviewCount,
   teReadyCount,
@@ -203,6 +274,7 @@ function WorkspaceActionBar({
   onOpenChaptersTab,
   onOpenSeriesTab,
   onOpenAssistantsTab,
+  onOpenRevisionInbox,
 }) {
   const hasItems =
     pendingReviewCount > 0
@@ -241,10 +313,10 @@ function WorkspaceActionBar({
           size="sm"
           variant="outline"
           className="h-8 gap-1.5 border-amber-200 bg-amber-50/50 text-amber-900 hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
-          onClick={onOpenChaptersTab}
+          onClick={onOpenRevisionInbox}
         >
-          <ListChecks className="size-3.5" />
-          {tantouRevisionCount} nhận xét {LABEL_TANTOU_EDITOR}
+          <Bell className="size-3.5" />
+          {tantouRevisionCount} thông báo chỉnh sửa
         </Button>
       ) : null}
       {incompleteSeriesCount > 0 ? (
@@ -274,14 +346,11 @@ function WorkspaceActionBar({
 function SeriesCard({
   series,
   ebApproved,
-  uploadPct,
   onOpenAnnotate,
   onOpenEdit,
   onDelete,
   onCompleteDebut,
 }) {
-  const isUploading = uploadPct > 0 && uploadPct < 100;
-  const barPct = isUploading ? uploadPct : Math.min(100, series.progress ?? 0);
   const toSeries = seriesPath(series);
   const statusBadge = STATUS_BADGE[series.status] ?? STATUS_BADGE.draft;
   const initials = (
@@ -354,19 +423,6 @@ function SeriesCard({
           <span>{series.chapters} chapter</span>
           <span aria-hidden>·</span>
           <span>{series.marks} ghi chú</span>
-        </div>
-
-        <div>
-          <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
-            <span>{isUploading ? "Đang tải" : "Tiến độ"}</span>
-            <span className="font-medium tabular-nums">{Math.round(barPct)}%</span>
-          </div>
-          <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full rounded-full transition-all duration-500"
-              style={{ width: `${barPct}%`, background: series.color }}
-            />
-          </div>
         </div>
 
         <p className="text-[11px] text-muted-foreground">{series.updated}</p>
@@ -482,6 +538,9 @@ export default function Mangaka() {
   const [teAssigning, setTeAssigning] = useState(false);      // đang gán
   const [teSending, setTeSending] = useState(false);          // đang gửi sang TE
   const [teSendChapter, setTeSendChapter] = useState(null);   // chapter đang mở dialog gửi TE
+  const [teRevisionInboxOpen, setTeRevisionInboxOpen] = useState(false);
+  const [teRevisionSeenTick, setTeRevisionSeenTick] = useState(0);
+  const [heroSlide, setHeroSlide] = useState(0);
   const [lastApprovedChapter, setLastApprovedChapter] = useState(null);
 
   const teTargetChapter = teSelectorOpen
@@ -599,14 +658,6 @@ export default function Mangaka() {
     return String(Math.max(...nums) + 1);
   }, [chapterRows, annotateSeries]);
 
-  const annotateChapterHint = useMemo(() => {
-    const n = chapterRows.filter((c) => c.series === annotateSeries).length;
-    const tail = n
-      ? `${n} dòng trong bảng Chapter`
-      : "Chưa có dòng trong bảng Chapter";
-    return `Gợi ý tiếp theo Ch. ${nextChapterNumSuggest} · ${tail}`;
-  }, [chapterRows, annotateSeries, nextChapterNumSuggest]);
-
   const chapterRowsBySeries = useMemo(() => {
     const order = [];
     const map = new Map();
@@ -618,8 +669,41 @@ export default function Mangaka() {
       }
       map.get(key).push(row);
     }
-    return order.map((series) => ({ series, chapters: map.get(series) }));
-  }, [chapterRows]);
+
+    const pendingIds = new Set(
+      (pendingReviews ?? [])
+        .map((r) => String(r?.chapter?.id ?? ""))
+        .filter(Boolean),
+    );
+
+    function chapterSortKey(row) {
+      const n =
+        typeof row?.num === "number"
+          ? row.num
+          : parseInt(String(row?.num ?? ""), 10);
+      return Number.isNaN(n) ? Number.POSITIVE_INFINITY : n;
+    }
+
+    const groups = order.map((series) => {
+      const chapters = [...(map.get(series) ?? [])].sort((a, b) => {
+        const aPending = pendingIds.has(String(a.id)) ? 0 : 1;
+        const bPending = pendingIds.has(String(b.id)) ? 0 : 1;
+        if (aPending !== bPending) return aPending - bPending;
+        return chapterSortKey(a) - chapterSortKey(b);
+      });
+      const pendingCount = chapters.filter((c) =>
+        pendingIds.has(String(c.id)),
+      ).length;
+      return { series, chapters, pendingCount };
+    });
+
+    groups.sort((a, b) => {
+      if (a.pendingCount !== b.pendingCount) return b.pendingCount - a.pendingCount;
+      return a.series.localeCompare(b.series, "vi");
+    });
+
+    return groups.map(({ series, chapters }) => ({ series, chapters }));
+  }, [chapterRows, pendingReviews]);
 
   /**
    * Map chapterId → pendingReview để chapter card tra nhanh khi render.
@@ -722,11 +806,6 @@ export default function Mangaka() {
     await refreshMangakaTasks();
     await refreshWorkspace();
   }
-
-  const pipelineSeries = useMemo(
-    () => seriesList.find((s) => s.title === annotateSeries) ?? seriesList[0],
-    [seriesList, annotateSeries],
-  );
 
   // Chapter vừa duyệt xong — dùng để nhắc gửi Tantou
   useEffect(() => {
@@ -1009,12 +1088,40 @@ export default function Mangaka() {
     [chapterRows],
   );
 
-  const workflowSteps = useMemo(() => {
-    if (!pipelineSeries) return PIPELINE_DEBUT_STEPS;
-    return pipelineSeries.needsFullDebutPipeline
-      ? PIPELINE_DEBUT_STEPS
-      : PIPELINE_RECURRING_STEPS;
-  }, [pipelineSeries]);
+  const unreadTeRevisions = useMemo(() => {
+    void teRevisionSeenTick;
+    return tantouRevisions.filter(
+      (item) => !isTeRevisionSeen(item.chapterId ?? item.id),
+    );
+  }, [tantouRevisions, teRevisionSeenTick]);
+
+  useEffect(() => {
+    if (HERO_IMAGES.length < 2) return undefined;
+    const timer = window.setInterval(() => {
+      setHeroSlide((index) => (index + 1) % HERO_IMAGES.length);
+    }, HERO_SLIDE_MS);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    // Tránh prune khi chưa load xong (tantouRevisions = []) — sẽ xóa sạch localStorage "đã xem".
+    if (workspaceLoading) return;
+    pruneTeRevisionSeen(
+      tantouRevisions.map((item) => item.chapterId ?? item.id),
+    );
+  }, [tantouRevisions, workspaceLoading]);
+
+  useEffect(() => {
+    function bumpSeen() {
+      setTeRevisionSeenTick((t) => t + 1);
+    }
+    window.addEventListener(TE_REVISION_SEEN_EVENT, bumpSeen);
+    window.addEventListener("storage", bumpSeen);
+    return () => {
+      window.removeEventListener(TE_REVISION_SEEN_EVENT, bumpSeen);
+      window.removeEventListener("storage", bumpSeen);
+    };
+  }, []);
 
   useEffect(() => {
     const pending = seriesList
@@ -1225,70 +1332,149 @@ export default function Mangaka() {
     <div className="ws-page--mangaka flex min-h-screen flex-col bg-background">
       <Header links={NAV_LINKS} onLogout={user ? handleLogout : undefined} />
 
-      <WorkspaceHero
-        className="border-b-0 bg-[linear-gradient(135deg,#141210_0%,#1f1518_45%,#151c28_100%)]"
-        label="Mangaka Workspace"
-        title={`Xin chào${user?.name ? `, ${user.name.split(" ")[0]}` : ""}`}
-        description={`Quản lý series, upload chapter và phối hợp Assistant · ${LABEL_TANTOU_EDITOR} · ${LABEL_EDITOR_BOARD}.`}
-        badge={(
-          <div className="hidden items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 backdrop-blur-sm md:flex">
-            <div className="flex size-10 items-center justify-center rounded-lg bg-gradient-to-br from-rose-500 to-rose-700 text-sm font-bold text-white shadow-lg shadow-rose-900/30">
-              {userInitials}
+      <section className="ws-hero--mangaka mk-hero-slideshow relative overflow-hidden border-b border-white/5 text-white">
+        <div className="mk-hero-slides" aria-hidden>
+          {HERO_IMAGES.map((src, index) => (
+            <img
+              key={src}
+              src={src}
+              alt=""
+              className={cn(
+                "mk-hero-slides__img",
+                index === heroSlide && "mk-hero-slides__img--active",
+              )}
+            />
+          ))}
+        </div>
+        <div className="mk-hero-slides__veil" aria-hidden />
+        <div className="page-container relative py-10 md:py-14">
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div className="max-w-2xl space-y-3">
+              <Badge
+                variant="secondary"
+                className="bg-white/10 text-white hover:bg-white/15"
+              >
+                Mangaka Workspace
+              </Badge>
+              <h1 className="text-3xl font-bold tracking-tight md:text-4xl">
+                {`Xin chào${user?.name ? `, ${user.name.split(" ")[0]}` : ""}`}
+              </h1>
+              <p className="leading-relaxed text-zinc-300">
+                {`Quản lý series, upload chapter và phối hợp Assistant · ${LABEL_TANTOU_EDITOR} · ${LABEL_EDITOR_BOARD}.`}
+              </p>
             </div>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-white">{mangakaName}</p>
-              <p className="text-xs text-zinc-400">Tác giả · Workspace</p>
+            <div className="hidden items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 backdrop-blur-sm md:flex">
+              <div className="flex size-10 items-center justify-center rounded-lg bg-gradient-to-br from-rose-500 to-rose-700 text-sm font-bold text-white shadow-lg shadow-rose-900/30">
+                {userInitials}
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-white">{mangakaName}</p>
+                <p className="text-xs text-zinc-400">Tác giả · Workspace</p>
+              </div>
             </div>
           </div>
-        )}
-      />
+        </div>
+      </section>
 
       <main className="page-container mk-main flex-1 py-8">
         {tab !== "annotate" ? (
           <WorkspaceActionBar
             pendingReviewCount={pendingReviews.length}
             teReadyCount={teReadyChapters.length}
-            tantouRevisionCount={tantouRevisions.length}
+            tantouRevisionCount={unreadTeRevisions.length}
             incompleteSeriesCount={incompleteSeriesCount}
             onOpenChaptersTab={() => setTab("chapters")}
             onOpenSeriesTab={() => setTab("series")}
             onOpenAssistantsTab={() => setTab("assistants")}
+            onOpenRevisionInbox={() => setTeRevisionInboxOpen((open) => !open)}
           />
         ) : null}
 
-        <div className={cn("mk-layout grid gap-6", tab !== "annotate" && "lg:grid-cols-[1fr_300px]")}>
+        <div
+          className={cn(
+            'mk-layout grid gap-6',
+            tab !== 'annotate' && 'mk-layout--with-sidebar lg:grid-cols-[1fr_300px]',
+          )}
+        >
           <div className="mk-content min-w-0">
             <Tabs value={tab} onValueChange={setTab}>
-              <TabsList className="mk-tabs mb-5 h-auto w-full flex-wrap justify-start gap-1 bg-muted/40 p-1">
-                {TAB_ITEMS.map((t) => {
-                  const Icon = t.icon;
-                  return (
-                    <TabsTrigger
-                      key={t.id}
-                      value={t.id}
-                      className="gap-2 data-[state=active]:shadow-sm"
+              <div className="mb-5 flex flex-wrap items-center gap-2">
+                <TabsList className="mk-tabs h-auto min-w-0 flex-1 flex-wrap justify-start gap-1 bg-muted/40 p-1">
+                  {TAB_ITEMS.map((t) => {
+                    const Icon = t.icon;
+                    return (
+                      <TabsTrigger
+                        key={t.id}
+                        value={t.id}
+                        className="gap-2 data-[state=active]:shadow-sm"
+                      >
+                        <Icon className="size-4" />
+                        {t.label}
+                        {t.id === "chapters" && pendingReviews.length > 0 ? (
+                          <Badge
+                            variant="secondary"
+                            className="h-5 min-w-5 justify-center px-1.5 text-[10px]"
+                          >
+                            {pendingReviews.length}
+                          </Badge>
+                        ) : null}
+                      </TabsTrigger>
+                    );
+                  })}
+                </TabsList>
+                <DropdownMenu
+                  open={teRevisionInboxOpen}
+                  onOpenChange={setTeRevisionInboxOpen}
+                >
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className={cn(
+                        "h-9 shrink-0 gap-1.5",
+                        unreadTeRevisions.length > 0
+                          && "border-amber-200 bg-amber-50/70 text-amber-950 hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100",
+                        unreadTeRevisions.length > 0
+                          && teRevisionInboxOpen
+                          && "border-amber-300 bg-amber-100 dark:border-amber-500/40 dark:bg-amber-500/15",
+                      )}
                     >
-                      <Icon className="size-4" />
-                      {t.label}
-                      {t.id === "chapters" && pendingReviews.length > 0 ? (
+                      <Bell className="size-3.5" />
+                      Thông báo chỉnh sửa
+                      {unreadTeRevisions.length > 0 ? (
                         <Badge
                           variant="secondary"
-                          className="h-5 min-w-5 justify-center px-1.5 text-[10px]"
+                          className="h-5 min-w-5 justify-center bg-amber-600 px-1.5 text-[10px] text-white hover:bg-amber-600"
                         >
-                          {pendingReviews.length}
+                          {unreadTeRevisions.length}
                         </Badge>
                       ) : null}
-                    </TabsTrigger>
-                  );
-                })}
-              </TabsList>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    sideOffset={8}
+                    className="w-[min(calc(100vw-2rem),24rem)] p-3"
+                    onCloseAutoFocus={(e) => e.preventDefault()}
+                  >
+                    <TeRevisionInboxPanel
+                      revisions={unreadTeRevisions}
+                      onClose={() => setTeRevisionInboxOpen(false)}
+                      onMarkRead={(chapterId) => {
+                        markTeRevisionSeen(chapterId);
+                      }}
+                    />
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
 
               <TabsContent value="series" className="mk-panel space-y-4">
                 <div className="flex flex-wrap items-end justify-between gap-3">
                   <div>
                     <h2 className="text-xl font-semibold tracking-tight">Series của tôi</h2>
                     <p className="text-sm text-muted-foreground">
-                      Quản lý hồ sơ và tiến độ từng series
+                      Quản lý hồ sơ từng series
                     </p>
                   </div>
                   <Button
@@ -1320,7 +1506,6 @@ export default function Mangaka() {
                         key={s.id}
                         series={s}
                         ebApproved={!!ebApprovedMap[s.title]}
-                        uploadPct={uploadPctBySeries[s.title] ?? 0}
                         onOpenAnnotate={() => openAnnotate(s.title)}
                         onOpenEdit={() => openEditSeriesModal(s)}
                         onDelete={() => deleteSeriesById(s.id)}
@@ -1544,7 +1729,6 @@ export default function Mangaka() {
                   }))}
                   chapterNum={annotatorChapterNum}
                   onChapterNumChange={setAnnotatorChapterNum}
-                  chapterNumHint={annotateChapterHint}
                   chapters={annotatorChapters}
                   setChapters={setAnnotatorChapters}
                   activeChapterId={annotatorActiveChapterId}
@@ -1558,7 +1742,6 @@ export default function Mangaka() {
                   onUploadProgress={handleUploadProgress}
                   onSendToAssistant={handleSendToAssistant}
                   onSendRevision={handleSendRevisionFromAnnotator}
-                  onSendToTantou={handleSendToTantou}
                   workspaceApi={workspaceApi}
                   pendingReviewCount={pendingReviews.length}
                   revisionMode={
@@ -1674,73 +1857,6 @@ export default function Mangaka() {
                 </CardContent>
               </Card>
             ) : null}
-
-            <Card className="mk-sidebar-card shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Workflow className="size-4 text-primary" />
-                  Quy trình làm việc
-                </CardTitle>
-                <CardDescription>
-                  Theo series{" "}
-                  <strong className="text-foreground">
-                    {pipelineSeries?.title ?? "—"}
-                  </strong>
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <Badge
-                  className={
-                    pipelineSeries?.needsFullDebutPipeline
-                      ? "bg-amber-100 text-amber-700 hover:bg-amber-100 dark:bg-amber-500/15 dark:text-amber-400"
-                      : "bg-emerald-100 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400"
-                  }
-                  variant="secondary"
-                >
-                  {pipelineSeries?.needsFullDebutPipeline
-                    ? `✦ Lần đầu · có ${LABEL_EDITOR_BOARD}`
-                    : `Lần 2+ · chỉ ${LABEL_TANTOU_EDITOR}`}
-                </Badge>
-
-                {pipelineSeries?.needsFullDebutPipeline &&
-                pipelineSeries.title &&
-                !ebApprovedMap[pipelineSeries.title] ? (
-                  <p className="text-xs text-muted-foreground">
-                    Chờ {LABEL_EDITOR_BOARD} duyệt vòng đầu —{" "}
-                    <Link
-                      to={PATH_EDITOR_BOARD}
-                      className="font-medium text-primary hover:underline"
-                    >
-                      mở trang {LABEL_EDITOR_BOARD}
-                    </Link>
-                  </p>
-                ) : null}
-
-                <ol className="relative space-y-3 border-l border-muted pl-5">
-                  {workflowSteps.map((w, i) => {
-                    const isActive = i === 0;
-                    return (
-                      <li key={w.step} className="relative">
-                        <span
-                          className={cn(
-                            "absolute -left-[26px] flex size-5 items-center justify-center rounded-full text-[10px] font-bold ring-2 ring-card",
-                            isActive
-                              ? "bg-primary text-primary-foreground"
-                              : "bg-muted text-muted-foreground",
-                          )}
-                        >
-                          {w.step}
-                        </span>
-                        <p className="text-sm font-medium">{w.title}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {w.desc}
-                        </p>
-                      </li>
-                    );
-                  })}
-                </ol>
-              </CardContent>
-            </Card>
 
             {tab !== "annotate" && seriesRankings.length > 0 ? (
               <Card className="mk-sidebar-card shadow-sm">

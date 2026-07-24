@@ -63,13 +63,11 @@ export default function Footer({ authGuard = false, onAuthRequired }) {
             <FooterLink to="/" authGuard={authGuard} onAuthRequired={onAuthRequired} className="text-muted-foreground transition-colors hover:text-foreground">Trang chủ</FooterLink>
             <FooterLink to="/login" authGuard={authGuard} onAuthRequired={onAuthRequired} className="text-muted-foreground transition-colors hover:text-foreground">Đăng nhập</FooterLink>
             <FooterLink to="/register" authGuard={authGuard} onAuthRequired={onAuthRequired} className="text-muted-foreground transition-colors hover:text-foreground">Đăng ký</FooterLink>
-            <FooterLink to="/mangaka" authGuard={authGuard} onAuthRequired={onAuthRequired} className="text-muted-foreground transition-colors hover:text-foreground">Mangaka</FooterLink>
-            <FooterLink to="/tantou" authGuard={authGuard} onAuthRequired={onAuthRequired} className="text-muted-foreground transition-colors hover:text-foreground">Tantou</FooterLink>
           </nav>
         </div>
         <Separator className="my-8" />
         <p className="text-center text-xs text-muted-foreground md:text-left">
-          © 2026 MangaHub — Dự án quản lý manga SWP391
+          © 2026 MangaHub — Dự án quản lý manga
         </p>
       </div>
     </footer>
