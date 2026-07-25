@@ -102,6 +102,16 @@ function mapRoleStats(raw) {
   }))
 }
 
+function mapGenresStats(raw) {
+  const items = Array.isArray(raw) ? raw : raw?.data ?? []
+  const colors = ['#8b5cf6', '#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#06b6d4', '#84cc16', '#f97316']
+  return items.map((row, index) => ({
+    name: row._id ?? row.name ?? 'Khác',
+    count: row.count ?? 0,
+    color: colors[index % colors.length],
+  }))
+}
+
 function mapNotifications(raw) {
   const items = Array.isArray(raw) ? raw : raw?.data ?? []
   if (!Array.isArray(items)) return []
@@ -176,6 +186,7 @@ function mapDashboardResponse(raw) {
       status: m.status ?? 'ongoing',
       initials: String(m.title ?? m.name ?? '?').slice(0, 2).toUpperCase(),
       bg: `hsl(${(index * 67) % 360} 55% 42%)`,
+      thumbnail: m.cover_image_url ?? m.thumbnail ?? '',
     })),
     activities: mapActivityItems(payload.recentActivity),
   }
@@ -244,6 +255,8 @@ export const realService = {
 
   getRoles: () => instance.get('/admin/roles').then(unwrap).then(mapRoleStats),
 
+  getGenresStats: () => instance.get('/admin/stats/genres').then(unwrap).then(mapGenresStats),
+
   getEbCandidates: () => instance.get('/admin/eb-representative/candidates').then(unwrap),
 
   setEbRepresentative: (userId) =>
@@ -257,4 +270,31 @@ export const realService = {
   getProfile: () => instance.get('/admin/profile').then(unwrap),
 
   updateProfile: (data) => instance.put('/admin/profile', data).then(unwrap),
+
+  // ===== Rankings =====
+  getRankingsStats: () => instance.get('/admin/rankings/stats').then(unwrap),
+
+  getRankingsList: (params = {}) => {
+    const { type = 'views', period = 'weekly', page = 1, limit = 10, search = '' } = params
+    return instance
+      .get('/admin/rankings/list', {
+        params: { type, period, page, limit: Number(limit), search },
+      })
+      .then(res => {
+        const data = unwrap(res)
+        return {
+          items: Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [],
+          total: data?.total ?? 0,
+        }
+      })
+  },
+
+  getRankingsSeriesDetail: (id) => instance.get(`/admin/rankings/series/${id}`).then(unwrap),
+
+  // ===== Comments =====
+  getCommentsByManga: (mangaId) =>
+    instance.get(`/admin/manga/${mangaId}/comments`).then(unwrap),
+
+  deleteComment: (commentId) =>
+    instance.delete(`/admin/comments/${commentId}`).then(unwrap),
 }
