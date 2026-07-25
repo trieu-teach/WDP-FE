@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
   ArrowLeft,
+  ArrowRight,
   BookOpen,
   Calendar,
   CheckCircle2,
@@ -19,10 +20,12 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -42,6 +45,7 @@ import { getSession, logout } from "@/lib/auth.js";
 import { cn } from "@/lib/utils";
 import { ebEvaluationsService } from "@/api/ebEvaluations.service.js";
 import { ebScoresService } from "@/api/ebScores.service.js";
+import { mangakaProfileService } from "@/api/mangakaProfile.service.js";
 import { getApiErrorMessage } from "@/api/http.js";
 import { updateSeriesEbAssessmentInWorkspace } from "@/utils/mangakaWorkspaceReader.js";
 import { placeholderPageDataUrl } from "@/utils/placeholderPageDataUrl.js";
@@ -50,7 +54,6 @@ import {
   EB_SCORE_CRITERIA,
   EB_SCORE_MAX,
   EB_COUNCIL_MIN_FOR_PUBLISH,
-  areAllCouncilMembersFullyScored,
   buildEmptyEbComments,
   buildEmptyEbScores,
   buildMemberScoresPayload,
@@ -147,12 +150,123 @@ function seriesItemToQueueChapter(seriesItem) {
     status: seriesItem.status ?? "pending_EB",
     previewImageUrl: seriesItem.coverUrl ?? seriesItem.previewImageUrl,
     mangakaName: seriesItem.mangakaName ?? "",
+    mangakaUserId: seriesItem.mangakaUserId ?? null,
+    mangakaAvatarUrl: seriesItem.mangakaAvatarUrl ?? null,
     classification: seriesItem.classification ?? null,
     classificationText: seriesItem.classificationText ?? "",
     councilAverage: seriesItem.councilAverage ?? null,
     pages: [],
     raw: seriesItem.raw,
   };
+}
+
+function ebMangakaGroupKey(item) {
+  const authorId = String(item?.mangakaUserId ?? "").trim();
+  if (authorId) return `id:${authorId}`;
+  const name = String(item?.mangakaName || "Mangaka").trim();
+  return `name:${name.toLowerCase() || "mangaka"}`;
+}
+
+function ebMangakaGroupName(item) {
+  return String(item?.mangakaName || "Mangaka").trim() || "Mangaka";
+}
+
+async function hydrateEbMangakaAvatars(items) {
+  const list = Array.isArray(items) ? items : [];
+  const ids = [
+    ...new Set(
+      list
+        .map((s) => String(s?.mangakaUserId ?? "").trim())
+        .filter(Boolean),
+    ),
+  ];
+  if (!ids.length) return list;
+
+  const avatarById = new Map();
+  await Promise.all(
+    ids.map(async (id) => {
+      try {
+        const profile = await mangakaProfileService.getPublicProfile(id);
+        const url = String(profile?.user?.avatarUrl ?? "").trim();
+        if (url) avatarById.set(id, url);
+      } catch {
+        // giữ fallback initials
+      }
+    }),
+  );
+  if (!avatarById.size) return list;
+
+  return list.map((s) => {
+    const id = String(s?.mangakaUserId ?? "").trim();
+    const avatar = id ? avatarById.get(id) : null;
+    if (!avatar) return s;
+    return { ...s, mangakaAvatarUrl: avatar };
+  });
+}
+
+function EbMangakaSelectCard({ group, onSelect }) {
+  const initials = (
+    group.name.length >= 2 ? group.name : `${group.name}●`
+  )
+    .slice(0, 2)
+    .toUpperCase();
+
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(group.key)}
+      className="group relative text-left"
+    >
+      <Card className="gap-0 overflow-hidden py-0 shadow-sm transition-all hover:-translate-y-0.5 hover:border-sky-300 hover:shadow-md dark:hover:border-sky-500/40">
+        <div className="relative flex aspect-[4/3] w-full items-center justify-center overflow-hidden bg-gradient-to-br from-sky-500/15 via-muted to-violet-500/10">
+          {group.coverUrl ? (
+            <img
+              src={group.coverUrl}
+              alt=""
+              className="size-full object-cover transition-transform duration-300 group-hover:scale-105"
+            />
+          ) : (
+            <div className="flex size-20 items-center justify-center rounded-2xl bg-sky-600 text-2xl font-bold text-white shadow-lg shadow-sky-900/20">
+              {initials}
+            </div>
+          )}
+          <Badge className="absolute right-2 top-2 h-6 min-w-6 justify-center bg-amber-600 px-1.5 text-xs text-white hover:bg-amber-600">
+            {group.count}
+          </Badge>
+        </div>
+        <CardContent className="space-y-1 p-3">
+          <p className="flex items-center gap-2 truncate text-sm font-semibold">
+            <span className="group/avatar inline-flex shrink-0">
+              <Avatar
+                size="sm"
+                className={cn(
+                  "size-6 ring-1 ring-border",
+                  "transition-all duration-200 ease-out",
+                  "group-hover/avatar:scale-110 group-hover/avatar:ring-2 group-hover/avatar:ring-sky-400",
+                  "group-hover/avatar:shadow-sm group-hover/avatar:shadow-sky-500/30",
+                )}
+              >
+                {group.avatarUrl ? (
+                  <AvatarImage
+                    src={group.avatarUrl}
+                    alt=""
+                    className="transition-transform duration-300 group-hover/avatar:scale-110"
+                  />
+                ) : null}
+                <AvatarFallback className="bg-sky-600 text-[10px] font-bold text-white">
+                  {initials}
+                </AvatarFallback>
+              </Avatar>
+            </span>
+            <span className="truncate">{group.name}</span>
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {group.count} series chờ duyệt
+          </p>
+        </CardContent>
+      </Card>
+    </button>
+  );
 }
 
 function ScoreStars({ value, size = "size-4" }) {
@@ -309,7 +423,8 @@ function getClassification(average, { scored = true } = {}) {
     return {
       label: "CHƯA CHẤM",
       note: "Chưa có điểm Hội đồng để phân loại.",
-      className: "border-border bg-muted/40 text-muted-foreground",
+      className:
+        "border-amber-300/80 bg-amber-500/15 text-amber-900 dark:border-amber-500/40 dark:text-amber-200",
     };
   }
 
@@ -317,7 +432,8 @@ function getClassification(average, { scored = true } = {}) {
     return {
       label: "KHÔNG ĐẠT",
       note: "Series chưa đạt chất lượng, cần chỉnh sửa lớn trước khi xét lại.",
-      className: "border-red-200 bg-red-50 text-red-700",
+      className:
+        "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/15 dark:text-rose-200",
     };
   }
 
@@ -325,7 +441,8 @@ function getClassification(average, { scored = true } = {}) {
     return {
       label: "ĐẠT",
       note: "Series có thể thông qua, nhưng cần cải thiện theo ghi chú.",
-      className: "border-amber-200 bg-amber-50 text-amber-700",
+      className:
+        "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200",
     };
   }
 
@@ -333,14 +450,16 @@ function getClassification(average, { scored = true } = {}) {
     return {
       label: "TỐT",
       note: "Chất lượng series ổn định, phù hợp duyệt nhanh.",
-      className: "border-sky-200 bg-sky-50 text-sky-700",
+      className:
+        "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-500/30 dark:bg-sky-500/15 dark:text-sky-200",
     };
   }
 
   return {
     label: "XUẤT SẮC",
     note: "Series chất lượng cao, phù hợp đẩy nổi bật/banner.",
-    className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    className:
+      "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200",
   };
 }
 
@@ -358,17 +477,17 @@ function CouncilScoresTable({
   });
 
   return (
-    <div className="eb-council-table-wrap overflow-x-auto rounded-xl border bg-card">
+    <div className="eb-council-table-wrap scrollbar-hide overflow-x-auto rounded-xl border bg-card">
       <table className="eb-council-table w-full min-w-[640px] text-sm">
         <thead>
           <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
             <th className="px-3 py-2.5 font-medium">Thành viên HĐ</th>
             {scoreFields.map((field) => (
               <th key={field.key} className="px-2 py-2.5 font-medium">
-                {field.hint}
+                {field.shortLabel || field.hint || field.label}
               </th>
             ))}
-            <th className="px-3 py-2.5 font-medium">DTB</th>
+            <th className="px-3 py-2.5 font-medium">ĐTB</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-border/70">
@@ -387,7 +506,7 @@ function CouncilScoresTable({
               return (
                 <tr
                   key={row.id}
-                  className={isActive ? "bg-primary/5" : undefined}
+                  className={isActive ? "bg-sky-500/5" : undefined}
                 >
                   <td className="px-3 py-2.5">
                     <p className="font-medium text-foreground">{row.name}</p>
@@ -490,11 +609,14 @@ export default function Eb() {
   const [memberNotes, setMemberNotes] = useState("");
   const [evaluationNotes, setEvaluationNotes] = useState("");
   const [lastEvaluation, setLastEvaluation] = useState(null);
+  /** true chỉ sau Nộp kết quả chấm thành công (hoặc BE đã có evaluation history). */
+  const [scoresSubmitted, setScoresSubmitted] = useState(false);
   const [scoreErrors, setScoreErrors] = useState(buildEmptyScoreErrors);
   const [pinnedChapter, setPinnedChapter] = useState(null);
   const [previewPageIndex, setPreviewPageIndex] = useState(0);
   const [zoomOpen, setZoomOpen] = useState(false);
   const [heroSlide, setHeroSlide] = useState(0);
+  const [selectedMangakaKey, setSelectedMangakaKey] = useState(null);
   const refresh = useCallback(() => bumpCouncil((n) => n + 1), []);
 
   useEffect(() => {
@@ -524,8 +646,10 @@ export default function Eb() {
         if (item.id && item.chapterNumber != null) return [item];
         return [];
       });
-      setPendingSeries(seriesList);
-      setPendingChapters(chapterList);
+      const seriesWithAvatars = await hydrateEbMangakaAvatars(seriesList);
+      const chaptersWithAvatars = await hydrateEbMangakaAvatars(chapterList);
+      setPendingSeries(seriesWithAvatars);
+      setPendingChapters(chaptersWithAvatars);
     } catch (err) {
       if (!silent) {
         toast.error(getApiErrorMessage(err, "Không tải được hàng chờ EB."));
@@ -546,6 +670,72 @@ export default function Eb() {
     [pendingChapters, councilTick],
   );
 
+  const queueItems = useMemo(() => {
+    if (pendingSeries.length) return pendingSeries;
+    return queueChapters.map((ch) => ({
+      id: ch.seriesId ?? ch.id,
+      seriesId: ch.seriesId ?? ch.id,
+      name: ch.seriesName,
+      seriesName: ch.seriesName,
+      coverUrl: ch.previewImageUrl,
+      status: ch.status,
+      mangakaName: ch.mangakaName,
+      mangakaUserId: ch.mangakaUserId ?? null,
+      mangakaAvatarUrl: ch.mangakaAvatarUrl ?? null,
+      classification: ch.classification,
+      classificationText: ch.classificationText,
+      firstChapter: {
+        id: ch.id,
+        chapterNumber: ch.chapterNumber,
+        title: ch.title,
+      },
+    }));
+  }, [pendingSeries, queueChapters]);
+
+  const queueByMangaka = useMemo(() => {
+    const map = new Map();
+    for (const item of queueItems) {
+      const key = ebMangakaGroupKey(item);
+      const name = ebMangakaGroupName(item);
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          name,
+          coverUrl: null,
+          avatarUrl: null,
+          items: [],
+        });
+      }
+      const group = map.get(key);
+      group.items.push(item);
+      if (!group.avatarUrl) {
+        group.avatarUrl = item.mangakaAvatarUrl || null;
+      }
+      if (!group.coverUrl) {
+        group.coverUrl = item.coverUrl || item.previewImageUrl || null;
+      }
+    }
+    return [...map.values()]
+      .map((g) => ({ ...g, count: g.items.length }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "vi"));
+  }, [queueItems]);
+
+  const selectedMangakaGroup = useMemo(
+    () => queueByMangaka.find((g) => g.key === selectedMangakaKey) ?? null,
+    [queueByMangaka, selectedMangakaKey],
+  );
+
+  useEffect(() => {
+    if (!selectedMangakaKey) return;
+    if (!queueByMangaka.some((g) => g.key === selectedMangakaKey)) {
+      setSelectedMangakaKey(null);
+    }
+  }, [queueByMangaka, selectedMangakaKey]);
+
+  useEffect(() => {
+    if (isChapterDetail) setSelectedMangakaKey(null);
+  }, [isChapterDetail]);
+
   const loadChapterDetail = useCallback(async (chapterId) => {
     if (!chapterId) return null
     try {
@@ -560,13 +750,18 @@ export default function Eb() {
           classification: mapped.classification,
           classification_text: mapped.classificationText,
         })
-        if (normalized.councilAverage != null) {
+        // Chỉ coi là đã nộp khi BE có bản evaluation — không unlock bằng councilAverage lẻ
+        if (latestEval && normalized.councilAverage != null) {
           setLastEvaluation({
             ...(normalized.evaluation ?? {}),
             council_average: normalized.councilAverage,
             classification: normalized.classification,
             classification_text: normalized.classificationText,
           })
+          setScoresSubmitted(true)
+        } else {
+          setLastEvaluation(null)
+          setScoresSubmitted(false)
         }
         return mapped
       }
@@ -683,6 +878,17 @@ export default function Eb() {
   useEffect(() => {
     if (!councilKey) {
       setActiveMemberId("");
+      setScoresSubmitted(false);
+      setLastEvaluation(null);
+      return;
+    }
+    setScoresSubmitted(false);
+    setLastEvaluation(null);
+  }, [councilKey]);
+
+  useEffect(() => {
+    if (!councilKey) {
+      setActiveMemberId("");
       return;
     }
     const roster = readCouncilRoster(councilKey);
@@ -754,32 +960,24 @@ export default function Eb() {
     { scored: councilAggregate.scoredCount > 0 },
   );
   const activeMember = councilRoster.find((m) => m.id === activeMemberId) ?? null;
-  const allMembersFullyScored = useMemo(
+  const savedScoredCount = councilAggregate.scoredCount;
+  const rosterCount = councilRoster.length;
+  const allMembersDraftSaved =
+    rosterCount > 0 && savedScoredCount >= rosterCount;
+  const canSubmitScores =
+    allMembersDraftSaved && rosterCount >= EB_COUNCIL_MIN_FOR_PUBLISH;
+  const unscoredMemberNames = useMemo(
     () =>
-      areAllCouncilMembersFullyScored({
-        roster: councilRoster,
-        councilRecord,
-        activeMemberId,
-        draftScores: scores,
-        scoreKeys: scoreFields.map((field) => field.key),
-      }),
-    [councilRoster, councilRecord, activeMemberId, scores, scoreFields],
+      councilAggregate.memberRows
+        .filter((row) => !row.scored)
+        .map((row) => row.name)
+        .filter(Boolean),
+    [councilAggregate.memberRows],
   );
-  const canConfirmPublish = useMemo(() => {
-    if (!activeChapter?.id) return false;
-    if (councilRoster.length < EB_COUNCIL_MIN_FOR_PUBLISH) return false;
-    if (!allMembersFullyScored) return false;
-    // Phải đã nộp điểm Hội đồng (có DTB từ API / lần submit gần nhất)
-    return (
-      lastEvaluation?.council_average != null
-      || activeChapter?.councilAverage != null
-    );
-  }, [
-    activeChapter,
-    allMembersFullyScored,
-    councilRoster.length,
-    lastEvaluation,
-  ]);
+  // Lưu nháp đủ tất cả thành viên → Nộp được; Nộp xong → mới Xác nhận lịch
+  const canConfirmPublish = Boolean(
+    activeChapter?.id && canSubmitScores && scoresSubmitted,
+  );
   const previewPageCount = chapterPages.length;
   const activePreviewPage =
     previewPageCount > 0
@@ -840,35 +1038,48 @@ export default function Eb() {
   }
 
   function buildMemberScoresDraft() {
+    // Chỉ lấy điểm đã Lưu nháp — không gộp draft chưa lưu
     return buildMemberScoresPayload({
       councilRecord,
       members: councilRoster,
-      activeMemberId,
-      draft: {
-        scores,
-        criterionNotes,
-        overallComment,
-        notes: memberNotes,
-        enteredBy: user?.name ?? "Đại diện EB",
-      },
+      activeMemberId: null,
+      draft: null,
     });
   }
 
-  function validateCurrentMemberForm() {
-    const nextErrors = Object.fromEntries(
-      scoreFields.map((field) => [field.key, validateScore(scores[field.key])]),
+  function warnMissingCouncilDrafts() {
+    if (rosterCount < EB_COUNCIL_MIN_FOR_PUBLISH) {
+      toast.error(
+        `Hội đồng cần ít nhất ${EB_COUNCIL_MIN_FOR_PUBLISH} thành viên (hiện ${rosterCount}).`,
+      );
+      return;
+    }
+    const remaining = unscoredMemberNames.length
+      ? unscoredMemberNames.join(", ")
+      : "các thành viên còn lại";
+    toast.error(
+      `Bạn chưa lưu đủ điểm các thành viên trong hội đồng (${savedScoredCount}/${rosterCount}). Còn thiếu: ${remaining}.`,
     );
-    setScoreErrors((current) => ({ ...current, ...nextErrors }));
-    return !Object.values(nextErrors).some(Boolean);
+  }
+
+  function handleConfirmPublishClick() {
+    if (!allMembersDraftSaved || rosterCount < EB_COUNCIL_MIN_FOR_PUBLISH) {
+      warnMissingCouncilDrafts();
+      return;
+    }
+    if (!scoresSubmitted) {
+      toast.error(
+        "Bạn chưa nộp kết quả chấm. Hãy bấm Nộp kết quả chấm trước khi xác nhận lịch phát hành.",
+      );
+      return;
+    }
+    if (!activeChapter?.id) return;
+    navigate(`/eb/chapter/${encodeURIComponent(activeChapter.id)}/publish`);
   }
 
   async function handleSubmitScores() {
     if (!activeChapter?.id) {
       toast.error("Chưa có chapter trong hàng chờ để chấm điểm.");
-      return;
-    }
-    if (!validateCurrentMemberForm()) {
-      toast.error("Có tiêu chí chưa hợp lệ. Vui lòng kiểm tra lại điểm thành viên đang nhập.");
       return;
     }
 
@@ -877,8 +1088,16 @@ export default function Eb() {
       return;
     }
 
+    if (!canSubmitScores) {
+      warnMissingCouncilDrafts();
+      return;
+    }
+
     const memberScores = buildMemberScoresDraft();
-    const payloadError = validateMemberScoresPayload(memberScores, councilRoster.length);
+    const payloadError = validateMemberScoresPayload(
+      memberScores,
+      Math.max(rosterCount, EB_COUNCIL_MIN_FOR_PUBLISH),
+    );
     if (payloadError) {
       toast.error(payloadError);
       return;
@@ -898,6 +1117,7 @@ export default function Eb() {
         classification_text: normalized.classificationText,
       };
       setLastEvaluation(evaluation);
+      setScoresSubmitted(true);
       setPinnedChapter((current) => {
         const base =
           current?.id === activeChapter.id ? current : activeChapter;
@@ -916,7 +1136,7 @@ export default function Eb() {
       const councilAvg = normalized.councilAverage;
       toast.success(
         normalized.message
-        || `Đã gửi điểm Hội đồng${classificationLabel ? ` · ${classificationLabel}` : ""}${councilAvg != null ? ` · DTB ${Number(councilAvg).toFixed(1)}` : ""}.`,
+        || `Đã gửi điểm Hội đồng${classificationLabel ? ` · ${classificationLabel}` : ""}${councilAvg != null ? ` · ĐTB ${Number(councilAvg).toFixed(1)}` : ""}.`,
       );
       void loadPending({ silent: true });
       refresh();
@@ -1018,7 +1238,7 @@ export default function Eb() {
 
     refresh();
     toast.success(
-      `Đã lưu điểm ${activeMember?.name ?? "thành viên"} · DTB HĐ ${aggregate.councilAverage.toFixed(1)} (${aggregate.scoredCount}/${councilRoster.length || 0})`,
+      `Đã lưu điểm ${activeMember?.name ?? "thành viên"} · ĐTB HĐ ${aggregate.councilAverage.toFixed(1)} (${aggregate.scoredCount}/${councilRoster.length || 0})`,
     );
   }
 
@@ -1061,7 +1281,7 @@ export default function Eb() {
         </section>
       ) : null}
 
-      <main className={cn("page-container flex-1 space-y-8 py-8", isChapterDetail && "pb-28")}>
+      <main className={cn("page-container flex-1 space-y-8 py-8", isChapterDetail && "pb-36")}>
         {isChapterDetail ? (
           <>
             <header className="flex flex-wrap items-center gap-3 border-b border-border/60 pb-4">
@@ -1072,7 +1292,7 @@ export default function Eb() {
                 </Link>
               </Button>
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium uppercase tracking-widest text-primary">
+                <p className="text-xs font-medium uppercase tracking-widest text-sky-600 dark:text-sky-400">
                   Chấm điểm chapter
                 </p>
                 <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
@@ -1104,21 +1324,27 @@ export default function Eb() {
                 </CardContent>
               </Card>
             ) : (
-        <section className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.9fr)]">
-          <Card>
-            <CardHeader className="space-y-2">
+        <section className="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(300px,0.85fr)] xl:items-start">
+          <Card className="shadow-sm">
+            <CardHeader className="space-y-1 pb-3">
               <CardTitle>Nhập điểm (tài khoản đại diện)</CardTitle>
+              <CardDescription>
+                Chọn thành viên Hội đồng rồi chấm từng tiêu chí bên dưới.
+              </CardDescription>
             </CardHeader>
 
-            <CardContent className="space-y-6">
+            <CardContent className="space-y-5">
               <div className="space-y-3">
-                <Label htmlFor="eb-council-member-name">Thêm thành viên Hội đồng</Label>
-                <div className="flex gap-2">
+                <Label htmlFor="eb-council-member-name">
+                  Thêm thành viên Hội đồng
+                </Label>
+                <div className="flex overflow-hidden rounded-lg border border-border bg-background shadow-sm focus-within:ring-2 focus-within:ring-ring/40">
                   <Input
                     id="eb-council-member-name"
                     value={newCouncilMemberName}
                     onChange={(event) => setNewCouncilMemberName(event.target.value)}
-                    placeholder="Nhập tên thành viên..."
+                    placeholder="Nhập tên thành viên…"
+                    className="h-10 rounded-none border-0 shadow-none focus-visible:ring-0"
                     onKeyDown={(event) => {
                       if (event.key === "Enter") {
                         event.preventDefault();
@@ -1129,7 +1355,7 @@ export default function Eb() {
                   <Button
                     type="button"
                     variant="secondary"
-                    className="shrink-0"
+                    className="h-10 shrink-0 rounded-none border-0 border-l border-border px-4"
                     onClick={handleAddCouncilMember}
                   >
                     <Plus className="size-4" />
@@ -1148,6 +1374,10 @@ export default function Eb() {
                           type="button"
                           size="sm"
                           variant={activeMemberId === member.id ? "default" : "outline"}
+                          className={cn(
+                            activeMemberId === member.id
+                              && "bg-sky-600 text-white hover:bg-sky-700",
+                          )}
                           onClick={() => setActiveMemberId(member.id)}
                         >
                           {member.name}
@@ -1158,7 +1388,7 @@ export default function Eb() {
                   </div>
                 ) : null}
                 {activeMember ? (
-                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-sky-200/70 bg-sky-500/5 px-3 py-2.5 dark:border-sky-500/30">
                     <p className="text-sm text-muted-foreground">
                       Đang nhập điểm cho{" "}
                       <strong className="text-foreground">{activeMember.name}</strong>
@@ -1240,8 +1470,8 @@ export default function Eb() {
                     id="eb-overall-comment"
                     value={overallComment}
                     onChange={(event) => setOverallComment(event.target.value)}
-                    placeholder="Nhận xét chung của thành viên này..."
-                    className="min-h-24"
+                    placeholder="Nhận xét chung của thành viên này…"
+                    className="min-h-20"
                   />
                 </div>
                 <div className="space-y-2">
@@ -1250,30 +1480,45 @@ export default function Eb() {
                     id="eb-member-notes"
                     value={memberNotes}
                     onChange={(event) => setMemberNotes(event.target.value)}
-                    placeholder="Ghi chú bổ sung (optional)..."
-                    className="min-h-24"
+                    placeholder="Ghi chú bổ sung (tuỳ chọn)…"
+                    className="min-h-20"
                   />
                 </div>
               </div>
 
-              <div className="rounded-xl border bg-muted/30 p-4">
-                <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  DTB Hội đồng (tổng hợp)
-                </p>
-                <div className="mt-2 flex items-end justify-between gap-3">
-                  <div
+              <div className="overflow-hidden rounded-xl border border-border/80 bg-gradient-to-br from-muted/40 via-card to-amber-500/5 p-4 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-amber-800 dark:text-amber-200">
+                      ĐTB Hội đồng
+                    </p>
+                    <div className="mt-1.5 flex items-end gap-2">
+                      <span
+                        className={cn(
+                          "text-4xl font-bold tracking-tight tabular-nums",
+                          councilAggregate.scoredCount > 0
+                            ? "text-foreground"
+                            : "text-muted-foreground/50",
+                        )}
+                      >
+                        {councilAggregate.scoredCount > 0
+                          ? councilAggregate.councilAverage.toFixed(1)
+                          : "—"}
+                      </span>
+                      <span className="mb-1 text-sm text-muted-foreground">
+                        / {SCORE_MAX}.0
+                      </span>
+                    </div>
+                  </div>
+                  <Badge
+                    variant="outline"
                     className={cn(
-                      "text-4xl font-bold tracking-tight tabular-nums",
-                      councilAggregate.scoredCount > 0
-                        ? "text-foreground"
-                        : "text-muted-foreground/60",
+                      "px-3 py-1 text-xs font-semibold tracking-wide",
+                      councilClassification.className,
                     )}
                   >
-                    {councilAggregate.scoredCount > 0
-                      ? councilAggregate.councilAverage.toFixed(1)
-                      : "—"}
-                  </div>
-                  <Badge variant="outline">/ {SCORE_MAX}.0</Badge>
+                    {councilClassification.label}
+                  </Badge>
                 </div>
                 <p className="mt-2 text-xs text-muted-foreground">
                   {councilAggregate.scoredCount}/{councilRoster.length || 0} thành
@@ -1285,34 +1530,30 @@ export default function Eb() {
                       <strong className="text-foreground">
                         {activeMember.name}
                       </strong>{" "}
-                      (DTB {personalAvgDisplay.text})
+                      (ĐTB {personalAvgDisplay.text})
                     </>
                   ) : null}
                 </p>
-                <Badge
-                  variant="secondary"
-                  className={`mt-3 border ${councilClassification.className}`}
-                >
-                  {councilClassification.label}
-                </Badge>
-                <p className="mt-3 text-sm text-muted-foreground">
+                <p className="mt-2 text-sm text-muted-foreground">
                   {councilClassification.note}
                 </p>
 
                 <div className="mt-4 space-y-2">
-                  <Label htmlFor="eb-evaluation-notes">Ghi chú đánh giá (optional)</Label>
+                  <Label htmlFor="eb-evaluation-notes">
+                    Ghi chú đánh giá (tuỳ chọn)
+                  </Label>
                   <Textarea
                     id="eb-evaluation-notes"
                     value={evaluationNotes}
                     onChange={(event) => setEvaluationNotes(event.target.value)}
-                    placeholder="Ghi chú gửi kèm khi chấm điểm series..."
-                    className="min-h-20"
+                    placeholder="Ghi chú gửi kèm khi chấm điểm series…"
+                    className="min-h-16"
                   />
                 </div>
 
                 {lastEvaluation?.council_average != null ? (
                   <p className="mt-2 text-xs text-muted-foreground">
-                    Kết quả vừa gửi: DTB{" "}
+                    Kết quả vừa gửi: ĐTB{" "}
                     <strong className="text-foreground">
                       {Number(lastEvaluation.council_average).toFixed(1)}
                     </strong>
@@ -1324,34 +1565,35 @@ export default function Eb() {
 
                 {activeChapter?.id ? (
                   <div className="mt-4 space-y-2">
-                    {canConfirmPublish ? (
-                      <Button className="w-full" variant="outline" asChild>
-                        <Link
-                          to={`/eb/chapter/${encodeURIComponent(activeChapter.id)}/publish`}
-                        >
-                          <Calendar className="size-4" />
-                          Sang trang xác nhận publish
-                        </Link>
-                      </Button>
-                    ) : (
-                      <Button
-                        type="button"
-                        className="w-full"
-                        variant="outline"
-                        disabled
-                        title="Nộp kết quả chấm điểm Hội đồng trước khi xác nhận publish"
-                      >
-                        <Calendar className="size-4" />
-                        Sang trang xác nhận publish
-                      </Button>
-                    )}
+                    <Button
+                      type="button"
+                      className={cn(
+                        "w-full gap-2",
+                        canConfirmPublish
+                          ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                          : undefined,
+                      )}
+                      variant={canConfirmPublish ? "default" : "outline"}
+                      onClick={handleConfirmPublishClick}
+                      title={
+                        canConfirmPublish
+                          ? undefined
+                          : "Cần lưu nháp đủ tất cả thành viên và nộp kết quả chấm trước"
+                      }
+                    >
+                      <Calendar className="size-4" />
+                      Xác nhận lịch phát hành
+                      <ArrowRight className="size-4" />
+                    </Button>
                     {!canConfirmPublish ? (
                       <p className="text-xs text-muted-foreground">
-                        Cần ít nhất {EB_COUNCIL_MIN_FOR_PUBLISH} thành viên Hội đồng,{" "}
-                        <strong>Nộp kết quả chấm</strong> trước khi vào trang xác
-                        nhận lịch phát hành (hiện {councilRoster.length} thành viên,{" "}
-                        {councilAggregate.scoredCount}/{councilRoster.length || 0} đã
-                        chấm đủ).
+                        {!allMembersDraftSaved || rosterCount < EB_COUNCIL_MIN_FOR_PUBLISH
+                          ? `Bước 1: Lưu nháp đủ tất cả thành viên hội đồng (hiện ${savedScoredCount}/${rosterCount || 0}${
+                            unscoredMemberNames.length
+                              ? ` · chưa lưu: ${unscoredMemberNames.join(", ")}`
+                              : ""
+                          }).`
+                          : "Bước 2: Bấm Nộp kết quả chấm trước khi xác nhận lịch phát hành."}
                       </p>
                     ) : null}
                   </div>
@@ -1360,9 +1602,10 @@ export default function Eb() {
             </CardContent>
           </Card>
 
-          <Card className="overflow-hidden">
-            <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
-              <CardTitle>Preview chapter</CardTitle>
+          <div className="xl:sticky xl:top-4 xl:self-start">
+          <Card className="overflow-hidden shadow-sm">
+            <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-3">
+              <CardTitle className="text-base">Xem trước chapter</CardTitle>
               <Button
                 type="button"
                 size="sm"
@@ -1382,7 +1625,7 @@ export default function Eb() {
                   : "Chưa có chapter trong hàng chờ"}
               </p>
               {pagesLoading && chapterPages.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Đang tải pages...</p>
+                <p className="text-sm text-muted-foreground">Đang tải trang…</p>
               ) : (
                 <div className="space-y-3">
                   <button
@@ -1403,7 +1646,7 @@ export default function Eb() {
                       className="max-h-[min(70vh,720px)] w-full object-contain"
                     />
                     <span className="pointer-events-none absolute right-3 top-3 rounded-md bg-black/55 px-2 py-1 text-[10px] font-medium text-white opacity-0 transition group-hover:opacity-100">
-                      Click để phóng to
+                      Bấm để phóng to
                     </span>
                   </button>
 
@@ -1469,6 +1712,7 @@ export default function Eb() {
               ) : null}
             </CardContent>
           </Card>
+          </div>
         </section>
             )}
           </>
@@ -1479,21 +1723,21 @@ export default function Eb() {
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <h2 className="flex items-center gap-2 text-xl font-semibold">
-                <Gavel className="size-5 text-primary" />
+                <Gavel className="size-5 text-amber-600" />
                 Hàng chờ duyệt
               </h2>
               <p className="text-sm text-muted-foreground">
                 Đồng bộ từ{" "}
                 <Link
                   to="/mangaka"
-                  className="font-medium text-primary hover:underline"
+                  className="font-medium text-sky-700 hover:underline dark:text-sky-400"
                 >
                   Mangaka
                 </Link>
                 {" / "}
                 <Link
                   to="/tantou"
-                  className="font-medium text-primary hover:underline"
+                  className="font-medium text-sky-700 hover:underline dark:text-sky-400"
                 >
                   Tantou
                 </Link>
@@ -1513,97 +1757,189 @@ export default function Eb() {
                 Đang tải hàng chờ EB...
               </CardContent>
             </Card>
-          ) : pendingSeries.length === 0 && queueChapters.length === 0 ? (
+          ) : queueItems.length === 0 ? (
             <Card>
               <CardContent className="py-16 text-center text-muted-foreground">
                 Không có series nào đang chờ EB duyệt.
               </CardContent>
             </Card>
           ) : (
-            <div className="grid gap-4">
-              {(pendingSeries.length ? pendingSeries : queueChapters.map((ch) => ({
-                id: ch.seriesId ?? ch.id,
-                seriesId: ch.seriesId ?? ch.id,
-                name: ch.seriesName,
-                seriesName: ch.seriesName,
-                coverUrl: ch.previewImageUrl,
-                status: ch.status,
-                mangakaName: ch.mangakaName,
-                classification: ch.classification,
-                classificationText: ch.classificationText,
-                firstChapter: {
-                  id: ch.id,
-                  chapterNumber: ch.chapterNumber,
-                  title: ch.title,
-                },
-              }))).map((series) => (
-                <Card
-                  key={series.id ?? series.seriesId}
-                  className="transition-shadow hover:shadow-md"
-                >
-                  <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex min-w-0 flex-1 gap-4">
-                      {series.coverUrl ? (
-                        <img
-                          src={series.coverUrl}
-                          alt=""
-                          className="size-16 shrink-0 rounded-lg border object-cover"
-                        />
-                      ) : null}
-                      <div className="min-w-0 space-y-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="font-semibold">{series.name ?? series.seriesName}</h3>
-                          <Badge variant="secondary">{series.status ?? "pending_EB"}</Badge>
-                          {series.classification ? (
-                            <Badge variant="outline">{series.classification}</Badge>
+            <Card className="flex flex-col gap-0 overflow-hidden py-0 shadow-sm">
+              <CardHeader className="shrink-0 border-b bg-muted/20 px-5 py-4 sm:px-6">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 space-y-1.5">
+                    <CardTitle className="flex flex-wrap items-center gap-2.5 text-xl tracking-tight sm:text-2xl">
+                      {selectedMangakaGroup ? (
+                        <span className="group/avatar inline-flex shrink-0">
+                          <Avatar
+                            className={cn(
+                              "size-9 rounded-full shadow-sm shadow-sky-900/20 ring-1 ring-border",
+                              "transition-all duration-200 ease-out",
+                              "group-hover/avatar:scale-110 group-hover/avatar:ring-2 group-hover/avatar:ring-sky-400",
+                              "group-hover/avatar:shadow-md group-hover/avatar:shadow-sky-500/25",
+                            )}
+                          >
+                            {selectedMangakaGroup.avatarUrl ? (
+                              <AvatarImage
+                                src={selectedMangakaGroup.avatarUrl}
+                                alt=""
+                                className="transition-transform duration-300 group-hover/avatar:scale-110"
+                              />
+                            ) : null}
+                            <AvatarFallback className="rounded-full bg-sky-600 text-sm font-bold text-white">
+                              {(selectedMangakaGroup.name.length >= 2
+                                ? selectedMangakaGroup.name
+                                : `${selectedMangakaGroup.name}●`
+                              )
+                                .slice(0, 2)
+                                .toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                        </span>
+                      ) : (
+                        <Gavel className="size-5 text-amber-500" />
+                      )}
+                      <span className="truncate">
+                        {selectedMangakaGroup
+                          ? selectedMangakaGroup.name
+                          : "Chọn Mangaka"}
+                      </span>
+                      <Badge
+                        className={cn(
+                          "h-6 min-w-6 justify-center px-2 text-xs font-semibold",
+                          selectedMangakaGroup
+                            ? "bg-amber-600 text-white hover:bg-amber-600"
+                            : "bg-secondary text-secondary-foreground hover:bg-secondary",
+                        )}
+                      >
+                        {selectedMangakaGroup
+                          ? selectedMangakaGroup.count
+                          : queueItems.length}
+                      </Badge>
+                    </CardTitle>
+                    {!selectedMangakaGroup ? (
+                      <CardDescription>
+                        Chọn Mangaka để xem series đang chờ EB duyệt.
+                      </CardDescription>
+                    ) : (
+                      <CardDescription>
+                        {selectedMangakaGroup.count} series chờ duyệt từ Mangaka
+                        này.
+                      </CardDescription>
+                    )}
+                  </div>
+                  {selectedMangakaGroup ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-9 shrink-0 gap-1.5 border-sky-200 bg-background shadow-sm hover:bg-sky-50 dark:border-sky-500/30 dark:hover:bg-sky-500/10"
+                      onClick={() => setSelectedMangakaKey(null)}
+                    >
+                      <ArrowLeft className="size-4" />
+                      Tất cả Mangaka
+                    </Button>
+                  ) : null}
+                </div>
+              </CardHeader>
+              <CardContent className="scrollbar-hide max-h-[min(640px,calc(100vh-260px))] space-y-2.5 overflow-y-auto px-4 py-4 sm:px-5">
+                {selectedMangakaGroup ? (
+                  selectedMangakaGroup.items.map((series) => (
+                    <Card
+                      key={series.id ?? series.seriesId}
+                      className="transition-shadow hover:shadow-md"
+                    >
+                      <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex min-w-0 flex-1 gap-4">
+                          {series.coverUrl ? (
+                            <img
+                              src={series.coverUrl}
+                              alt=""
+                              className="size-16 shrink-0 rounded-lg border object-cover"
+                            />
+                          ) : null}
+                          <div className="min-w-0 space-y-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="font-semibold">
+                                {series.name ?? series.seriesName}
+                              </h3>
+                              <Badge variant="secondary">
+                                {series.status ?? "pending_EB"}
+                              </Badge>
+                              {series.classification ? (
+                                <Badge variant="outline">
+                                  {series.classification}
+                                </Badge>
+                              ) : null}
+                            </div>
+                            <p className="text-sm text-muted-foreground">
+                              {[
+                                series.firstChapter
+                                  ? `Ch.${series.firstChapter.chapterNumber}${
+                                      series.firstChapter.title
+                                        ? ` — ${series.firstChapter.title}`
+                                        : ""
+                                    }`
+                                  : null,
+                                series.classificationText,
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </p>
+                            {series.synopsis ? (
+                              <p className="line-clamp-2 text-xs text-muted-foreground">
+                                {series.synopsis}
+                              </p>
+                            ) : null}
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            variant="outline"
+                            onClick={() =>
+                              openSeriesReview(series.seriesId ?? series.id)
+                            }
+                          >
+                            <BookOpen className="size-4" />
+                            Xem pages
+                          </Button>
+                          {series.firstChapter?.id ? (
+                            <Button
+                              className="bg-emerald-600 text-white hover:bg-emerald-700"
+                              onClick={() =>
+                                openChapterEvaluate(series.firstChapter.id)
+                              }
+                            >
+                              <CheckCircle2 className="size-4" />
+                              Chấm điểm
+                            </Button>
                           ) : null}
                         </div>
-                        <p className="text-sm text-muted-foreground">
-                          {[
-                            series.firstChapter
-                              ? `Ch.${series.firstChapter.chapterNumber}${series.firstChapter.title ? ` — ${series.firstChapter.title}` : ""}`
-                              : null,
-                            series.mangakaName,
-                            series.classificationText,
-                          ]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </p>
-                        {series.synopsis ? (
-                          <p className="line-clamp-2 text-xs text-muted-foreground">
-                            {series.synopsis}
-                          </p>
-                        ) : null}
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        variant="outline"
-                        onClick={() => openSeriesReview(series.seriesId ?? series.id)}
-                      >
-                        <BookOpen className="size-4" />
-                        Xem pages
-                      </Button>
-                      {series.firstChapter?.id ? (
-                        <Button onClick={() => openChapterEvaluate(series.firstChapter.id)}>
-                          <CheckCircle2 className="size-4" />
-                          Chấm điểm
-                        </Button>
-                      ) : null}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+                      </CardContent>
+                    </Card>
+                  ))
+                ) : (
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+                    {queueByMangaka.map((group) => (
+                      <EbMangakaSelectCard
+                        key={group.key}
+                        group={group}
+                        onSelect={setSelectedMangakaKey}
+                      />
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           )}
         </section>
         ) : null}
       </main>
 
       {isChapterDetail ? (
-        <div className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-          <div className="page-container flex flex-wrap items-center justify-between gap-3 py-3">
-            <p className="text-xs text-muted-foreground">
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border/70 bg-background/85 shadow-[0_-12px_40px_rgba(15,23,42,0.08)] backdrop-blur-md supports-[backdrop-filter]:bg-background/70 dark:shadow-[0_-12px_40px_rgba(0,0,0,0.35)]">
+          <div className="page-container flex flex-wrap items-center justify-between gap-3 py-3.5 pb-[max(0.875rem,env(safe-area-inset-bottom))]">
+            <p className="text-xs text-muted-foreground sm:text-sm">
               Điểm TB cá nhân:{" "}
               <strong
                 className={cn(
@@ -1625,7 +1961,8 @@ export default function Eb() {
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 type="button"
-                variant="secondary"
+                variant="outline"
+                className="bg-background"
                 onClick={() => void handleSaveAssessment()}
               >
                 Lưu nháp
@@ -1633,9 +1970,21 @@ export default function Eb() {
               <Button
                 type="button"
                 disabled={submitting || !activeChapter?.id}
-                onClick={() => void handleSubmitScores()}
+                title={
+                  canSubmitScores
+                    ? undefined
+                    : "Cần lưu nháp đủ điểm tất cả thành viên hội đồng"
+                }
+                className="bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                onClick={() => {
+                  if (!canSubmitScores) {
+                    warnMissingCouncilDrafts();
+                    return;
+                  }
+                  void handleSubmitScores();
+                }}
               >
-                {submitting ? "Đang nộp..." : "Nộp kết quả chấm"}
+                {submitting ? "Đang nộp…" : "Nộp kết quả chấm"}
               </Button>
             </div>
           </div>
@@ -1654,7 +2003,7 @@ export default function Eb() {
               alt={
                 activePreviewPage
                   ? `Trang ${activePreviewPage.pageNumber}`
-                  : "Preview chapter"
+                  : "Xem trước chapter"
               }
               className="max-h-[86vh] w-auto max-w-full object-contain"
             />

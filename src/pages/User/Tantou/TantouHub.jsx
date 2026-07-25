@@ -39,7 +39,6 @@ import './TantouEditor.css'
 
 const NAV_LINKS = [
   { to: '/', label: 'Trang chủ' },
-  { to: PATH_EDITOR_BOARD, label: LABEL_EDITOR_BOARD },
 ]
 
 const HERO_IMAGES = [
@@ -172,9 +171,9 @@ export default function TantouHub() {
                 to={`${PATH_TANTOU_EDITOR}/${section.id}`}
                 className="group block rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                <Card className="h-full transition-colors group-hover:border-primary/40 group-hover:bg-muted/30">
-                  <CardHeader className="pb-2">
-                    <div className="mb-2 flex size-10 items-center justify-center rounded-lg bg-sky-500/15 text-sky-600 dark:text-sky-400">
+                <Card className="flex h-full flex-col gap-0 py-0 transition-colors group-hover:border-primary/40 group-hover:bg-muted/30">
+                  <CardHeader className="flex flex-1 flex-col gap-2 pb-3 pt-5">
+                    <div className="mb-1 flex size-10 items-center justify-center rounded-lg bg-sky-500/15 text-sky-600 dark:text-sky-400">
                       <Icon className="size-5" />
                     </div>
                     <CardTitle className="flex items-center gap-2 text-base">
@@ -185,9 +184,11 @@ export default function TantouHub() {
                         </Badge>
                       ) : null}
                     </CardTitle>
-                    <CardDescription>{section.description}</CardDescription>
+                    <CardDescription className="min-h-[2.75rem] leading-relaxed">
+                      {section.description?.trim() || '\u00A0'}
+                    </CardDescription>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="mt-auto border-t border-border/50 px-6 py-3">
                     <span className="text-sm font-medium text-primary group-hover:underline">
                       Mở trang →
                     </span>

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { seriesService } from '@/api/series.service.js'
 import { chaptersService } from '@/api/chapters.service.js'
-import { getApiErrorMessage } from '@/api/http.js'
+import { getApiErrorMessage, resolveMediaUrl } from '@/api/http.js'
 import {
   apiChapterToAnnotator,
   apiChapterToRow,
@@ -10,12 +10,19 @@ import {
   apiPageToUi,
   apiRankingToUi,
   apiSeriesToUi,
+  apiTaskToUi,
   extractPageNotesList,
   parsePageNotesResponse,
+  shouldShowAssistantEditedOnAnnotate,
   uiChapterStatusToApi,
   uiNoteToApi,
   uiSeriesFormToApi,
 } from '@/utils/apiMappers.js'
+import { tasksService } from '@/api/tasks.service.js'
+import {
+  allChapterTasksApproved,
+  mergeTaskResultsIntoPages,
+} from '@/utils/chapterTaskFlow.js'
 import {
   applySeriesFormUpdate,
   buildSeriesFromForm,
@@ -25,6 +32,13 @@ import {
   appendChapterPagesToFormData,
   filesToChapterPageItems,
 } from '@/utils/chapterUploadForm.js'
+import {
+  isAssistantPageApproved,
+  isChapterFullyAssistantApproved,
+  markAssistantApprovedPages,
+  stampAssistantApprovedOnPages,
+  unwrapChapterPagesPayload,
+} from '@/utils/assistantApprovedPages.js'
 
 export function useMangakaWorkspace(user) {
   const userId = user?.id ?? null
@@ -120,12 +134,27 @@ export function useMangakaWorkspace(user) {
       setAnnotatorChapters(prev => {
         const existing = prev.find(ch => String(ch.id) === key)
         if (existing?.pages?.length && existing.pages.every(p => p?.url)) {
-          cached = existing.pages
+          const approvedMissingResult = existing.pages.some((p) => {
+            const approved =
+              p.assistantApproved
+              || isAssistantPageApproved(key, p.pageNumber)
+              || isChapterFullyAssistantApproved(key)
+              || shouldShowAssistantEditedOnAnnotate(existing.apiStatus)
+            return approved && !p.resultUrl
+          })
+          if (!approvedMissingResult) {
+            cached = stampAssistantApprovedOnPages(key, existing.pages)
+          }
         }
         return prev
       })
       if (cached.length) {
         chapterPagesFetchRef.current.add(key)
+        setAnnotatorChapters((prev) =>
+          prev.map((ch) =>
+            String(ch.id) === key ? { ...ch, pages: cached } : ch,
+          ),
+        )
         return cached
       }
 
@@ -160,34 +189,54 @@ export function useMangakaWorkspace(user) {
       chapterPagesInflightRef.current.add(key)
       try {
         const raw = await chaptersService.getPages(chapterId)
-        const unwrapped = (() => {
-          if (Array.isArray(raw)) return raw
-          if (raw && typeof raw === 'object' && 'data' in raw) {
-            const inner = raw.data
-            if (Array.isArray(inner)) return inner
-            if (inner && typeof inner === 'object' && 'data' in inner) return inner.data ?? []
-            if (inner && typeof inner === 'object' && 'pages' in inner) {
-              return Array.isArray(inner.pages) ? inner.pages : []
+        const unwrapped = unwrapChapterPagesPayload(raw)
+        const row = (chapterRowsRef.current ?? []).find(
+          (r) => String(r.id) === key,
+        )
+        if (shouldShowAssistantEditedOnAnnotate(row?.apiStatus)) {
+          markAssistantApprovedPages(key, [], { markAll: true })
+        }
+        let pageList = stampAssistantApprovedOnPages(
+          chapterId,
+          unwrapped.map(apiPageToUi),
+        )
+        // Ảnh Assistant thường nằm trên Task — merge vào page để Upload & ghi chú hiện đúng
+        try {
+          const rawTasks = await tasksService.getByChapter(chapterId)
+          const tasks = (Array.isArray(rawTasks) ? rawTasks : []).map(apiTaskToUi)
+          pageList = stampAssistantApprovedOnPages(
+            chapterId,
+            mergeTaskResultsIntoPages(pageList, tasks),
+          )
+          if (allChapterTasksApproved(tasks)) {
+            markAssistantApprovedPages(key, [], { markAll: true })
+            pageList = stampAssistantApprovedOnPages(chapterId, pageList)
+          } else {
+            const approvedNums = tasks
+              .filter((t) => t.status === 'approved' && t.pageNumber != null)
+              .map((t) => t.pageNumber)
+            if (approvedNums.length) {
+              markAssistantApprovedPages(key, approvedNums)
+              pageList = stampAssistantApprovedOnPages(chapterId, pageList)
             }
-            return [inner].filter(Boolean)
           }
-          if (raw && typeof raw === 'object' && 'pages' in raw) {
-            return Array.isArray(raw.pages) ? raw.pages : []
-          }
-          return []
-        })()
-        const pageList = unwrapped.map(apiPageToUi)
+        } catch {
+          // Không có quyền / không có task — giữ pageList hiện tại
+        }
         chapterPagesFetchRef.current.add(key)
         setAnnotatorChapters(prev => {
           const existing = prev.find(ch => String(ch.id) === key)
           if (existing) {
             return prev.map(ch =>
-              String(ch.id) === key ? { ...ch, pages: pageList } : ch,
+              String(ch.id) === key
+                ? {
+                    ...ch,
+                    pages: pageList,
+                    apiStatus: row?.apiStatus ?? ch.apiStatus,
+                  }
+                : ch,
             )
           }
-          const row = (chapterRowsRef.current ?? []).find(
-            (r) => String(r.id) === key,
-          )
           const stub = row
             ? {
                 id: row.id,
@@ -195,6 +244,7 @@ export function useMangakaWorkspace(user) {
                 series: row.series,
                 num: row.num,
                 pages: pageList,
+                apiStatus: row.apiStatus,
                 cover: row.coverUrl ? { url: row.coverUrl, name: 'cover' } : null,
               }
             : {
@@ -254,7 +304,15 @@ export function useMangakaWorkspace(user) {
     setAnnotatorChapters(prev => prev.filter(ch => ch.seriesId !== seriesId))
   }, [])
 
-  const createChapter = useCallback(async (seriesId, seriesTitle, chapterNumber, assistantId = null, files = []) => {
+  const createChapter = useCallback(async (
+    seriesId,
+    seriesTitle,
+    chapterNumber,
+    assistantId = null,
+    files = [],
+    options = {},
+  ) => {
+    const coverFile = options?.coverFile ?? null
     let created, uploadedPages
 
     if (files.length > 0) {
@@ -285,8 +343,32 @@ export function useMangakaWorkspace(user) {
       uploadedPages = []
     }
 
-    const row = apiChapterToRow(created, seriesTitle)
-    const annotator = apiChapterToAnnotator(created, uploadedPages, seriesTitle)
+    const createdId = created?._id ?? created?.id
+    let coverImageUrl =
+      created?.cover_image_url
+      ?? created?.cover_url
+      ?? created?.coverUrl
+      ?? ''
+
+    // Bước 2 (optional): PATCH /chapters/:id/cover — fail không làm fail cả flow tạo chapter
+    if (coverFile && createdId) {
+      try {
+        const coverRes = await chaptersService.uploadCover(createdId, coverFile)
+        coverImageUrl =
+          coverRes?.cover_image_url
+          ?? coverRes?.cover_url
+          ?? coverImageUrl
+      } catch {
+        // Chapter vẫn tạo được; cover còn trống, user set lại sau
+      }
+    }
+
+    const createdWithCover = {
+      ...created,
+      cover_image_url: coverImageUrl || created?.cover_image_url || '',
+    }
+    const row = apiChapterToRow(createdWithCover, seriesTitle)
+    const annotator = apiChapterToAnnotator(createdWithCover, uploadedPages, seriesTitle)
     setChapterRows(prev => [row, ...prev])
     setAnnotatorChapters(prev => [annotator, ...prev])
     setSeriesList(prev => prev.map(s =>
@@ -294,19 +376,45 @@ export function useMangakaWorkspace(user) {
     ))
     if (assistantId) {
       setChapterRows(prev => prev.map(r =>
-        r.id === created.id ? { ...r, assistantId, status: 'assistant' } : r,
+        r.id === createdId ? { ...r, assistantId, status: 'assistant' } : r,
       ))
     }
     return annotator
   }, [])
 
-  /** Gộp tạo chapter + upload pages trong 1 request multipart. */
+  /** Gộp tạo chapter + upload pages trong 1 request multipart (+ optional cover sau đó). */
   const createChapterWithPages = useCallback(
-    async (seriesId, seriesTitle, chapterNumber, assistantId = null, files = []) => {
-      return createChapter(seriesId, seriesTitle, chapterNumber, assistantId, files)
+    async (seriesId, seriesTitle, chapterNumber, assistantId = null, files = [], options = {}) => {
+      return createChapter(seriesId, seriesTitle, chapterNumber, assistantId, files, options)
     },
     [createChapter],
   )
+
+  const updateChapterCover = useCallback(async (chapterId, file) => {
+    const data = await chaptersService.uploadCover(chapterId, file)
+    const coverUrl = resolveMediaUrl(
+      data?.cover_image_url ?? data?.cover_url ?? null,
+    )
+    setChapterRows(prev => prev.map(r =>
+      r.id === chapterId ? { ...r, coverUrl: coverUrl || null } : r,
+    ))
+    setAnnotatorChapters(prev => prev.map(ch =>
+      ch.id !== chapterId
+        ? ch
+        : { ...ch, cover: coverUrl ? { url: coverUrl, name: file?.name ?? 'cover' } : null },
+    ))
+    return coverUrl
+  }, [])
+
+  const removeChapterCover = useCallback(async (chapterId) => {
+    await chaptersService.removeCover(chapterId)
+    setChapterRows(prev => prev.map(r =>
+      r.id === chapterId ? { ...r, coverUrl: null } : r,
+    ))
+    setAnnotatorChapters(prev => prev.map(ch =>
+      ch.id !== chapterId ? ch : { ...ch, cover: null },
+    ))
+  }, [])
 
   const uploadChapterPages = useCallback(async (chapterId, files, pageNotes = []) => {
     const uploaded = await chaptersService.uploadPages(chapterId, files, pageNotes)
@@ -358,11 +466,26 @@ export function useMangakaWorkspace(user) {
     await chaptersService.deletePage(pageId)
   }, [])
 
+  /**
+   * Xóa chapter rỗng trên server (DELETE /chapters/:id).
+   * BE: status ∈ { draft, pending_assistant } và chưa có page.
+   */
+  const deleteChapter = useCallback(async (chapterId) => {
+    const id = String(chapterId ?? '').trim()
+    if (!id || !/^[0-9a-f]{24}$/i.test(id)) return
+    await chaptersService.delete(id)
+    setChapterRows((prev) => prev.filter((r) => String(r.id) !== id))
+    setAnnotatorChapters((prev) => prev.filter((ch) => String(ch.id) !== id))
+  }, [])
+
   const updateChapterStatus = useCallback(async (chapterId, uiStatus) => {
     const apiStatus = uiChapterStatusToApi(uiStatus)
     await chaptersService.update(chapterId, { status: apiStatus }).catch(() => null)
     setChapterRows(prev => prev.map(r =>
-      r.id === chapterId ? { ...r, status: uiStatus } : r,
+      r.id === chapterId ? { ...r, status: uiStatus, apiStatus } : r,
+    ))
+    setAnnotatorChapters(prev => prev.map(ch =>
+      ch.id === chapterId ? { ...ch, apiStatus } : ch,
     ))
   }, [])
 
@@ -397,13 +520,23 @@ export function useMangakaWorkspace(user) {
   }, [])
 
   const savePageNote = useCallback(async (pageId, pageKey, note) => {
-    const payload = uiNoteToApi(note)
+    const text = String(note?.text ?? '').trim()
     const clientKey = String(note.clientKey ?? note.id ?? '')
     let serverId = noteServerIdRef.current.get(clientKey) ?? null
     if (!serverId && note.id && !String(note.id).startsWith('note-')) {
       serverId = String(note.id)
       noteServerIdRef.current.set(clientKey, serverId)
     }
+
+    // BE: text is required — không tạo note rỗng (gây 400 lần gửi đầu)
+    if (!text && !serverId) {
+      return { ...note, clientKey: note.clientKey ?? clientKey }
+    }
+
+    const payload = uiNoteToApi({
+      ...note,
+      text: text || 'Cần xử lý.',
+    })
 
     if (!serverId) {
       const created = await chaptersService.createPageNote(pageId, payload)
@@ -419,10 +552,20 @@ export function useMangakaWorkspace(user) {
       [pageKey]: (prev[pageKey] ?? []).map(n => {
         const nKey = String(n.clientKey ?? n.id ?? '')
         if (nKey !== clientKey) return n
-        return { ...n, id: serverId, clientKey: n.clientKey ?? clientKey }
+        return {
+          ...n,
+          id: serverId,
+          clientKey: n.clientKey ?? clientKey,
+          text: payload.text,
+        }
       }),
     }))
-    return { ...note, id: serverId, clientKey: note.clientKey ?? clientKey }
+    return {
+      ...note,
+      id: serverId,
+      clientKey: note.clientKey ?? clientKey,
+      text: payload.text,
+    }
   }, [])
 
   /** Đồng bộ toàn bộ note chapter lên BE trước khi gửi Assistant (tránh lần 1 thiếu toạ độ). */
@@ -435,9 +578,16 @@ export function useMangakaWorkspace(user) {
       const list = notesByPage?.[pageKey] ?? []
       const saved = []
       for (const note of list) {
+        // Bỏ qua ô chưa có chữ — tránh POST notes 400 "text is required"
+        if (!String(note?.text ?? '').trim()) {
+          const clientKey = String(note.clientKey ?? note.id ?? '')
+          const serverId = noteServerIdRef.current.get(clientKey)
+            ?? (note.id && !String(note.id).startsWith('note-') ? String(note.id) : null)
+          if (!serverId) continue
+        }
         saved.push(await savePageNote(page.id, pageKey, note))
       }
-      synced[pageKey] = saved
+      synced[pageKey] = saved.length ? saved : list
     }
     return synced
   }, [savePageNote])
@@ -451,6 +601,69 @@ export function useMangakaWorkspace(user) {
       [pageKey]: (prev[pageKey] ?? []).filter(n => n.id !== noteId),
     }))
   }, [])
+
+  /**
+   * Sau duyệt ảnh Assistant → reload result_image, đánh dấu trang, xóa note cũ.
+   */
+  const applyAssistantApprovalToAnnotator = useCallback(async (
+    chapterId,
+    { pageNumbers = [], promoteChapter = false } = {},
+  ) => {
+    const id = String(chapterId ?? '')
+    if (!id) return []
+
+    markAssistantApprovedPages(id, pageNumbers, { markAll: promoteChapter })
+    const pages = await loadChapterPages(id, { force: true })
+    const stamped = stampAssistantApprovedOnPages(id, pages)
+    const pageNumSet = new Set(
+      (pageNumbers ?? []).map(Number).filter((n) => Number.isFinite(n)),
+    )
+    const markAll = promoteChapter || pageNumSet.size === 0
+
+    setAnnotatorChapters((prev) =>
+      prev.map((ch) => {
+        if (String(ch.id) !== id) return ch
+        return {
+          ...ch,
+          pages: stamped,
+          ...(promoteChapter ? { apiStatus: 'approved_by_mangaka' } : {}),
+        }
+      }),
+    )
+
+    if (promoteChapter) {
+      setChapterRows((prev) =>
+        prev.map((r) =>
+          String(r.id) === id
+            ? {
+                ...r,
+                apiStatus: 'approved_by_mangaka',
+                status: 'approved',
+                statusLabel: 'Đã duyệt (Assistant)',
+              }
+            : r,
+        ),
+      )
+    }
+
+    setAnnotatorNotes((prev) => {
+      const next = { ...prev }
+      stamped.forEach((p, idx) => {
+        const pn = Number(p.pageNumber)
+        if (markAll || pageNumSet.has(pn) || p.assistantApproved) {
+          next[`${id}-${idx}`] = []
+        }
+      })
+      if (markAll) {
+        for (const key of Object.keys(next)) {
+          if (key.startsWith(`${id}-`)) next[key] = []
+        }
+      }
+      return next
+    })
+
+    return stamped
+  }, [loadChapterPages])
 
   return {
     seriesList,
@@ -472,7 +685,10 @@ export function useMangakaWorkspace(user) {
     createChapter,
     createChapterWithPages,
     uploadChapterPages,
+    updateChapterCover,
+    removeChapterCover,
     deleteChapterPage,
+    deleteChapter,
     updateChapterStatus,
     assignChapter,
     unassignChapter,
@@ -480,5 +696,6 @@ export function useMangakaWorkspace(user) {
     savePageNote,
     syncChapterNotes,
     deletePageNote,
+    applyAssistantApprovalToAnnotator,
   }
 }

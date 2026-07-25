@@ -5,6 +5,8 @@
  * chapter_level: Series đã EB-approved → TE chỉ duyệt Chapter → published
  */
 
+import { getApiErrorMessage } from '@/api/http.js'
+
 export const SERIES_LEVEL_STATUSES = [
   'draft',
   'submitted',
@@ -65,8 +67,8 @@ export function pipelineToPhase(pipeline) {
 
 export function tePhaseLabel(phaseOrPipeline, seriesStatus) {
   return isChapterLevelPhase(phaseOrPipeline, seriesStatus)
-    ? 'Giai đoạn 2 · Duyệt chapter (publish)'
-    : 'Giai đoạn 1 · Duyệt series (gửi EB)'
+    ? 'Giai đoạn 2 — Duyệt chapter'
+    : 'Giai đoạn 1 — Duyệt series'
 }
 
 export function mangakaTeSubmitMessage(phaseOrPipeline, seriesStatus) {
@@ -78,4 +80,36 @@ export function mangakaTeSubmitMessage(phaseOrPipeline, seriesStatus) {
 /** Giai đoạn 2 — chapter approved_by_EB, TE publish thủ công (không qua te-action). */
 export function isChapterAwaitingTePublish(chapterStatus) {
   return String(chapterStatus ?? '').toLowerCase() === 'approved_by_eb'
+}
+
+/** Chuẩn hoá status local sau te-action approve. */
+export const TE_CHAPTER_APPROVED_STATUS = 'approved_by_EB'
+
+/**
+ * Lấy next_step từ response te-action approve.
+ * Shape: { action: 'publish', endpoint: 'POST /te-reviews/chapter/:id/publish' }
+ */
+export function parseTeActionNextStep(res) {
+  const raw =
+    res?.data?.next_step
+    ?? res?.next_step
+    ?? res?.data?.data?.next_step
+    ?? null
+  if (!raw || typeof raw !== 'object') return null
+  const action = String(raw.action ?? '').toLowerCase()
+  const endpoint = String(raw.endpoint ?? '').trim()
+  if (!action && !endpoint) return null
+  return { action: action || 'publish', endpoint }
+}
+
+/** Message lỗi POST .../publish theo status code. */
+export function formatTeChapterPublishError(err, fallback = 'Không phát hành được chapter.') {
+  const status = err?.response?.status
+  if (status === 403) {
+    return 'Chỉ TE đã phê duyệt chapter mới được phát hành.'
+  }
+  if (status === 400) {
+    return 'Chapter chưa ở trạng thái approved_by_EB — hãy phê duyệt trước.'
+  }
+  return getApiErrorMessage(err, fallback)
 }

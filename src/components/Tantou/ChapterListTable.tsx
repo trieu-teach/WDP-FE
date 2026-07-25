@@ -1,4 +1,4 @@
-import { BookOpen } from "lucide-react";
+import { BookOpen, Eye } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { ChapterRow } from "./reviewTypes";
@@ -16,13 +16,15 @@ function ChapterStatusBadge({ status }: { status: string }) {
   const approved = status === "approved_publish" || status === "forwarded_eb";
   return (
     <Badge
-      variant={approved ? "secondary" : "outline"}
+      variant="outline"
       className={cn(
-        approved &&
-          "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300",
+        "font-medium",
+        approved
+          ? "border-emerald-200 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/30 dark:text-emerald-300"
+          : "border-amber-200 bg-amber-500/10 text-amber-800 dark:border-amber-500/30 dark:text-amber-200",
       )}
     >
-      {approved ? "Approved" : "Pending"}
+      {approved ? "Đã duyệt" : "Chờ duyệt"}
     </Badge>
   );
 }
@@ -38,7 +40,7 @@ export function ChapterListTable({
     <div className="space-y-3 rounded-2xl border border-border/80 bg-card/40 p-4 dark:bg-zinc-900/40">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <BookOpen className="size-4 text-primary" />
+          <BookOpen className="size-4 text-sky-600 dark:text-sky-400" />
           <h3 className="font-semibold text-foreground">Danh sách chương</h3>
         </div>
         <Badge variant="outline">{rows.length}</Badge>
@@ -51,10 +53,10 @@ export function ChapterListTable({
               <th className="px-3 py-2.5 font-medium">#</th>
               <th className="px-3 py-2.5 font-medium">Chương</th>
               <th className="hidden px-3 py-2.5 font-medium sm:table-cell">
-                Sent
+                Ngày gửi
               </th>
-              <th className="px-3 py-2.5 font-medium">Status</th>
-              <th className="px-3 py-2.5 text-right font-medium">Action</th>
+              <th className="px-3 py-2.5 font-medium">Trạng thái</th>
+              <th className="px-3 py-2.5 text-right font-medium">Thao tác</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border bg-background/60">
@@ -85,7 +87,8 @@ export function ChapterListTable({
                     key={row.id}
                     className={cn(
                       "transition-colors",
-                      isViewing && "bg-sky-500/10",
+                      isViewing &&
+                        "bg-sky-500/10 ring-1 ring-inset ring-sky-400/30",
                       !isViewing && isReviewTarget && "bg-muted/30",
                       !isViewing && "hover:bg-muted/40",
                     )}
@@ -101,14 +104,22 @@ export function ChapterListTable({
                       <ChapterStatusBadge status={row.status} />
                     </td>
                     <td className="px-3 py-2.5 text-right">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant={isViewing ? "default" : "outline"}
-                        onClick={() => onOpen(row.id)}
-                      >
-                        {isViewing ? "Đang xem" : "Mở"}
-                      </Button>
+                      {isViewing ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-300/70 bg-sky-500/10 px-2.5 py-1 text-xs font-medium text-sky-800 dark:border-sky-500/40 dark:text-sky-200">
+                          <Eye className="size-3.5" />
+                          Đang chọn
+                        </span>
+                      ) : (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-8"
+                          onClick={() => onOpen(row.id)}
+                        >
+                          Mở
+                        </Button>
+                      )}
                     </td>
                   </tr>
                 );

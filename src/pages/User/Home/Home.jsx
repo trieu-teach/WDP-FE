@@ -40,7 +40,8 @@ import './Home.css'
 
 const HERO_SLIDES = [
   {
-    image: '/images/home4.png',
+    image: '/images/home2.png',
+    objectPosition: 'center 35%',
     badge: 'Nền tảng manga',
     title: 'Khám phá & xuất bản manga dễ dàng',
     desc: 'Kết nối Mangaka, Assistant, Tantou Editor và Editor Board trong một quy trình thống nhất.',
@@ -48,7 +49,8 @@ const HERO_SLIDES = [
     ctaLabel: 'Bắt đầu ngay',
   },
   {
-    image: '/images/home3.png',
+    image: '/images/home6.png',
+    objectPosition: 'center 28%',
     badge: 'Mangaka Studio',
     title: 'Từ sketch đến chapter hoàn chỉnh',
     desc: 'Upload trang, ghi chú vùng và duyệt bản tổng hợp ngay trên workspace.',
@@ -57,6 +59,8 @@ const HERO_SLIDES = [
   },
   {
     image: '/images/home4.png',
+    /* Đẩy khung nhìn lên để hiện đủ đầu nhân vật */
+    objectPosition: 'center 12%',
     badge: 'Editorial',
     title: 'Quy trình biên tập chuyên nghiệp',
     desc: 'Tantou Editor nhận xét, chuyển debut sang Editor Board và lên lịch phát hành.',
@@ -65,6 +69,7 @@ const HERO_SLIDES = [
   },
   {
     image: '/images/home5.png',
+    objectPosition: 'center 30%',
     badge: LABEL_EDITOR_BOARD,
     title: 'Chấm điểm & xác nhận phát hành',
     desc: 'Editor Board đánh giá debut series, duyệt chapter và chốt lịch lên sóng.',
@@ -309,6 +314,9 @@ export default function Home() {
               alt=""
               className="home-hero__img"
               loading="eager"
+              style={{
+                objectPosition: activeHero.objectPosition ?? 'center 30%',
+              }}
             />
             <div className="home-hero__scrim" aria-hidden />
 

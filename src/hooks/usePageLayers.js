@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { layersService } from '@/api/layers.service.js'
-import { getApiErrorMessage } from '@/api/http.js'
+import { getApiErrorMessage, isNetworkError } from '@/api/http.js'
 import {
   apiLayerToUi,
   apiVersionToUi,
@@ -50,7 +50,9 @@ export function usePageLayers(pageId) {
         setFinalComposedAt(finalRes?.final_composed_at ?? finalRes?.composedAt ?? null)
       }
     } catch (err) {
-      toast.error(getApiErrorMessage(err, 'Không tải được layer.'))
+      if (!isNetworkError(err)) {
+        toast.error(getApiErrorMessage(err, 'Không tải được layer.'))
+      }
     } finally {
       setLoading(false)
     }
@@ -92,7 +94,9 @@ export function usePageLayers(pageId) {
         toast.success(`Đã thêm layer #${ui.index}.`)
         return ui
       } catch (err) {
-        toast.error(getApiErrorMessage(err, 'Không upload được layer.'))
+        if (!isNetworkError(err)) {
+          toast.error(getApiErrorMessage(err, 'Không upload được layer.'))
+        }
         throw err
       } finally {
         setUploading(false)
@@ -111,7 +115,9 @@ export function usePageLayers(pageId) {
       try {
         await layersService.updateLayer(pageId, layerId, apiPatch)
       } catch (err) {
-        toast.error(getApiErrorMessage(err, 'Không cập nhật được layer.'))
+        if (!isNetworkError(err)) {
+          toast.error(getApiErrorMessage(err, 'Không cập nhật được layer.'))
+        }
         await refresh()
       }
     },
@@ -131,7 +137,9 @@ export function usePageLayers(pageId) {
         })
         toast.success('Đã xóa layer.')
       } catch (err) {
-        toast.error(getApiErrorMessage(err, 'Không xóa được layer.'))
+        if (!isNetworkError(err)) {
+          toast.error(getApiErrorMessage(err, 'Không xóa được layer.'))
+        }
       }
     },
     [pageId],
@@ -169,7 +177,9 @@ export function usePageLayers(pageId) {
         toast.success(`Đã upload version ${version.versionNo} cho layer.`)
         return version
       } catch (err) {
-        toast.error(getApiErrorMessage(err, 'Không upload được version mới.'))
+        if (!isNetworkError(err)) {
+          toast.error(getApiErrorMessage(err, 'Không upload được version mới.'))
+        }
         throw err
       } finally {
         setUploading(false)
@@ -198,7 +208,9 @@ export function usePageLayers(pageId) {
         )
         toast.success(`Đã rollback về version ${version.versionNo}.`)
       } catch (err) {
-        toast.error(getApiErrorMessage(err, 'Không rollback được.'))
+        if (!isNetworkError(err)) {
+          toast.error(getApiErrorMessage(err, 'Không rollback được.'))
+        }
       }
     },
     [pageId],
@@ -222,7 +234,9 @@ export function usePageLayers(pageId) {
           ),
         )
       } catch (err) {
-        toast.error(getApiErrorMessage(err, 'Không sắp xếp lại layer.'))
+        if (!isNetworkError(err)) {
+          toast.error(getApiErrorMessage(err, 'Không sắp xếp lại layer.'))
+        }
         await refresh()
       }
     },
@@ -262,7 +276,9 @@ export function usePageLayers(pageId) {
       const msg = getApiErrorMessage(err, 'Không gộp được layer.')
       console.error('[usePageLayers.finalize] error:', err, 'message:', msg)
       setFinalError(msg)
-      toast.error(msg)
+      if (!isNetworkError(err)) {
+        toast.error(msg)
+      }
       throw err
     } finally {
       setFinalizing(false)

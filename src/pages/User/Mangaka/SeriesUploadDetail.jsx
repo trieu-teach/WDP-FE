@@ -18,12 +18,30 @@ import { seriesService } from '@/api/series.service.js'
 import { chaptersService } from '@/api/chapters.service.js'
 import { getApiErrorMessage, resolveMediaUrl } from '@/api/http.js'
 import {
+  getPage1OriginalUrl,
+  resolveChapterCoverDisplay,
+} from '@/utils/chapterCover.js'
+import {
   apiChapterToAnnotator,
   apiChapterToRow,
+  apiPageToUi,
   apiSeriesToUi,
+  apiTaskToUi,
   findSeriesByIdOrSlug,
+  getAnnotatorPageDisplayUrl,
+  shouldShowAssistantEditedOnAnnotate,
   uiSeriesFormToApi,
 } from '@/utils/apiMappers.js'
+import { tasksService } from '@/api/tasks.service.js'
+import {
+  allChapterTasksApproved,
+  mergeTaskResultsIntoPages,
+} from '@/utils/chapterTaskFlow.js'
+import {
+  markAssistantApprovedPages,
+  stampAssistantApprovedOnPages,
+  unwrapChapterPagesPayload,
+} from '@/utils/assistantApprovedPages.js'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -125,9 +143,30 @@ export default function SeriesUploadDetail() {
       const annotators = await Promise.all(
         rows.map(async (row) => {
           try {
-            const pages = await chaptersService.getPages(row.id)
-            const ch = (Array.isArray(chapters) ? chapters : []).find(c => (c._id ?? c.id) === row.id)
-            return apiChapterToAnnotator(ch ?? row, pages, title)
+            const rawPages = await chaptersService.getPages(row.id)
+            let pageList = unwrapChapterPagesPayload(rawPages).map(apiPageToUi)
+            try {
+              const rawTasks = await tasksService.getByChapter(row.id)
+              const tasks = (Array.isArray(rawTasks) ? rawTasks : []).map(apiTaskToUi)
+              pageList = mergeTaskResultsIntoPages(pageList, tasks)
+              if (allChapterTasksApproved(tasks) || shouldShowAssistantEditedOnAnnotate(row.apiStatus)) {
+                markAssistantApprovedPages(row.id, [], { markAll: true })
+              } else {
+                const approvedNums = tasks
+                  .filter((t) => t.status === 'approved' && t.pageNumber != null)
+                  .map((t) => t.pageNumber)
+                if (approvedNums.length) markAssistantApprovedPages(row.id, approvedNums)
+              }
+            } catch {
+              if (shouldShowAssistantEditedOnAnnotate(row.apiStatus)) {
+                markAssistantApprovedPages(row.id, [], { markAll: true })
+              }
+            }
+            const stamped = stampAssistantApprovedOnPages(row.id, pageList)
+            const ch = (Array.isArray(chapters) ? chapters : []).find(
+              (c) => String(c._id ?? c.id) === String(row.id),
+            )
+            return apiChapterToAnnotator(ch ?? row, stamped, title)
           } catch {
             return apiChapterToAnnotator(row, [], title)
           }
@@ -181,23 +220,18 @@ export default function SeriesUploadDetail() {
 
   const chapterCards = useMemo(() => chapterRows.map(row => {
     const annot = annotatorChapters.find(ch => ch.id === row.id)
-    // 1) Ảnh bìa chapter (local / BE cover_url)
-    // 2) Fallback trang đầu — BE hiện chưa có API lưu cover chapter riêng
-    const pageThumb =
-      annot?.pages?.find((p) => p?.url)?.url
-      ?? annot?.pages?.[0]?.url
-      ?? null
-    const coverUrl =
-      annot?.cover?.url
-      || row.coverUrl
-      || pageThumb
-      || null
+    const page1Original = getPage1OriginalUrl(annot?.pages)
+    const coverUrl = resolveChapterCoverDisplay({
+      coverImageUrl: annot?.cover?.url || row.coverUrl,
+      page1OriginalUrl: page1Original,
+      seriesCoverUrl: series?.coverImage,
+    })
     const cover = coverUrl
       ? { url: coverUrl, name: annot?.cover?.name ?? 'cover' }
       : null
     const uploaded = annot?.pages?.length ?? row.pages ?? 0
     return { row, annot, cover, uploaded }
-  }), [chapterRows, annotatorChapters])
+  }), [chapterRows, annotatorChapters, series?.coverImage])
 
   if (loading) {
     return (
@@ -231,7 +265,20 @@ export default function SeriesUploadDetail() {
   const basePath = `/mangaka/series/${slug}`
 
   if (chapterId && activeRow) {
-    const pages = activeAnnotator?.pages ?? []
+    const rawPages = stampAssistantApprovedOnPages(
+      activeRow.id,
+      activeAnnotator?.pages ?? [],
+    )
+    // Ưu tiên ảnh Assistant (result) nếu có — series detail luôn hiện bản mới nhất
+    const pages = rawPages.map((p) => ({
+      ...p,
+      url:
+        p.resultUrl
+        ?? getAnnotatorPageDisplayUrl(
+          p,
+          activeRow.apiStatus ?? activeAnnotator?.apiStatus,
+        ),
+    }))
     const pagesWithMedia = pages.filter(p => p?.url)
     const staleOnly = pages.length > 0 && pagesWithMedia.length === 0
     const progressPct = pages.length > 0 ? Math.min(100, pages.length * 4) : null
@@ -301,6 +348,10 @@ export default function SeriesUploadDetail() {
               <Button onClick={openAnnotate}>
                 <PenSquare className="size-4" />
                 Mở Upload & Ghi chú
+              </Button>
+              <Button variant="outline" onClick={openAnnotate}>
+                <ImageIcon className="size-4" />
+                Đổi ảnh bìa
               </Button>
             </CardContent>
           </Card>

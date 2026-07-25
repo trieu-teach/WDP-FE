@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
-import { ArrowLeft, FileText, Sparkles } from "lucide-react";
+import { ArrowLeft, FileText, MessageSquareText, Sparkles } from "lucide-react";
 import Header from "@/components/User/Header/Header.jsx";
 import Footer from "@/components/User/Footer/Footer.jsx";
-import { WorkspaceHero } from "@/components/layout/WorkspaceHero.jsx";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Card,
   CardContent,
@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/select";
 import { getSession, logout } from "@/lib/auth.js";
 import { seriesService } from "@/api/series.service.js";
+import { mangakaProfileService } from "@/api/mangakaProfile.service.js";
 import {
   buildTeAnnotationCreatePayload,
   teReviewsService,
@@ -46,7 +47,6 @@ import {
 import {
   LABEL_EDITOR_BOARD,
   LABEL_TANTOU_EDITOR,
-  PATH_EDITOR_BOARD,
   PATH_TANTOU_EDITOR,
 } from "@/constants/roleTerminology.js";
 import {
@@ -55,8 +55,11 @@ import {
 } from "@/constants/tantouSections.js";
 import { readEbDebutApproved } from "@/utils/ebDebutStorage.js";
 import {
+  formatTeChapterPublishError,
+  parseTeActionNextStep,
   phaseToPipeline,
   resolveTePhase,
+  TE_CHAPTER_APPROVED_STATUS,
 } from "@/utils/teReviewPhase.js";
 import {
   enrichTeSubmissionAssignment,
@@ -77,18 +80,18 @@ import {
   suggestPublishCadence,
 } from "@/utils/tantouWorkspaceStorage.js";
 import TantouPageReview from "./TantouPageReview.jsx";
+import "./TantouEditor.css";
 
 const NAV_LINKS = [
   { to: "/", label: "Trang chủ" },
-  { to: PATH_EDITOR_BOARD, label: LABEL_EDITOR_BOARD },
 ];
 
-function statusVariant(status) {
-  if (status === "pending") return "secondary";
-  if (status === "forwarded_eb") return "default";
-  if (status === "revision") return "destructive";
-  return "outline";
-}
+const HERO_IMAGES = [
+  "/images/editor1.png",
+  "/images/editor2.png",
+  "/images/editor3.png",
+];
+const HERO_SLIDE_MS = 5000;
 
 function statusLabel(status) {
   const map = {
@@ -119,76 +122,251 @@ function formatReviewedAt(value) {
   }).format(date);
 }
 
-function SubmissionCard({ sub, onReview, onQuickApprove, showQuickApprove }) {
+function statusBadgeClass(status) {
+  if (status === "pending") {
+    return "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200";
+  }
+  if (status === "forwarded_eb") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200";
+  }
+  if (status === "revision") {
+    return "border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-500/30 dark:bg-rose-500/15 dark:text-rose-200";
+  }
+  return "border-border bg-muted text-muted-foreground";
+}
+
+function assignmentBadgeClass(status) {
+  if (status === "unassigned") {
+    return "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-500/30 dark:bg-sky-500/15 dark:text-sky-200";
+  }
+  if (status === "mine") {
+    return "border-violet-200 bg-violet-50 text-violet-900 dark:border-violet-500/30 dark:bg-violet-500/15 dark:text-violet-200";
+  }
+  if (status === "other") {
+    return "border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-500/30 dark:bg-rose-500/15 dark:text-rose-200";
+  }
+  return "border-border bg-muted text-muted-foreground";
+}
+
+function SubmissionCard({
+  sub,
+  onReview,
+  onQuickApprove,
+  showQuickApprove,
+  hideMangakaMeta = false,
+}) {
   const canReview = sub.canReview !== false;
-  const assignmentVariant =
-    sub.teAssignmentStatus === "mine"
-      ? "default"
-      : sub.teAssignmentStatus === "other"
-        ? "destructive"
-        : "outline";
+  const pageCount = Array.isArray(sub.pagesMeta) && sub.pagesMeta.length > 0
+    ? sub.pagesMeta.length
+    : 1;
+  const chapterLabel = `Chapter ${sub.chapterNum || "?"}`;
+  const metaLine = hideMangakaMeta
+    ? `${chapterLabel} · ${pageCount} trang`
+    : `${chapterLabel} · ${pageCount} trang · ${sub.mangakaName}`;
 
   return (
     <Card
       className={cn(
-        "gap-0 py-0 transition-all hover:shadow-md",
+        "gap-0 overflow-hidden border-border/70 py-0 shadow-sm transition-all duration-200",
+        "hover:-translate-y-0.5 hover:border-sky-300/70 hover:shadow-md dark:hover:border-sky-500/40",
         !canReview && "opacity-75",
       )}
     >
-      <CardContent className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:p-3.5">
-        <div className="flex size-14 shrink-0 overflow-hidden rounded-lg bg-muted sm:size-16">
-          {sub.mangakaImageUrl ? (
+      <CardContent className="flex items-stretch gap-3.5 p-3 sm:gap-4 sm:p-3.5">
+        <div className="relative aspect-[3/4] w-[4.25rem] shrink-0 overflow-hidden rounded-lg bg-muted sm:w-[5.25rem]">
+          {(sub.chapterCoverUrl || sub.mangakaImageUrl) ? (
             <img
-              src={sub.mangakaImageUrl}
+              src={sub.chapterCoverUrl || sub.mangakaImageUrl}
               alt=""
               className="size-full object-cover"
             />
           ) : (
-            <div className="flex size-full items-center justify-center text-2xl">
-              📄
+            <div className="flex size-full items-center justify-center bg-gradient-to-br from-sky-500/20 to-violet-500/20 text-lg font-bold text-sky-700/70">
+              {(sub.seriesTitle || "?").slice(0, 1).toUpperCase()}
             </div>
           )}
         </div>
-        <div className="min-w-0 flex-1 space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="font-semibold">{sub.seriesTitle}</h3>
-            <Badge variant={statusVariant(sub.status)}>
-              {statusLabel(sub.status)}
-            </Badge>
-            {sub.teAssignmentStatus ? (
-              <Badge variant={assignmentVariant} className="text-[10px]">
-                {sub.teAssignmentStatus === "unassigned"
-                  ? "Chưa ai nhận"
-                  : sub.teAssignmentStatus === "mine"
-                    ? "Của bạn"
-                    : "TE khác"}
+
+        <div className="flex min-w-0 flex-1 flex-col justify-center gap-2">
+          <div className="min-w-0 space-y-1.5">
+            <h3 className="truncate text-base font-semibold leading-snug tracking-tight sm:text-[1.05rem]">
+              {sub.seriesTitle}
+            </h3>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Badge
+                variant="outline"
+                className={cn("text-[11px] font-medium", statusBadgeClass(sub.status))}
+              >
+                {statusLabel(sub.status)}
               </Badge>
+              {sub.teAssignmentStatus ? (
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "text-[11px] font-medium",
+                    assignmentBadgeClass(sub.teAssignmentStatus),
+                  )}
+                >
+                  {sub.teAssignmentStatus === "unassigned"
+                    ? "Chưa ai nhận"
+                    : sub.teAssignmentStatus === "mine"
+                      ? "Của bạn"
+                      : "TE khác"}
+                </Badge>
+              ) : null}
+            </div>
+            <p className="text-xs text-muted-foreground/90 sm:text-[13px]">
+              {metaLine}
+            </p>
+            {sub.teAssignmentLabel ? (
+              <p className="text-[11px] text-muted-foreground">{sub.teAssignmentLabel}</p>
             ) : null}
           </div>
-          <p className="text-sm text-muted-foreground">
-            Ch. {sub.chapterNum} · {sub.pageLabel} · {sub.mangakaName}
-          </p>
-          {sub.teAssignmentLabel ? (
-            <p className="text-xs text-muted-foreground">{sub.teAssignmentLabel}</p>
-          ) : null}
         </div>
-        <div className="flex shrink-0 flex-wrap gap-2">
+
+        <div className="flex shrink-0 flex-col items-stretch justify-center gap-2 self-center sm:min-w-[9.5rem]">
           <Button
-            variant="outline"
             size="sm"
             disabled={!canReview}
+            className="h-9 gap-1.5 bg-sky-600 px-3 text-white shadow-sm hover:bg-sky-700"
             onClick={() => onReview(sub)}
           >
+            <MessageSquareText className="size-3.5" />
             Mở & nhận xét
           </Button>
           {showQuickApprove && sub.status === "pending" && canReview ? (
-            <Button size="sm" onClick={() => onQuickApprove(sub.id)}>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8"
+              onClick={() => onQuickApprove(sub.id)}
+            >
               Duyệt nhanh
             </Button>
           ) : null}
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function mangakaGroupKey(sub) {
+  const authorId = String(
+    sub?.mangakaUserId ?? sub?.seriesMeta?.authorId ?? "",
+  ).trim();
+  if (authorId) return `id:${authorId}`;
+  const name = String(sub?.seriesMeta?.authorName || sub?.mangakaName || "Mangaka").trim();
+  return `name:${name.toLowerCase()}`;
+}
+
+/** Lấy avatar từ GET /mangaka/profile/:id (profile Mangaka đã chỉnh). */
+async function hydrateMangakaAvatarsFromProfiles(items) {
+  const list = Array.isArray(items) ? items : [];
+  const ids = [
+    ...new Set(
+      list
+        .map((s) => String(s?.mangakaUserId || s?.seriesMeta?.authorId || "").trim())
+        .filter(Boolean),
+    ),
+  ];
+  if (!ids.length) return list;
+
+  const avatarById = new Map();
+  await Promise.all(
+    ids.map(async (id) => {
+      try {
+        const profile = await mangakaProfileService.getPublicProfile(id);
+        const url = String(profile?.user?.avatarUrl ?? "").trim();
+        if (url) avatarById.set(id, url);
+      } catch {
+        // giữ fallback initials nếu profile/avatar không có
+      }
+    }),
+  );
+  if (!avatarById.size) return list;
+
+  return list.map((s) => {
+    const id = String(s?.mangakaUserId || s?.seriesMeta?.authorId || "").trim();
+    const avatar = id ? avatarById.get(id) : null;
+    if (!avatar) return s;
+    return {
+      ...s,
+      mangakaAvatarUrl: avatar,
+      seriesMeta: {
+        ...s.seriesMeta,
+        authorAvatarUrl: avatar,
+      },
+    };
+  });
+}
+
+function mangakaGroupName(sub) {
+  return (
+    String(sub?.seriesMeta?.authorName || sub?.mangakaName || "Mangaka").trim()
+    || "Mangaka"
+  );
+}
+
+function MangakaSelectCard({ group, onSelect }) {
+  const initials = (
+    group.name.length >= 2 ? group.name : `${group.name}●`
+  ).slice(0, 2).toUpperCase();
+
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(group.key)}
+      className="group relative text-left"
+    >
+      <Card className="gap-0 overflow-hidden py-0 shadow-sm transition-all hover:-translate-y-0.5 hover:border-sky-300 hover:shadow-md dark:hover:border-sky-500/40">
+        <div className="relative flex aspect-[4/3] w-full items-center justify-center overflow-hidden bg-gradient-to-br from-sky-500/15 via-muted to-violet-500/10">
+          {group.coverUrl ? (
+            <img
+              src={group.coverUrl}
+              alt=""
+              className="size-full object-cover transition-transform duration-300 group-hover:scale-105"
+            />
+          ) : (
+            <div className="flex size-20 items-center justify-center rounded-2xl bg-sky-600 text-2xl font-bold text-white shadow-lg shadow-sky-900/20">
+              {initials}
+            </div>
+          )}
+          <Badge className="absolute right-2 top-2 h-6 min-w-6 justify-center bg-amber-600 px-1.5 text-xs text-white hover:bg-amber-600">
+            {group.count}
+          </Badge>
+        </div>
+        <CardContent className="space-y-1 p-3">
+          <p className="flex items-center gap-2 truncate text-sm font-semibold">
+            <span className="group/avatar inline-flex shrink-0">
+              <Avatar
+                size="sm"
+                className={cn(
+                  "size-6 ring-1 ring-border",
+                  "transition-all duration-200 ease-out",
+                  "group-hover/avatar:scale-110 group-hover/avatar:ring-2 group-hover/avatar:ring-sky-400",
+                  "group-hover/avatar:shadow-sm group-hover/avatar:shadow-sky-500/30",
+                )}
+              >
+                {group.avatarUrl ? (
+                  <AvatarImage
+                    src={group.avatarUrl}
+                    alt=""
+                    className="transition-transform duration-300 group-hover/avatar:scale-110"
+                  />
+                ) : null}
+                <AvatarFallback className="bg-sky-600 text-[10px] font-bold text-white">
+                  {initials}
+                </AvatarFallback>
+              </Avatar>
+            </span>
+            <span className="truncate">{group.name}</span>
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {group.count} chapter chờ duyệt
+          </p>
+        </CardContent>
+      </Card>
+    </button>
   );
 }
 
@@ -209,6 +387,16 @@ export default function TantouEditor() {
   const [publicationLoading, setPublicationLoading] = useState(false);
   const [publicationSavingId, setPublicationSavingId] = useState(null);
   const [publicationConfirm, setPublicationConfirm] = useState(null);
+  const [heroSlide, setHeroSlide] = useState(0);
+  const [selectedMangakaKey, setSelectedMangakaKey] = useState(null);
+
+  useEffect(() => {
+    if (HERO_IMAGES.length < 2) return undefined;
+    const timer = window.setInterval(() => {
+      setHeroSlide((index) => (index + 1) % HERO_IMAGES.length);
+    }, HERO_SLIDE_MS);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const needsQueue =
     sectionId === "series-pending"
@@ -279,27 +467,70 @@ export default function TantouEditor() {
       const enriched = await Promise.all(
         flat.map(async (entry, index) => {
           const chapterId = resolveTeEntityId(entry.chapter);
-          if (!chapterId) return enrichTeQueueItemWithSeriesDetail(baseMapped[index]);
+          const base = baseMapped[index];
+          if (!chapterId) {
+            return enrichTeQueueItemWithSeriesDetail(base);
+          }
           let preview = null;
           try {
             preview = await teReviewsService.getAllChapterPages(chapterId);
           } catch {
             preview = null;
           }
-          return enrichTeQueueItemWithSeriesDetail(
-            enrichTeSubmissionAssignment(
-              mapTePendingChapterToSubmission(
-                entry.chapter,
-                entry.series,
-                entry.tabType,
-                preview,
-              ),
-              currentTeId,
+          const remapped = enrichTeSubmissionAssignment(
+            mapTePendingChapterToSubmission(
+              entry.chapter,
+              entry.series,
+              entry.tabType,
+              preview,
             ),
+            currentTeId,
           );
+          // Giữ ảnh bìa đã có từ pending — đừng để preview pages ghi đè thành ảnh trang.
+          const chapterCoverUrl =
+            remapped.chapterCoverUrl
+            || base?.chapterCoverUrl
+            || null;
+          const mangakaImageUrl =
+            chapterCoverUrl
+            || remapped.mangakaImageUrl
+            || base?.mangakaImageUrl
+            || null;
+          const mangakaAvatarUrl =
+            remapped.mangakaAvatarUrl
+            || base?.mangakaAvatarUrl
+            || remapped.seriesMeta?.authorAvatarUrl
+            || base?.seriesMeta?.authorAvatarUrl
+            || null;
+          return enrichTeQueueItemWithSeriesDetail({
+            ...remapped,
+            chapterCoverUrl,
+            mangakaImageUrl,
+            mangakaUserId:
+              remapped.mangakaUserId
+              || base?.mangakaUserId
+              || remapped.seriesMeta?.authorId
+              || base?.seriesMeta?.authorId
+              || null,
+            mangakaAvatarUrl,
+            seriesMeta: {
+              ...remapped.seriesMeta,
+              authorId:
+                remapped.seriesMeta?.authorId
+                || remapped.mangakaUserId
+                || base?.seriesMeta?.authorId
+                || base?.mangakaUserId
+                || "",
+              authorAvatarUrl:
+                remapped.seriesMeta?.authorAvatarUrl
+                || mangakaAvatarUrl
+                || null,
+            },
+          });
         }),
       );
-      setSubmissions(enriched);
+      const withAvatars = await hydrateMangakaAvatarsFromProfiles(enriched);
+      setSubmissions(withAvatars);
     } catch (err) {
       toast.error(getApiErrorMessage(err, "Không tải được hàng chờ Tantou."));
       setSubmissions([]);
@@ -373,6 +604,57 @@ export default function TantouEditor() {
     [submissions],
   );
 
+  const debutByMangaka = useMemo(() => {
+    const map = new Map();
+    for (const sub of debutQueue) {
+      const key = mangakaGroupKey(sub);
+      const name = mangakaGroupName(sub);
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          name,
+          coverUrl: null,
+          avatarUrl: null,
+          chapters: [],
+        });
+      }
+      const group = map.get(key);
+      group.chapters.push(sub);
+      if (!group.avatarUrl) {
+        group.avatarUrl =
+          sub.mangakaAvatarUrl
+          || sub.seriesMeta?.authorAvatarUrl
+          || null;
+      }
+      if (!group.coverUrl) {
+        group.coverUrl =
+          sub.chapterCoverUrl
+          || sub.seriesMeta?.coverImageUrl
+          || sub.mangakaImageUrl
+          || null;
+      }
+    }
+    return [...map.values()]
+      .map((g) => ({ ...g, count: g.chapters.length }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "vi"));
+  }, [debutQueue]);
+
+  const selectedMangakaGroup = useMemo(
+    () => debutByMangaka.find((g) => g.key === selectedMangakaKey) ?? null,
+    [debutByMangaka, selectedMangakaKey],
+  );
+
+  useEffect(() => {
+    if (!selectedMangakaKey) return;
+    if (!debutByMangaka.some((g) => g.key === selectedMangakaKey)) {
+      setSelectedMangakaKey(null);
+    }
+  }, [debutByMangaka, selectedMangakaKey]);
+
+  useEffect(() => {
+    setSelectedMangakaKey(null);
+  }, [sectionId]);
+
   const recurringQueue = useMemo(
     () =>
       sortTePendingSubmissionsNewestFirst(
@@ -431,7 +713,7 @@ export default function TantouEditor() {
 
   async function handleQuickApprove(chapterId) {
     const sub = submissions.find((s) => s.id === chapterId);
-    if (!sub || !isTeChapterLevelSubmission(sub) || !sub.seriesId) return;
+    if (!sub || !isTeChapterLevelSubmission(sub)) return;
     if (sub.canReview === false) {
       toast.error(
         sub.teAssignmentLabel ?? "Chapter này đã được gán cho TE khác.",
@@ -441,17 +723,44 @@ export default function TantouEditor() {
 
     setSaving(true);
     try {
-      const res = await teReviewsService.reviewChapter(sub.seriesId, {
-        chapter_id: String(chapterId),
+      const chId = String(sub.chapterId ?? sub.id ?? chapterId);
+      // Giai đoạn 2: te-action (BE auto-claim nếu te_id null) — không review-chapter
+      const res = await teReviewsService.teAction(chId, {
         action: "approve",
-        feedback: "OK",
+        notes: ["OK"],
       });
-      toast.success(res?.message ?? "Chapter đã được publish.");
-      refresh();
+
+      setSubmissions((prev) =>
+        prev.map((s) => {
+          const id = String(s.chapterId ?? s.id);
+          if (id !== chId && s.id !== sub.id) return s;
+          return {
+            ...s,
+            apiChapterStatus: TE_CHAPTER_APPROVED_STATUS,
+            teId: currentTeId ?? s.teId,
+            teAssignmentStatus: "mine",
+            canReview: true,
+            teAssignmentLabel: "Đang review chapter của bạn",
+          };
+        }),
+      );
+
+      const nextStep = parseTeActionNextStep(res);
+      const publishHint =
+        !nextStep || nextStep.action === "publish"
+          ? " Bấm Phát hành để xuất bản."
+          : "";
+      toast.success(
+        res?.message
+          ?? `Đã phê duyệt "${sub.seriesTitle}" · Ch.${sub.chapterNum || "?"}.${publishHint}`,
+      );
+      setSelectedId(sub.id);
+      setReviewOpen(true);
     } catch (err) {
       const fallback =
         err?.response?.status === 403
-          ? "Chapter này đã được gán cho TE khác."
+          ? (err?.response?.data?.message
+            || "Chapter này đã được gán cho TE khác.")
           : "Duyệt nhanh thất bại.";
       toast.error(getApiErrorMessage(err, fallback));
     } finally {
@@ -512,6 +821,12 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
         phase: tabType,
         pipeline: phaseToPipeline(tabType),
         seriesTitle: series?.name || mapped.seriesTitle,
+        mangakaAvatarUrl:
+          (authorObj && typeof authorObj === "object"
+            ? resolveMediaUrl(authorObj.avatar_url ?? authorObj.avatarUrl ?? null)
+            : null)
+          || mapped.mangakaAvatarUrl
+          || null,
         seriesMeta: {
           ...mapped.seriesMeta,
           genres: parseSeriesGenres(series).length
@@ -529,6 +844,13 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
             authorObj && typeof authorObj === "object"
               ? (authorObj.full_name ?? authorObj.username ?? "")
               : mapped.seriesMeta.authorName,
+          authorAvatarUrl:
+            (authorObj && typeof authorObj === "object"
+              ? resolveMediaUrl(authorObj.avatar_url ?? authorObj.avatarUrl ?? null)
+              : null)
+            || mapped.seriesMeta?.authorAvatarUrl
+            || mapped.mangakaAvatarUrl
+            || null,
           seriesApiStatus: series?.status ?? mapped.seriesMeta.seriesApiStatus,
           publicationStatus:
             series?.publication_status
@@ -665,7 +987,7 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
           feedback: nextText,
           quick_notes: nextQuickNotes || nextText,
         });
-        toast.success("Đã lưu nháp Series Review.");
+        toast.success("Đã lưu nháp đánh giá series.");
       } catch (err) {
         toast.error(getApiErrorMessage(err, "Không lưu được nháp."));
       } finally {
@@ -695,6 +1017,49 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
         pagesMeta,
       );
 
+      // Phát hành riêng (POST .../publish) — chỉ khi approved_by_EB
+      if (nextStatus === "release" || reviewData.publishOnly) {
+        try {
+          const res = await teReviewsService.publishChapter(nextChapterId);
+          toast.success(
+            res?.message
+              ?? `Đã phát hành "${nextSeriesName}"${
+                nextChapterNumber ? ` · Ch.${nextChapterNumber}` : ""
+              }.`,
+          );
+
+          pushTantouReviewHistory({
+            id: `${nextChapterId}-${Date.now()}`,
+            chapterId: nextChapterId,
+            chapterNumber: nextChapterNumber,
+            seriesName: nextSeriesName,
+            authorName: nextSeriesAuthorName,
+            status: "publish",
+            averageScore: nextAverage,
+            feedback: nextText,
+            reviewedAt: new Date().toISOString(),
+          });
+
+          setSubmissions((prev) =>
+            prev.map((s) => {
+              const id = String(s.chapterId ?? s.id);
+              if (id !== nextChapterId && s.id !== selected.id) return s;
+              return {
+                ...s,
+                apiChapterStatus: "published",
+                status: "approved_publish",
+              };
+            }),
+          );
+
+          setReviewOpen(false);
+          refresh();
+        } catch (err) {
+          toast.error(formatTeChapterPublishError(err));
+        }
+        return;
+      }
+
       if (nextStatus === "publish" || nextStatus === "reject") {
         const seriesLevel = submissionIsSeriesLevel(selected);
         const action = nextStatus === "reject" ? "reject" : "approve";
@@ -705,12 +1070,70 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
           ? rejectNotes
           : (nextText ? [nextText] : []);
 
+        // Giai đoạn 2 (series đã EB-approved): CHỈ te-action — BE auto-claim nếu te_id null
+        if (!seriesLevel) {
+          const res = await teReviewsService.teAction(nextChapterId, {
+            action,
+            ...(noteLines.length ? { notes: noteLines } : {}),
+          });
+
+          if (action === "approve") {
+            setSubmissions((prev) =>
+              prev.map((s) => {
+                const id = String(s.chapterId ?? s.id);
+                if (id !== nextChapterId && s.id !== selected.id) return s;
+                return {
+                  ...s,
+                  apiChapterStatus: TE_CHAPTER_APPROVED_STATUS,
+                  teId: currentTeId ?? s.teId,
+                  teAssignmentStatus: "mine",
+                  canReview: true,
+                  teAssignmentLabel: "Đang review chapter của bạn",
+                };
+              }),
+            );
+
+            const nextStep = parseTeActionNextStep(res);
+            const publishHint =
+              !nextStep || nextStep.action === "publish"
+                ? " Bấm Phát hành để xuất bản."
+                : "";
+            toast.success(
+              res?.message
+                ?? `Đã phê duyệt "${nextSeriesName}"${
+                  nextChapterNumber ? ` · Ch.${nextChapterNumber}` : ""
+                }.${publishHint}`,
+            );
+            // Giữ workspace mở — TE bấm Phát hành (POST .../publish) riêng
+            return;
+          }
+
+          toast.success(
+            res?.message ?? "Đã yêu cầu Mangaka sửa chapter.",
+          );
+          pushTantouReviewHistory({
+            id: `${nextChapterId}-${Date.now()}`,
+            chapterId: nextChapterId,
+            chapterNumber: nextChapterNumber,
+            seriesName: nextSeriesName,
+            authorName: nextSeriesAuthorName,
+            status: nextStatus,
+            averageScore: nextAverage,
+            feedback: nextText,
+            reviewedAt: new Date().toISOString(),
+          });
+          setReviewOpen(false);
+          refresh();
+          return;
+        }
+
+        // Giai đoạn 1: review-chapter vẫn gộp approve + gửi EB như cũ (không đổi)
         if (!nextSeriesId) {
           toast.error("Thiếu series_id để gửi review.");
           return;
         }
 
-        if (seriesLevel && (nextText || nextQuickNotes) && action === "approve") {
+        if ((nextText || nextQuickNotes) && action === "approve") {
           await teReviewsService
             .saveSeriesReviewDraft(nextSeriesId, {
               feedback: nextText,
@@ -741,7 +1164,7 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
 
         if (action === "approve") {
           toast.success(
-            `Đã publish thành công "${nextSeriesName}"${
+            `Đã phê duyệt và gửi EB "${nextSeriesName}"${
               nextChapterNumber ? ` · Ch.${nextChapterNumber}` : ""
             }.`,
           );
@@ -767,11 +1190,20 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
       setReviewOpen(false);
       refresh();
     } catch (err) {
-      const fallback =
-        err?.response?.status === 403
-          ? "Chapter này đã được gán cho TE khác."
+      const status = err?.response?.status;
+      const isPublish =
+        nextStatus === "release" || reviewData.publishOnly;
+      const fallback = isPublish
+        ? formatTeChapterPublishError(err)
+        : err?.code === "TE_ASSIGNED_OTHER" || status === 403
+          ? (err?.message
+            || "Chapter này đã được gán cho TE khác.")
           : "Không lưu được review.";
-      toast.error(getApiErrorMessage(err, fallback));
+      toast.error(
+        isPublish
+          ? fallback
+          : getApiErrorMessage(err, fallback),
+      );
     } finally {
       setSaving(false);
     }
@@ -812,15 +1244,43 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-background">
+    <div className="ws-page--tantou flex min-h-screen flex-col bg-background">
       <Header links={NAV_LINKS} onLogout={user ? handleLogout : undefined} />
 
-      <WorkspaceHero
-        className="from-sky-950 to-zinc-950"
-        label={LABEL_TANTOU_EDITOR}
-        title={sectionMeta.title}
-        description={sectionMeta.description}
-      />
+      <section className="ws-hero--tantou te-hero-slideshow relative overflow-hidden border-b border-white/5 text-white">
+        <div className="te-hero-slides" aria-hidden>
+          {HERO_IMAGES.map((src, index) => (
+            <img
+              key={src}
+              src={src}
+              alt=""
+              className={cn(
+                "te-hero-slides__img",
+                index === heroSlide && "te-hero-slides__img--active",
+              )}
+            />
+          ))}
+        </div>
+        <div className="te-hero-slides__veil" aria-hidden />
+        <div className="page-container relative py-10 md:py-14">
+          <div className="max-w-2xl space-y-3">
+            <Badge
+              variant="secondary"
+              className="bg-white/10 text-white hover:bg-white/15"
+            >
+              {LABEL_TANTOU_EDITOR}
+            </Badge>
+            <h1 className="text-3xl font-bold tracking-tight md:text-4xl">
+              {sectionMeta.title}
+            </h1>
+            {sectionMeta.description ? (
+              <p className="leading-relaxed text-zinc-300">
+                {sectionMeta.description}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      </section>
 
       <main className="page-container flex-1 space-y-6 py-8">
         <Button type="button" variant="ghost" size="sm" asChild>
@@ -833,31 +1293,106 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
         {sectionId === "series-pending" ? (
           <section className="space-y-4">
             <Card className="flex flex-col gap-0 overflow-hidden py-0 shadow-sm">
-              <CardHeader className="shrink-0 px-6 py-4">
-                <CardTitle className="flex items-center gap-2">
-                  <Sparkles className="size-5 text-amber-500" />
-                  {pendingSections?.seriesLevel?.label ?? "Series chưa được duyệt"}
-                  <Badge variant="secondary" className="font-normal">
-                    {debutQueue.length || pendingSections?.seriesLevel?.count || 0}
-                  </Badge>
-                </CardTitle>
+              <CardHeader className="shrink-0 border-b bg-muted/20 px-5 py-4 sm:px-6">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 space-y-1.5">
+                    <CardTitle className="flex flex-wrap items-center gap-2.5 text-xl tracking-tight sm:text-2xl">
+                      {selectedMangakaGroup ? (
+                        <span className="group/avatar inline-flex shrink-0">
+                          <Avatar
+                            className={cn(
+                              "size-9 rounded-full shadow-sm shadow-sky-900/20 ring-1 ring-border",
+                              "transition-all duration-200 ease-out",
+                              "group-hover/avatar:scale-110 group-hover/avatar:ring-2 group-hover/avatar:ring-sky-400",
+                              "group-hover/avatar:shadow-md group-hover/avatar:shadow-sky-500/25",
+                            )}
+                          >
+                            {selectedMangakaGroup.avatarUrl ? (
+                              <AvatarImage
+                                src={selectedMangakaGroup.avatarUrl}
+                                alt=""
+                                className="transition-transform duration-300 group-hover/avatar:scale-110"
+                              />
+                            ) : null}
+                            <AvatarFallback className="rounded-full bg-sky-600 text-sm font-bold text-white">
+                              {(selectedMangakaGroup.name.length >= 2
+                                ? selectedMangakaGroup.name
+                                : `${selectedMangakaGroup.name}●`
+                              ).slice(0, 2).toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                        </span>
+                      ) : (
+                        <Sparkles className="size-5 text-amber-500" />
+                      )}
+                      <span className="truncate">
+                        {selectedMangakaGroup
+                          ? selectedMangakaGroup.name
+                          : (pendingSections?.seriesLevel?.label ?? "Series chưa được duyệt")}
+                      </span>
+                      <Badge
+                        className={cn(
+                          "h-6 min-w-6 justify-center px-2 text-xs font-semibold",
+                          selectedMangakaGroup
+                            ? "bg-amber-600 text-white hover:bg-amber-600"
+                            : "bg-secondary text-secondary-foreground hover:bg-secondary",
+                        )}
+                      >
+                        {selectedMangakaGroup
+                          ? selectedMangakaGroup.count
+                          : (debutQueue.length || pendingSections?.seriesLevel?.count || 0)}
+                      </Badge>
+                    </CardTitle>
+                    {!selectedMangakaGroup ? (
+                      <CardDescription>
+                        Chọn Mangaka để xem chapter đang chờ duyệt.
+                      </CardDescription>
+                    ) : (
+                      <CardDescription>
+                        {selectedMangakaGroup.count} chapter chờ duyệt từ Mangaka này.
+                      </CardDescription>
+                    )}
+                  </div>
+                  {selectedMangakaGroup ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-9 shrink-0 gap-1.5 border-sky-200 bg-background shadow-sm hover:bg-sky-50 dark:border-sky-500/30 dark:hover:bg-sky-500/10"
+                      onClick={() => setSelectedMangakaKey(null)}
+                    >
+                      <ArrowLeft className="size-4" />
+                      Tất cả Mangaka
+                    </Button>
+                  ) : null}
+                </div>
               </CardHeader>
-              {/* Cao tối đa ~4 card; từ chapter thứ 5 trở đi cuộn (ẩn scrollbar) */}
-              <CardContent className="scrollbar-hide max-h-[min(460px,calc(100vh-280px))] space-y-3 overflow-y-auto px-6 pb-4">
+              <CardContent className="scrollbar-hide max-h-[min(560px,calc(100vh-260px))] space-y-2.5 overflow-y-auto px-4 py-4 sm:px-5">
                 {debutQueue.length === 0 ? (
                   <Card>
                     <CardContent className="py-12 text-center text-muted-foreground">
                       {loading ? "Đang tải hàng chờ..." : "Không có series chờ duyệt."}
                     </CardContent>
                   </Card>
-                ) : (
-                  debutQueue.map((sub) => (
+                ) : selectedMangakaGroup ? (
+                  selectedMangakaGroup.chapters.map((sub) => (
                     <SubmissionCard
                       key={sub.id}
                       sub={sub}
                       onReview={openReview}
+                      hideMangakaMeta
                     />
                   ))
+                ) : (
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+                    {debutByMangaka.map((group) => (
+                      <MangakaSelectCard
+                        key={group.key}
+                        group={group}
+                        onSelect={setSelectedMangakaKey}
+                      />
+                    ))}
+                  </div>
                 )}
               </CardContent>
             </Card>
@@ -877,7 +1412,7 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
                 </CardTitle>
                 <CardDescription>
                   {pendingSections?.chapterLevel?.description
-                    ?? "Series đã EB-approved — TE duyệt chapter để publish ngay."}
+                    ?? "Series đã được Hội đồng chấp nhận — duyệt chapter để phát hành."}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -964,7 +1499,7 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
               <div>
                 <h2 className="text-xl font-semibold">Trạng thái phát hành</h2>
                 <p className="text-sm text-muted-foreground">
-                  TE cập nhật sau khi series đã published: ongoing ↔ hiatus / completed / dropped.
+                  TE cập nhật sau khi series đã phát hành: đang phát hành ↔ tạm ngưng / hoàn thành / bị drop.
                   upcoming do job tự chuyển, completed chỉ đọc.
                 </p>
               </div>

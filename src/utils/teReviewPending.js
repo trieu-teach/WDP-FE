@@ -127,6 +127,12 @@ function legacyFlatPendingToSections(items) {
       updatedAt: item.updatedAt ?? item.createdAt,
       submitted_by: item.submitted_by,
       te_review_id: item.te_review_id ?? null,
+      cover_image_url:
+        item.cover_image_url
+        ?? item.cover_url
+        ?? item.coverUrl
+        ?? item.coverImageUrl
+        ?? null,
     })
     bucket.chapter_count = bucket.chapters.length
   }
@@ -209,13 +215,19 @@ export function resolveTeEntityId(entity) {
 /** chapter.te_id — TE đang được gán review chapter này. */
 export function resolveTeChapterTeId(chapter) {
   if (!chapter || typeof chapter !== 'object') return ''
-  const raw = chapter.te_id ?? chapter.teId
+  const raw =
+    chapter.te_id
+    ?? chapter.teId
+    ?? chapter.assigned_te_id
+    ?? chapter.assignedTeId
+    ?? chapter.te_user_id
+    ?? chapter.teUserId
   return resolveEntityId(raw)
 }
 
 /**
  * TE hiện tại có được review chapter không?
- * - te_id null → được (BE auto gán khi review)
+ * - te_id null → được (BE te-action auto-claim TE hiện tại)
  * - te_id = TE hiện tại → được
  * - te_id = TE khác → không (403)
  */
@@ -236,9 +248,36 @@ export function teChapterAssignmentStatus(teId, currentTeId) {
 }
 
 export function teChapterAssignmentLabel(status) {
-  if (status === 'unassigned') return ''
+  if (status === 'unassigned') {
+    return 'Chưa gán TE — bấm Phê duyệt sẽ tự nhận chapter (auto-claim)'
+  }
   if (status === 'mine') return 'Đang review chapter của bạn'
-  return 'Chapter đã gán cho TE khác'
+  return 'Chapter đã được gán cho TE khác'
+}
+
+/**
+ * true khi chapter chưa có te_id.
+ * BE te-action sẽ auto-claim; FE không chặn approve vì lý do này.
+ */
+export function teChapterNeedsAutoAssign(submission) {
+  const status = submission?.teAssignmentStatus
+  if (status === 'unassigned') return true
+  if (status === 'mine' || status === 'other') return false
+  return !resolveEntityId(submission?.teId)
+}
+
+/**
+ * Lấy status chapter từ response review-chapter / te-action.
+ */
+export function resolveChapterStatusFromTeResponse(res) {
+  const raw =
+    res?.chapter?.status
+    ?? res?.data?.chapter?.status
+    ?? res?.data?.status
+    ?? res?.status
+    ?? res?.chapter_status
+    ?? ''
+  return String(raw).trim()
 }
 
 export function enrichTeSubmissionAssignment(submission, currentTeId) {
@@ -259,10 +298,50 @@ export function mapTePendingChapterToSubmission(chapter, series, tabType, previe
   const seriesTitle = series?.name ?? 'Series'
   const submittedBy = chapter?.submitted_by ?? {}
   const previewPage = resolveTePreviewPage(preview, 0)
-  const mangakaName = submittedBy.full_name ?? submittedBy.username ?? 'Mangaka'
-  const authorRaw = series?.author
+  const authorRaw = series?.author ?? series?.author_id
   const authorObj =
     authorRaw && typeof authorRaw === 'object' ? authorRaw : null
+  const mangakaName =
+    submittedBy.full_name
+    ?? submittedBy.username
+    ?? authorObj?.full_name
+    ?? authorObj?.username
+    ?? 'Mangaka'
+  const mangakaUserId =
+    resolveEntityId(submittedBy)
+    || resolveEntityId(authorObj)
+    || (authorRaw && typeof authorRaw !== 'object' ? String(authorRaw).trim() : '')
+  const mangakaAvatarUrl =
+    resolveMediaUrl(
+      submittedBy.avatar_url
+      ?? submittedBy.avatarUrl
+      ?? authorObj?.avatar_url
+      ?? authorObj?.avatarUrl
+      ?? null,
+    )
+    || null
+  const previewChapter =
+    preview?.chapter && typeof preview.chapter === 'object'
+      ? preview.chapter
+      : null
+
+  // Ảnh bìa chapter — KHÔNG lấy ảnh trang (tránh flicker khi preview pages load xong).
+  const chapterCoverUrl =
+    resolveMediaUrl(
+      chapter?.cover_image_url
+      ?? chapter?.cover_url
+      ?? chapter?.coverUrl
+      ?? chapter?.coverImageUrl
+      ?? previewChapter?.cover_image_url
+      ?? previewChapter?.cover_url
+      ?? null,
+    )
+    || null
+
+  const thumbFallback =
+    chapterCoverUrl
+    || resolveMediaUrl(series?.cover_image_url ?? null)
+    || resolveTePageImageUrl(previewPage)
 
   return {
     id: chapterId,
@@ -275,10 +354,13 @@ export function mapTePendingChapterToSubmission(chapter, series, tabType, previe
     pageLabel: previewPage?.page_number
       ? `Trang ${previewPage.page_number}`
       : 'Trang 1',
-    mangakaImageUrl:
-      resolveTePageImageUrl(previewPage)
-      ?? resolveMediaUrl(series?.cover_image_url ?? null),
+    /** Ảnh bìa chapter thuần (null nếu chưa set). */
+    chapterCoverUrl,
+    /** Thumbnail card: bìa chapter → series cover → page 1. */
+    mangakaImageUrl: thumbFallback,
     mangakaName,
+    mangakaUserId: mangakaUserId || null,
+    mangakaAvatarUrl,
     tabType,
     phase: tabType,
     pipeline: phaseToPipeline(tabType),
@@ -294,13 +376,19 @@ export function mapTePendingChapterToSubmission(chapter, series, tabType, previe
       tags: Array.isArray(series?.tags) ? series.tags : [],
       synopsis: String(series?.synopsis ?? series?.description ?? '').trim(),
       coverImageUrl: resolveMediaUrl(series?.cover_image_url ?? null),
-      authorId: authorObj?._id
-        ? String(authorObj._id)
-        : (series?.author ? String(series.author) : ''),
+      authorId: mangakaUserId || '',
       authorName:
         authorObj?.full_name
         ?? authorObj?.username
         ?? mangakaName,
+      authorAvatarUrl:
+        resolveMediaUrl(
+          authorObj?.avatar_url
+          ?? authorObj?.avatarUrl
+          ?? null,
+        )
+        || mangakaAvatarUrl
+        || null,
       seriesApiStatus: series?.status ?? null,
       ebApproved: tabType === 'chapter_level',
       publicationSchedule: series?.publication_schedule ?? null,

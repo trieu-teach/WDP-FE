@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Eraser,
   Maximize2,
+  MessageSquareText,
   MousePointer2,
   Square,
   X,
@@ -338,7 +339,7 @@ export const TantouPageAnnotator = forwardRef<
   ) {
     return (
       <div className="te-editor__stage-wrap flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="te-editor__stage flex min-h-0 flex-1 items-center justify-center overflow-auto p-4 sm:p-6">
+        <div className="te-editor__stage flex min-h-0 flex-1 items-start justify-center overflow-auto p-2 sm:p-3 md:items-center">
           {renderPageBoard(boardRefEl, fullscreen)}
         </div>
         {renderPageNavBottom(darkToolbar)}
@@ -346,15 +347,33 @@ export const TantouPageAnnotator = forwardRef<
     );
   }
 
+  function toolButtonClass(
+    active: boolean,
+    tone: "neutral" | "danger" = "neutral",
+    darkToolbar = false,
+  ) {
+    if (darkToolbar) {
+      if (active && tone === "danger") {
+        return "border-rose-400/50 bg-rose-500/20 text-rose-50 hover:bg-rose-500/30 hover:text-white";
+      }
+      if (active) {
+        return "border-indigo-400/60 bg-indigo-500/25 text-white hover:bg-indigo-500/35 hover:text-white";
+      }
+      return "border-white/25 bg-white/5 text-white shadow-none hover:bg-white/12 hover:text-white";
+    }
+    if (active && tone === "danger") {
+      return "border-rose-300 bg-rose-600 text-white hover:bg-rose-600 hover:text-white";
+    }
+    if (active) {
+      return "border-indigo-500 bg-indigo-600 text-white hover:bg-indigo-600 hover:text-white";
+    }
+    return "border-border/80 bg-background text-foreground hover:bg-muted";
+  }
+
   function renderToolButtons({
     darkToolbar = false,
     showZoom = true,
   }: { darkToolbar?: boolean; showZoom?: boolean } = {}) {
-    const outlineOnDark =
-      "border-white/25 bg-white/5 text-white shadow-none hover:bg-white/12 hover:text-white";
-    const destructiveOnDark =
-      "border-red-400/50 bg-red-500/15 text-red-50 hover:bg-red-500/25 hover:text-white";
-
     return (
       <>
         {!readOnly ? (
@@ -362,8 +381,8 @@ export const TantouPageAnnotator = forwardRef<
             <Button
               type="button"
               size="sm"
-              variant={tool === "draw" ? "default" : "outline"}
-              className={cn(tool !== "draw" && darkToolbar && outlineOnDark)}
+              variant="outline"
+              className={cn("h-8 gap-1.5", toolButtonClass(tool === "draw", "neutral", darkToolbar))}
               onClick={() => setTool("draw")}
             >
               <Square className="size-3.5" />
@@ -372,8 +391,8 @@ export const TantouPageAnnotator = forwardRef<
             <Button
               type="button"
               size="sm"
-              variant={tool === "select" ? "default" : "outline"}
-              className={cn(tool !== "select" && darkToolbar && outlineOnDark)}
+              variant="outline"
+              className={cn("h-8 gap-1.5", toolButtonClass(tool === "select", "neutral", darkToolbar))}
               onClick={() => setTool("select")}
             >
               <MousePointer2 className="size-3.5" />
@@ -382,11 +401,8 @@ export const TantouPageAnnotator = forwardRef<
             <Button
               type="button"
               size="sm"
-              variant={tool === "delete" ? "destructive" : "outline"}
-              className={cn(
-                tool !== "delete" && darkToolbar && outlineOnDark,
-                tool === "delete" && darkToolbar && destructiveOnDark,
-              )}
+              variant="outline"
+              className={cn("h-8 gap-1.5", toolButtonClass(tool === "delete", "danger", darkToolbar))}
               onClick={() => setTool("delete")}
             >
               <Eraser className="size-3.5" />
@@ -399,7 +415,12 @@ export const TantouPageAnnotator = forwardRef<
             type="button"
             size="sm"
             variant="outline"
-            className={cn(darkToolbar && outlineOnDark)}
+            className={cn(
+              "h-8 gap-1.5",
+              darkToolbar
+                ? "border-white/25 bg-white/5 text-white shadow-none hover:bg-white/12 hover:text-white"
+                : "border-border/80 bg-background",
+            )}
             onClick={() => setIsFullscreen(true)}
           >
             <Maximize2 className="size-3.5" />
@@ -579,16 +600,20 @@ export const TantouPageAnnotator = forwardRef<
             </h3>
 
             {editorialNotes.length === 0 ? (
-              <p className="text-xs text-muted-foreground">
-                {readOnly
-                  ? "TE chưa để lại ô nhận xét trên trang này."
-                  : (
-                    <>
-                      Chọn <strong>Tạo ô</strong>, kéo vùng trên trang, rồi ghi nhận
-                      xét chỉnh sửa.
-                    </>
-                  )}
-              </p>
+              <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border/70 bg-muted/20 px-3 py-6 text-center">
+                <MessageSquareText className="size-7 text-muted-foreground/50" />
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  {readOnly
+                    ? "TE chưa để lại ô nhận xét trên trang này."
+                    : (
+                      <>
+                        Chưa có nhận xét. Chọn{" "}
+                        <strong className="text-foreground">Tạo ô</strong>, kéo
+                        vùng trên trang rồi ghi nội dung chỉnh sửa.
+                      </>
+                    )}
+                </p>
+              </div>
             ) : (
               <ul className="te-tantou-pick-list">
                 {editorialNotes.map((n, idx) => (

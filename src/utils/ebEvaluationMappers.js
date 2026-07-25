@@ -13,26 +13,31 @@ export const EB_SCORE_CRITERIA = [
     key: 'story_dialogue',
     label: 'Cốt truyện & Lời thoại',
     hint: 'Story & Dialogue',
+    shortLabel: 'Cốt truyện',
   },
   {
     key: 'art_design',
     label: 'Nét vẽ & Tạo hình nhân vật',
     hint: 'Art & Design',
+    shortLabel: 'Nét vẽ',
   },
   {
     key: 'panel_camera',
     label: 'Phân khung',
     hint: 'Panel',
+    shortLabel: 'Phân khung',
   },
   {
     key: 'pacing_climax',
     label: 'Nhịp độ & Cao trào',
     hint: 'Pacing & Climax',
+    shortLabel: 'Nhịp độ',
   },
   {
     key: 'color',
     label: 'Đổ màu & Phối màu',
     hint: 'Color',
+    shortLabel: 'Màu sắc',
   },
 ]
 
@@ -77,8 +82,14 @@ export function mapEbSeriesPendingItem(raw) {
   const seriesId = resolveEntityId(raw._id ?? raw.id)
   if (!seriesId) return null
 
+  const authorRaw = raw.author_id ?? raw.author
   const author =
-    raw.author_id && typeof raw.author_id === 'object' ? raw.author_id : {}
+    authorRaw && typeof authorRaw === 'object' ? authorRaw : {}
+  const mangakaUserId =
+    resolveEntityId(author)
+    || (authorRaw != null && typeof authorRaw !== 'object'
+      ? resolveEntityId(authorRaw)
+      : '')
   const firstRef = raw.first_pending_chapter ?? raw.first_chapter ?? null
   const firstChapterId = firstRef
     ? resolveEntityId(firstRef._id ?? firstRef.id)
@@ -95,7 +106,10 @@ export function mapEbSeriesPendingItem(raw) {
     tags: Array.isArray(raw.tags) ? raw.tags.filter(Boolean) : [],
     status: raw.status ?? 'pending_EB',
     publicationSchedule: raw.publication_schedule ?? null,
+    mangakaUserId: mangakaUserId || null,
     mangakaName: author.full_name ?? author.username ?? '',
+    mangakaAvatarUrl:
+      resolveMediaUrl(author.avatar_url ?? author.avatarUrl ?? null) || null,
     councilAverage: raw.council_average ?? null,
     classification: raw.classification ?? null,
     classificationText: raw.classification_text ?? raw.classificationText ?? '',
@@ -217,8 +231,15 @@ export function mapEbChapterPendingItem(raw) {
 
   const pages = Array.isArray(chapter.pages) ? chapter.pages : []
   const previewPage = pages[0] ?? null
+  const authorRaw =
+    series.author_id ?? series.author ?? chapter.submitted_by ?? raw.submitted_by
   const author =
-    series.author && typeof series.author === 'object' ? series.author : {}
+    authorRaw && typeof authorRaw === 'object' ? authorRaw : {}
+  const mangakaUserId =
+    resolveEntityId(author)
+    || (authorRaw != null && typeof authorRaw !== 'object'
+      ? resolveEntityId(authorRaw)
+      : '')
 
   return {
     id: chapterId,
@@ -243,6 +264,7 @@ export function mapEbChapterPendingItem(raw) {
         ?? null,
       ),
     previewImages,
+    mangakaUserId: mangakaUserId || null,
     mangakaName:
       author.full_name
       ?? author.username
@@ -250,6 +272,8 @@ export function mapEbChapterPendingItem(raw) {
       ?? chapter.submitted_by?.username
       ?? raw.submitted_by?.username
       ?? '',
+    mangakaAvatarUrl:
+      resolveMediaUrl(author.avatar_url ?? author.avatarUrl ?? null) || null,
     memberScores: Array.isArray(raw.member_scores) ? raw.member_scores : [],
     pages,
     raw,
@@ -524,8 +548,8 @@ export function areAllCouncilMembersFullyScored({
 }
 
 export const EB_PUBLICATION_SCHEDULES = [
-  { value: 'weekly', label: 'Hàng tuần (weekly)' },
-  { value: 'monthly', label: 'Hàng tháng (monthly)' },
+  { value: 'weekly', label: 'Hàng tuần' },
+  { value: 'monthly', label: 'Hàng tháng' },
 ]
 
 /** Khoảng mặc định: 30 ngày trước → 90 ngày tới (khớp BE). */

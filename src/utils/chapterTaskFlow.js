@@ -59,6 +59,42 @@ function taskResultUrl(task) {
   return fromList ?? null
 }
 
+/**
+ * Gộp ảnh kết quả từ Task vào Page — BE thường chỉ lưu result trên task,
+ * GET /pages không có result_image_url → Upload & ghi chú vẫn hiện ảnh gốc nếu không merge.
+ */
+export function mergeTaskResultsIntoPages(pages = [], tasks = []) {
+  const deduped = dedupeTasksByPage(tasks)
+  const byPageId = new Map()
+  const byPageNum = new Map()
+  for (const t of deduped) {
+    if (t?.pageId) byPageId.set(String(t.pageId), t)
+    if (t?.pageNumber != null && Number.isFinite(Number(t.pageNumber))) {
+      byPageNum.set(Number(t.pageNumber), t)
+    }
+  }
+
+  return (pages ?? []).map((p) => {
+    const task =
+      byPageId.get(String(p?.id))
+      ?? byPageNum.get(Number(p?.pageNumber))
+    const fromTask = taskResultUrl(task)
+    if (!fromTask && task?.status !== 'approved') return p
+
+    const resultUrl = p.resultUrl || fromTask || null
+    const taskApproved = task?.status === 'approved'
+    return {
+      ...p,
+      resultUrl,
+      assistantApproved: Boolean(p.assistantApproved || taskApproved),
+      // Khi đã có ảnh Assistant / task approved → ưu tiên hiện result
+      url: (taskApproved || p.assistantApproved) && resultUrl
+        ? resultUrl
+        : p.url,
+    }
+  })
+}
+
 const TASK_STATUS_RANK = {
   approved: 60,
   revision: 55,

@@ -43,10 +43,12 @@ export default function MangakaAssistantReviewDetail() {
     chapterRows,
     loadChapterPages,
     refresh: refreshWorkspace,
+    applyAssistantApprovalToAnnotator,
   } = useMangakaWorkspace(user);
 
   const {
     pendingReviews,
+    teReadyChapters,
     loading: tasksLoading,
     refresh: refreshMangakaTasks,
     acknowledgeTask,
@@ -54,13 +56,19 @@ export default function MangakaAssistantReviewDetail() {
     approveChapterByMangaka,
   } = useMangakaTasks(chapterRows);
 
-  const review = useMemo(
-    () =>
+  const review = useMemo(() => {
+    const fromPending =
       (pendingReviews ?? []).find(
         (r) => String(r?.chapter?.id) === String(chapterId),
-      ) ?? null,
-    [pendingReviews, chapterId],
-  );
+      ) ?? null;
+    if (fromPending) return fromPending;
+    // Đã approve-by-mangaka (sẵn sàng gửi TE) — vẫn mở được trang chi tiết
+    return (
+      (teReadyChapters ?? []).find(
+        (r) => String(r?.chapter?.id) === String(chapterId),
+      ) ?? null
+    );
+  }, [pendingReviews, teReadyChapters, chapterId]);
 
   const [taskActionBusy, setTaskActionBusy] = useState(null);
   const [highlightPageNumbers, setHighlightPageNumbers] = useState([]);
@@ -161,16 +169,41 @@ export default function MangakaAssistantReviewDetail() {
     if (!taskId) return;
     setTaskActionBusy(taskId);
     try {
+      const task = (review?.allTasks ?? review?.tasks ?? []).find(
+        (t) => String(t.id) === String(taskId),
+      );
+      const pageNumber = task?.pageNumber;
       await approveTask(taskId);
-      toast.success("Đã duyệt task.");
+      const chapterKey =
+        review?.submission?.id ?? review?.chapter?.id ?? chapterId;
+      const remainingUnapproved = countUnapprovedTasks(
+        (review?.tasks ?? []).map((t) =>
+          String(t.id) === String(taskId) ? { ...t, status: "approved" } : t,
+        ),
+      );
+      const promoteChapter = remainingUnapproved === 0;
+
+      toast.success(
+        promoteChapter
+          ? `Đã duyệt hết task — chọn ${LABEL_TANTOU_EDITOR} và gửi khi sẵn sàng.`
+          : "Đã duyệt task.",
+      );
       setHighlightPageNumbers((prev) => {
-        const task = (review?.allTasks ?? review?.tasks ?? []).find(
-          (t) => String(t.id) === String(taskId),
-        );
-        const pn = task?.pageNumber;
-        if (pn == null) return prev;
-        return prev.filter((n) => Number(n) !== Number(pn));
+        if (pageNumber == null) return prev;
+        return prev.filter((n) => Number(n) !== Number(pageNumber));
       });
+
+      if (chapterKey && applyAssistantApprovalToAnnotator) {
+        // Không gọi approve-by-mangaka ở đây — giữ chapter trong hàng chờ duyệt
+        // để Mangaka còn chọn TE và bấm Gửi. approveChapter chạy lúc Gửi TE.
+        await applyAssistantApprovalToAnnotator(chapterKey, {
+          pageNumbers: promoteChapter
+            ? []
+            : (pageNumber != null ? [pageNumber] : []),
+          promoteChapter,
+        });
+        await refreshWorkspace();
+      }
     } catch (err) {
       toast.error(getApiErrorMessage(err, "Duyệt task thất bại."));
     } finally {
@@ -208,11 +241,27 @@ export default function MangakaAssistantReviewDetail() {
       if (!canMangakaSendToTe(apiStatus)) {
         const id = review.submission?.id ?? chapter.id;
         await approveChapterByMangaka(id);
+        if (applyAssistantApprovalToAnnotator) {
+          await applyAssistantApprovalToAnnotator(id, {
+            pageNumbers: [],
+            promoteChapter: true,
+          });
+        }
       }
 
       await verifyChapterPagesReadyForTe(chapter.id);
 
       const teId = selectedTeId || undefined;
+      if (teId) {
+        try {
+          await submissionsService.assignTe(chapter.id, teId);
+        } catch (assignErr) {
+          const status = assignErr?.response?.status;
+          if (status !== 400 && status !== 409) {
+            throw assignErr;
+          }
+        }
+      }
       const res = await submissionsService.submitChapterToTe(chapter.id, teId);
 
       const selectedTe = teId
@@ -302,9 +351,9 @@ export default function MangakaAssistantReviewDetail() {
             <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
               <ClipboardCheck className="size-10 text-muted-foreground/40" />
               <div className="space-y-1">
-                <p className="font-medium">Chapter không còn chờ duyệt</p>
+                <p className="font-medium">Chapter không còn trên hàng duyệt</p>
                 <p className="text-sm text-muted-foreground">
-                  Có thể đã được duyệt hoặc trả lại cho Assistant.
+                  Có thể đã gửi {LABEL_TANTOU_EDITOR} hoặc trả lại cho Assistant.
                 </p>
               </div>
               <Button variant="outline" asChild>

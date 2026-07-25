@@ -255,9 +255,11 @@ export default function Users() {
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [roleFilter, setRoleFilter] = useState('all')
   const [updating, setUpdating] = useState(null)
   const [manageUserId, setManageUserId] = useState(null)
   const [createOpen, setCreateOpen] = useState(false)
+  const [lockTarget, setLockTarget] = useState(null)
 
   useEffect(() => {
     loadUsers()
@@ -277,6 +279,14 @@ export default function Users() {
     }
   }
 
+  function requestToggleStatus(user) {
+    if (user.status === 'active') {
+      setLockTarget(user)
+      return
+    }
+    void toggleStatus(user)
+  }
+
   async function toggleStatus(user) {
     const newStatus = user.status === 'active' ? 'banned' : 'active'
     setUpdating(user.id)
@@ -284,6 +294,7 @@ export default function Users() {
       await api.updateUserStatus(user.id, newStatus)
       setUsers((prev) => prev.map((u) => (u.id === user.id ? { ...u, status: newStatus } : u)))
       toast.success(newStatus === 'active' ? 'Đã mở khóa.' : 'Đã khóa tài khoản.')
+      setLockTarget(null)
     } catch (err) {
       toast.error(err?.response?.data?.message || 'Không thể đổi trạng thái.')
     } finally {
@@ -293,8 +304,9 @@ export default function Users() {
 
   const filtered = users.filter(
     (u) =>
-      u.name?.toLowerCase().includes(search.toLowerCase()) ||
-      u.email?.toLowerCase().includes(search.toLowerCase())
+      (u.name?.toLowerCase().includes(search.toLowerCase()) ||
+      u.email?.toLowerCase().includes(search.toLowerCase())) &&
+      (roleFilter === 'all' || u.role?.toLowerCase() === roleFilter.toLowerCase())
   )
 
   if (loading) {
@@ -323,16 +335,31 @@ export default function Users() {
 
       <Card>
         <CardHeader className="pb-3">
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
             <CardTitle className="text-base">Danh sách tài khoản</CardTitle>
-            <div className="relative w-64">
-              <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Tìm tên, email..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-9"
-              />
+            <div className="flex items-center gap-3">
+              <div className="relative w-52">
+                <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Tìm tên, email..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+              <Select value={roleFilter} onValueChange={setRoleFilter}>
+                <SelectTrigger className="w-36">
+                  <SelectValue placeholder="Vai trò" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tất cả vai trò</SelectItem>
+                  {ROLE_OPTIONS.map((r) => (
+                    <SelectItem key={r} value={r.toLowerCase()}>
+                      {r}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
         </CardHeader>
@@ -381,7 +408,7 @@ export default function Users() {
                         <Button
                           size="sm"
                           variant={user.status === 'active' ? 'destructive' : 'default'}
-                          onClick={() => toggleStatus(user)}
+                          onClick={() => requestToggleStatus(user)}
                           disabled={updating === user.id}
                         >
                           {updating === user.id ? (
@@ -415,6 +442,61 @@ export default function Users() {
         onClose={() => setManageUserId(null)}
         onUpdated={loadUsers}
       />
+
+      <Dialog
+        open={Boolean(lockTarget)}
+        onOpenChange={(open) => {
+          if (!open && updating !== lockTarget?.id) setLockTarget(null)
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <span className="flex size-9 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+                <Ban className="size-4" />
+              </span>
+              Khóa người dùng?
+            </DialogTitle>
+            <DialogDescription className="text-left leading-relaxed">
+              {lockTarget?.name || lockTarget?.email ? (
+                <>
+                  Bạn sắp khóa tài khoản{' '}
+                  <strong className="text-foreground">
+                    {lockTarget.name || lockTarget.email}
+                  </strong>
+                  . Người dùng sẽ không thể đăng nhập cho đến khi được mở khóa.
+                </>
+              ) : (
+                'Người dùng sẽ không thể đăng nhập cho đến khi được mở khóa.'
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={updating === lockTarget?.id}
+              onClick={() => setLockTarget(null)}
+            >
+              Huỷ
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={!lockTarget || updating === lockTarget?.id}
+              className="gap-1.5"
+              onClick={() => lockTarget && void toggleStatus(lockTarget)}
+            >
+              {updating === lockTarget?.id ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Ban className="size-4" />
+              )}
+              {updating === lockTarget?.id ? 'Đang khóa…' : 'Khóa tài khoản'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

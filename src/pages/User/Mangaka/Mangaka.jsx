@@ -82,7 +82,11 @@ import { getApiErrorMessage, resolveMediaUrl } from "@/api/http.js";
 import { chaptersService } from "@/api/chapters.service.js";
 import { submissionsService } from "@/api/submissions.service.js";
 import { tasksService } from "@/api/tasks.service.js";
-import { uiNoteToTaskCreate, uiChapterToTaskCreate, uiTaskTypeToErrorType, canMangakaSendToTe, chapterPagesToCompareUrls, apiTaskToUi } from "@/utils/apiMappers.js";
+import { uiNoteToTaskCreate, uiChapterToTaskCreate, uiTaskTypeToErrorType, canMangakaSendToTe, chapterPagesToCompareUrls, apiTaskToUi, shouldShowAssistantEditedOnAnnotate } from "@/utils/apiMappers.js";
+import {
+  markAssistantApprovedPages,
+  stampAssistantApprovedOnPages,
+} from "@/utils/assistantApprovedPages.js";
 import { useMangakaTasks } from "@/hooks/useMangakaTasks.js";
 import { dedupeTasksByPage } from "@/utils/chapterTaskFlow.js";
 import {
@@ -496,10 +500,13 @@ export default function Mangaka() {
     createChapter,
     createChapterWithPages,
     uploadChapterPages,
+    updateChapterCover,
+    removeChapterCover,
     assignChapter,
     unassignChapter,
     updateChapterStatus,
     deleteChapterPage,
+    deleteChapter,
     loadPageNotes,
     loadChapterPages,
     savePageNote,
@@ -608,6 +615,19 @@ export default function Mangaka() {
     setTeSending(true);
     try {
       await verifyChapterPagesReadyForTe(chapter.id);
+      // Đảm bảo te_id được set trước submit (cần cho TE te-action approve / publish).
+      if (teId) {
+        try {
+          await submissionsService.assignTe(chapter.id, teId);
+          setSelectedTeId(teId);
+        } catch (assignErr) {
+          const status = assignErr?.response?.status;
+          // 400 đã gán cùng TE — vẫn tiếp tục submit
+          if (status !== 400 && status !== 409) {
+            throw assignErr;
+          }
+        }
+      }
       const res = await submissionsService.submitChapterToTe(
         chapter.id,
         teId || undefined,
@@ -858,12 +878,39 @@ export default function Mangaka() {
     [ebApprovedTick, seriesList],
   );
 
+  const annotateChapters = useMemo(() => {
+    const statusById = new Map(
+      (chapterRows ?? []).map((row) => [String(row.id), row.apiStatus ?? null]),
+    );
+    return (annotatorChapters ?? []).map((ch) => {
+      const fromRow = statusById.get(String(ch.id));
+      const apiStatus = fromRow ?? ch.apiStatus ?? null;
+      return {
+        ...ch,
+        apiStatus,
+        pages: stampAssistantApprovedOnPages(ch.id, ch.pages ?? []),
+      };
+    });
+  }, [annotatorChapters, chapterRows]);
+
+  // Chapter đã approved_by_mangaka → đánh dấu session để Upload & ghi chú hiện ảnh result + ẩn note cũ
+  useEffect(() => {
+    for (const row of chapterRows ?? []) {
+      if (shouldShowAssistantEditedOnAnnotate(row.apiStatus)) {
+        markAssistantApprovedPages(row.id, [], { markAll: true });
+      }
+    }
+  }, [chapterRows]);
+
   const workspaceApi = useMemo(
     () => ({
       createChapter,
       createChapterWithPages,
       uploadChapterPages,
+      updateChapterCover,
+      removeChapterCover,
       deleteChapterPage,
+      deleteChapter,
       loadChapterPages,
       loadPageNotes,
       savePageNote,
@@ -875,7 +922,10 @@ export default function Mangaka() {
       createChapter,
       createChapterWithPages,
       uploadChapterPages,
+      updateChapterCover,
+      removeChapterCover,
       deleteChapterPage,
+      deleteChapter,
       loadChapterPages,
       loadPageNotes,
       savePageNote,
@@ -1147,15 +1197,15 @@ export default function Mangaka() {
   }, [annotateSeries, nextChapterNumSuggest]);
 
   useEffect(() => {
-    if (seriesList.length === 0) {
+    // Đừng ghi đè lựa chọn khi seriesList đang load (race với location.state / openAnnotate).
+    if (seriesList.length === 0) return;
+
+    if (!annotateSeries) return;
+
+    const stillExists = seriesList.some((s) => s.title === annotateSeries);
+    if (!stillExists) {
+      // Series đã bị xóa / đổi tên — để trống, không nhảy sang series đầu danh sách.
       setAnnotateSeries("");
-      return;
-    }
-    if (
-      !annotateSeries ||
-      !seriesList.some((s) => s.title === annotateSeries)
-    ) {
-      setAnnotateSeries(seriesList[0].title);
     }
   }, [seriesList, annotateSeries]);
 
@@ -1528,7 +1578,13 @@ export default function Mangaka() {
                     size="sm"
                     variant="outline"
                     disabled={seriesList.length === 0}
-                    onClick={() => seriesList[0] && openAnnotate(seriesList[0].title)}
+                    onClick={() => {
+                      if (annotateSeries) {
+                        openAnnotate(annotateSeries);
+                        return;
+                      }
+                      setTab("annotate");
+                    }}
                   >
                     <Upload className="size-4" />
                     Upload mới
@@ -1543,7 +1599,13 @@ export default function Mangaka() {
                     action={(
                       <Button
                         disabled={seriesList.length === 0}
-                        onClick={() => setTab("annotate")}
+                        onClick={() => {
+                          if (annotateSeries) {
+                            openAnnotate(annotateSeries);
+                            return;
+                          }
+                          setTab("annotate");
+                        }}
                       >
                         <PenSquare className="size-4" />
                         Mở Upload & ghi chú
@@ -1596,13 +1658,21 @@ export default function Mangaka() {
                               const resultUrls = pageCompare.results.filter(Boolean);
                               const hasSubmittedImages = Boolean(review && pageCompare.resultCount > 0);
                               const firstResultUrl = hasSubmittedImages ? resultUrls[0] : null;
-                              const originalUrl = annot?.pages?.find(p => p?.url)?.url;
-                              // Đã có ảnh assistant → hiện ảnh kết quả làm thumbnail, đánh dấu "đã chỉnh"
-                              const thumbUrl = hasSubmittedImages ? firstResultUrl : originalUrl;
+                              const chapterCoverUrl = resolveMediaUrl(
+                                annot?.cover?.url
+                                || c.coverUrl
+                                || seriesMeta?.coverImage
+                                || null,
+                              ) || null;
+                              const thumbUrl = hasSubmittedImages ? firstResultUrl : chapterCoverUrl;
                               const statusBadge = hasSubmittedImages
                                 ? { label: 'Đã gửi ảnh', className: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400' }
                                 : (STATUS_BADGE[c.status] ?? STATUS_BADGE.draft);
                               const canSendTe = canMangakaSendToTe(c.apiStatus);
+                              const pageCount = Math.max(
+                                Number(c.pages) || 0,
+                                Array.isArray(annot?.pages) ? annot.pages.length : 0,
+                              );
                               return (
                                 <div
                                   key={c.id}
@@ -1656,7 +1726,7 @@ export default function Mangaka() {
                                         </Badge>
                                       </div>
                                       <p className="text-xs text-muted-foreground">
-                                        {c.pages} trang
+                                        {pageCount} trang
                                         {c.assistantName ? ` · ${c.assistantName}` : ""}
                                       </p>
                                       <p className="mt-auto text-[11px] text-muted-foreground">
@@ -1729,7 +1799,7 @@ export default function Mangaka() {
                   }))}
                   chapterNum={annotatorChapterNum}
                   onChapterNumChange={setAnnotatorChapterNum}
-                  chapters={annotatorChapters}
+                  chapters={annotateChapters}
                   setChapters={setAnnotatorChapters}
                   activeChapterId={annotatorActiveChapterId}
                   setActiveChapterId={setAnnotatorActiveChapterId}
@@ -1927,9 +1997,13 @@ export default function Mangaka() {
                     variant="outline"
                     className="w-full"
                     disabled={seriesList.length === 0}
-                    onClick={() =>
-                      seriesList[0] && openAnnotate(seriesList[0].title)
-                    }
+                    onClick={() => {
+                      if (annotateSeries) {
+                        openAnnotate(annotateSeries);
+                        return;
+                      }
+                      setTab("annotate");
+                    }}
                   >
                     Bắt đầu ghi chú
                     <ArrowRight className="size-3.5" />
@@ -1999,7 +2073,7 @@ export default function Mangaka() {
             </DialogTitle>
             <DialogDescription>
               {teTargetChapter
-                ? `Ch. ${teTargetChapter.num} — ${teTargetChapter.series}. Chọn TE (tuỳ chọn) rồi gán hoặc gửi. Không chọn TE → gửi cho tất cả TE active.`
+                ? `Ch. ${teTargetChapter.num} — ${teTargetChapter.series}. Có thể chọn TE rồi gửi, hoặc Gửi tất cả TE. TE có thể tự nhận chapter khi phê duyệt (auto-claim) nếu chưa gán.`
                 : "Chọn TE để gán cho chapter này."}
             </DialogDescription>
           </DialogHeader>

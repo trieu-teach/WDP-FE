@@ -1,13 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
-import { ArrowLeft, Calendar, CheckCircle2, Clock } from "lucide-react";
+import {
+  ArrowLeft,
+  Calendar,
+  CheckCircle2,
+  Clock,
+  ImageIcon,
+  Star,
+  User,
+} from "lucide-react";
 import Header from "@/components/User/Header/Header.jsx";
 import Footer from "@/components/User/Footer/Footer.jsx";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -70,6 +79,45 @@ function isPastPublishTime(dateValue, hour, minute) {
   return candidate < getEbVietnamTimeNow();
 }
 
+/** Cộng/trừ ngày trên chuỗi YYYY-MM-DD (lịch Việt Nam). */
+function shiftVietnamDate(dateStr, days) {
+  const base = String(dateStr || getEbVietnamDateNow());
+  const [y, m, d] = base.split("-").map(Number);
+  if (!y || !m || !d) return getEbVietnamDateNow();
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  const yy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getUTCDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
+}
+
+/** Thứ Hai của tuần kế tiếp (theo ngày VN YYYY-MM-DD). */
+function nextWeekMonday(dateStr = getEbVietnamDateNow()) {
+  const [y, m, d] = String(dateStr).split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  const day = dt.getUTCDay(); // 0 CN … 1 T2
+  const daysUntilNextMonday = day === 1 ? 7 : ((8 - day) % 7 || 7);
+  return shiftVietnamDate(dateStr, daysUntilNextMonday);
+}
+
+function councilScoreBadgeClass(label) {
+  const text = String(label ?? "").toLowerCase();
+  if (text.includes("xuất sắc") || text.includes("xuat sac")) {
+    return "border-emerald-300/70 bg-emerald-500/15 text-emerald-900 dark:border-emerald-500/40 dark:text-emerald-200";
+  }
+  if (text.includes("tốt") || text.includes("tot")) {
+    return "border-sky-300/70 bg-sky-500/15 text-sky-900 dark:border-sky-500/40 dark:text-sky-200";
+  }
+  if (text.includes("đạt") || text.includes("dat")) {
+    return "border-amber-300/70 bg-amber-500/15 text-amber-900 dark:border-amber-500/40 dark:text-amber-200";
+  }
+  if (text.includes("không") || text.includes("khong")) {
+    return "border-rose-300/70 bg-rose-500/15 text-rose-900 dark:border-rose-500/40 dark:text-rose-200";
+  }
+  return "border-emerald-300/70 bg-emerald-500/15 text-emerald-900 dark:border-emerald-500/40 dark:text-emerald-200";
+}
+
 /** Custom time picker — chặn giờ/phút trong quá khứ (native input không bắt được từng ô). */
 function PublishTimePicker({
   value,
@@ -107,7 +155,7 @@ function PublishTimePicker({
         disabled={disabled}
         onClick={() => setOpen((v) => !v)}
         className={cn(
-          "border-input bg-background flex h-9 w-full items-center justify-between rounded-md border px-3 text-sm shadow-xs transition-colors",
+          "border-input bg-background flex h-10 w-full items-center justify-between rounded-md border px-3 text-sm shadow-xs transition-colors",
           "hover:bg-accent/40 disabled:cursor-not-allowed disabled:opacity-50",
           open && "ring-ring ring-1",
         )}
@@ -301,6 +349,26 @@ export default function EbPublish() {
     setScheduledPublishTime((prev) => clampPublishTime(nextDate, prev));
   }
 
+  function applySchedulePreset(preset) {
+    const today = getEbVietnamDateNow();
+    if (preset === "today") {
+      applyPublishDate(today);
+      setScheduledPublishTime(clampPublishTime(today, getEbVietnamTimeNow()));
+      return;
+    }
+    if (preset === "tomorrow-morning") {
+      const tomorrow = shiftVietnamDate(today, 1);
+      setScheduledPublishAt(tomorrow);
+      setScheduledPublishTime("09:00");
+      return;
+    }
+    if (preset === "next-week") {
+      const monday = nextWeekMonday(today);
+      setScheduledPublishAt(monday);
+      setScheduledPublishTime("09:00");
+    }
+  }
+
   function handleLogout() {
     logout();
     navigate("/login");
@@ -309,7 +377,7 @@ export default function EbPublish() {
   async function handleConfirmPublish() {
     const seriesId = chapter?.seriesId;
     if (!seriesId) {
-      toast.error("Thiếu series để xác nhận publish.");
+      toast.error("Thiếu series để xác nhận phát hành.");
       return;
     }
     const schedule = publicationSchedule.trim();
@@ -322,7 +390,7 @@ export default function EbPublish() {
       : "";
     if (!schedule && !scheduled_publish_at) {
       toast.error(
-        "Chọn lịch phát hành (weekly/monthly) hoặc ngày + giờ publish cụ thể.",
+        "Chọn tần suất phát hành hoặc ngày + giờ phát hành cụ thể.",
       );
       return;
     }
@@ -360,7 +428,7 @@ export default function EbPublish() {
         whenLabel
           ? `Series đã được duyệt · chuẩn bị phát hành. Tự động chuyển sang đang phát hành vào ${whenLabel}.`
           : (res?.message
-            || `Series "${seriesName}" đã duyệt phát hành${res?.council_average != null ? ` · DTB ${Number(res.council_average).toFixed(1)}` : ""}${
+            || `Series "${seriesName}" đã duyệt phát hành${res?.council_average != null ? ` · ĐTB ${Number(res.council_average).toFixed(1)}` : ""}${
               res?.series?.publication_status
                 ? ` · ${res.series.publication_status}`
                 : ""
@@ -368,7 +436,7 @@ export default function EbPublish() {
       );
       navigate("/eb");
     } catch (err) {
-      toast.error(getApiErrorMessage(err, "Không xác nhận được lịch publish."));
+      toast.error(getApiErrorMessage(err, "Không xác nhận được lịch phát hành."));
     } finally {
       setSubmitting(false);
     }
@@ -377,6 +445,14 @@ export default function EbPublish() {
   const evaluateUrl = chapterId
     ? `/eb/chapter/${encodeURIComponent(chapterId)}`
     : "/eb";
+
+  const classificationLabel = formatEbClassification(lastEvaluation ?? chapter);
+  const coverUrl =
+    chapter?.seriesCoverUrl
+    || chapter?.previewImageUrl
+    || chapter?.coverUrl
+    || null;
+  const authorName = chapter?.mangakaName || "—";
 
   return (
     <div className="ws-page--eb flex min-h-screen flex-col bg-background">
@@ -391,8 +467,8 @@ export default function EbPublish() {
             </Link>
           </Button>
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium uppercase tracking-widest text-primary">
-              {LABEL_EDITOR_BOARD} · Publish
+            <p className="text-xs font-medium uppercase tracking-widest text-sky-600 dark:text-sky-400">
+              {LABEL_EDITOR_BOARD} · Phát hành
             </p>
             <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
               Xác nhận lịch phát hành
@@ -417,7 +493,7 @@ export default function EbPublish() {
           <Card>
             <CardContent className="flex flex-col items-center gap-4 py-16 text-center">
               <p className="text-muted-foreground">
-                Không tìm thấy chapter để publish.
+                Không tìm thấy chapter để phát hành.
               </p>
               <Button asChild variant="outline">
                 <Link to="/eb">Về hàng chờ</Link>
@@ -425,42 +501,107 @@ export default function EbPublish() {
             </CardContent>
           </Card>
         ) : (
-          <div className="mx-auto max-w-xl space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Calendar className="size-5 text-primary" />
-                  Lịch publish series
-                </CardTitle>
+          <div className="mx-auto grid w-full max-w-5xl gap-6 lg:grid-cols-[minmax(260px,1fr)_minmax(0,1.2fr)] lg:items-stretch">
+            <Card className="flex h-full flex-col overflow-hidden border-border/70 py-0 shadow-sm">
+              <CardHeader className="shrink-0 pb-3 pt-5">
+                <CardTitle className="text-base">Tóm tắt series</CardTitle>
+                <CardDescription>
+                  Đối chiếu nhanh trước khi xác nhận lịch.
+                </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="rounded-xl border bg-muted/30 p-4 text-sm">
-                  <p className="text-muted-foreground">Điểm Hội đồng</p>
-                  {hasScores ? (
-                    <p className="mt-1 font-semibold text-foreground">
-                      DTB {councilAverage.toFixed(1)}
-                      {formatEbClassification(lastEvaluation ?? chapter)
-                        ? ` · ${formatEbClassification(lastEvaluation ?? chapter)}`
-                        : ""}
-                    </p>
+              <CardContent className="flex min-h-0 flex-1 flex-col gap-4 pb-5">
+                <div className="relative min-h-[220px] flex-1 overflow-hidden rounded-xl border border-border/70 bg-muted/30 shadow-sm">
+                  {coverUrl ? (
+                    <img
+                      src={coverUrl}
+                      alt=""
+                      className="absolute inset-0 size-full object-cover object-top"
+                    />
                   ) : (
-                    <p className="mt-1 text-amber-700">
-                      Chưa có điểm — quay lại trang đánh giá để gửi điểm Hội đồng
-                      trước.
-                    </p>
+                    <div className="flex size-full min-h-[220px] flex-col items-center justify-center gap-2 text-muted-foreground">
+                      <ImageIcon className="size-8 opacity-40" />
+                      <span className="text-xs">Chưa có ảnh bìa</span>
+                    </div>
                   )}
                 </div>
+                <div className="shrink-0 space-y-1.5 border-t border-border/60 pt-3">
+                  <h2 className="text-lg font-semibold leading-snug tracking-tight">
+                    {chapter.seriesName || "Series"}
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    {chapter.chapterNumber != null
+                      ? `Chapter ${chapter.chapterNumber}`
+                      : "Chapter"}
+                    {chapter.title ? ` — ${chapter.title}` : ""}
+                  </p>
+                  <p className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+                    <User className="size-3.5 shrink-0" />
+                    <span>
+                      Tác giả:{" "}
+                      <strong className="font-medium text-foreground">
+                        {authorName}
+                      </strong>
+                    </span>
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="flex h-full flex-col border-border/70 py-0 shadow-sm">
+              <CardHeader className="shrink-0 pb-3 pt-5">
+                <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+                  <Calendar className="size-5 text-emerald-600 dark:text-emerald-400" />
+                  Lịch phát hành series
+                </CardTitle>
+                <CardDescription>
+                  Chọn tần suất và/hoặc thời điểm phát hành cụ thể (giờ Việt Nam).
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-1 flex-col gap-5 pb-5">
+                {hasScores ? (
+                  <div
+                    className={cn(
+                      "flex items-center gap-3 rounded-2xl border px-4 py-3.5 shadow-sm",
+                      councilScoreBadgeClass(classificationLabel),
+                    )}
+                  >
+                    <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-white/70 shadow-sm dark:bg-black/20">
+                      <Star className="size-5 fill-amber-400 text-amber-400" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-semibold uppercase tracking-wider opacity-80">
+                        Điểm Hội đồng
+                      </p>
+                      <p className="mt-0.5 text-lg font-bold tracking-tight tabular-nums sm:text-xl">
+                        ĐTB {councilAverage.toFixed(1)}
+                        {classificationLabel ? (
+                          <span className="font-semibold">
+                            {" "}
+                            · {classificationLabel}
+                          </span>
+                        ) : null}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-amber-300/70 bg-amber-500/10 px-4 py-3.5 text-sm text-amber-900 dark:border-amber-500/40 dark:text-amber-200">
+                    <p className="font-medium">Chưa có điểm Hội đồng</p>
+                    <p className="mt-1 text-xs opacity-90">
+                      Quay lại trang đánh giá để gửi điểm trước khi xác nhận lịch.
+                    </p>
+                  </div>
+                )}
 
                 <div className="space-y-2">
                   <Label htmlFor="eb-publication-schedule">
-                    Lịch phát hành (weekly / monthly)
+                    Tần suất phát hành
                   </Label>
                   <Select
                     value={publicationSchedule || undefined}
                     onValueChange={setPublicationSchedule}
                   >
-                    <SelectTrigger id="eb-publication-schedule" className="w-full">
-                      <SelectValue placeholder="Chọn weekly hoặc monthly (tùy chọn)" />
+                    <SelectTrigger id="eb-publication-schedule" className="h-10 w-full">
+                      <SelectValue placeholder="Chọn hàng tuần / hàng tháng (tuỳ chọn)" />
                     </SelectTrigger>
                     <SelectContent>
                       {EB_PUBLICATION_SCHEDULES.map((opt) => (
@@ -472,66 +613,88 @@ export default function EbPublish() {
                   </Select>
                 </div>
 
-                <p className="text-xs text-muted-foreground">
-                  Giờ hiện tại tại Việt Nam:{" "}
-                  <strong className="text-foreground">{vietnamNowLabel}</strong>
-                  {" "}
-                  (GMT+7)
-                </p>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="eb-scheduled-publish">
-                      Ngày publish (giờ Việt Nam)
-                    </Label>
-                    <Input
-                      id="eb-scheduled-publish"
-                      type="date"
-                      min={vietnamDateNow}
-                      value={scheduledPublishAt}
-                      onChange={(event) => applyPublishDate(event.target.value)}
-                    />
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <Label>Thời điểm phát hành</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Hiện tại VN:{" "}
+                      <strong className="text-foreground">{vietnamNowLabel}</strong>
+                    </p>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="eb-scheduled-publish-time">
-                      Giờ publish (giờ Việt Nam, HH:mm)
-                    </Label>
-                    <PublishTimePicker
-                      dateValue={scheduledPublishAt}
-                      value={scheduledPublishTime}
-                      disabled={!scheduledPublishAt}
-                      onChange={setScheduledPublishTime}
-                    />
+
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { id: "today", label: "Hôm nay" },
+                      { id: "tomorrow-morning", label: "Sáng mai 09:00" },
+                      { id: "next-week", label: "Đầu tuần sau" },
+                    ].map((chip) => (
+                      <Button
+                        key={chip.id}
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8 rounded-full border-border/80 bg-background px-3 text-xs hover:border-emerald-300 hover:bg-emerald-500/10 hover:text-emerald-900 dark:hover:border-emerald-500/40 dark:hover:text-emerald-200"
+                        onClick={() => applySchedulePreset(chip.id)}
+                      >
+                        {chip.label}
+                      </Button>
+                    ))}
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="eb-scheduled-publish">Ngày phát hành</Label>
+                      <Input
+                        id="eb-scheduled-publish"
+                        type="date"
+                        min={vietnamDateNow}
+                        value={scheduledPublishAt}
+                        className="h-10"
+                        onChange={(event) => applyPublishDate(event.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="eb-scheduled-publish-time">
+                        Giờ:Phút
+                      </Label>
+                      <PublishTimePicker
+                        dateValue={scheduledPublishAt}
+                        value={scheduledPublishTime}
+                        disabled={!scheduledPublishAt}
+                        onChange={setScheduledPublishTime}
+                      />
+                    </div>
                   </div>
                 </div>
 
-                <Button
-                  className="w-full"
-                  disabled={
-                    submitting
-                    || !hasScores
-                    || !chapter?.seriesId
-                    || (!publicationSchedule && !scheduledPublishAt)
-                  }
-                  onClick={() => void handleConfirmPublish()}
-                >
-                  <CheckCircle2 className="size-4" />
-                  Xác nhận publish series
-                </Button>
-
-                {!hasScores ? (
-                  <p className="text-center text-xs text-muted-foreground">
-                    Chưa đủ điều kiện: cần ít nhất {EB_COUNCIL_MIN_FOR_PUBLISH} thành
-                    viên Hội đồng, tất cả nhập đủ điểm và đã nộp kết quả chấm. Nút
-                    xác nhận lịch phát hành đang bị khóa.
-                  </p>
-                ) : null}
-
-                {!hasScores ? (
-                  <Button variant="outline" className="w-full" asChild>
-                    <Link to={evaluateUrl}>Quay lại trang đánh giá</Link>
+                <div className="mt-auto space-y-3 pt-1">
+                  <Button
+                    className="h-11 w-full gap-2 bg-emerald-600 text-white shadow-sm transition hover:bg-emerald-700 active:bg-emerald-800 disabled:bg-muted disabled:text-muted-foreground"
+                    disabled={
+                      submitting
+                      || !hasScores
+                      || !chapter?.seriesId
+                      || (!publicationSchedule && !scheduledPublishAt)
+                    }
+                    onClick={() => void handleConfirmPublish()}
+                  >
+                    <CheckCircle2 className="size-4" />
+                    {submitting ? "Đang xác nhận…" : "Xác nhận phát hành series"}
                   </Button>
-                ) : null}
+
+                  {!hasScores ? (
+                    <>
+                      <p className="text-center text-xs text-muted-foreground">
+                        Chưa đủ điều kiện: cần ít nhất {EB_COUNCIL_MIN_FOR_PUBLISH}{" "}
+                        thành viên Hội đồng, tất cả nhập đủ điểm và đã nộp kết quả
+                        chấm. Nút xác nhận đang bị khóa.
+                      </p>
+                      <Button variant="outline" className="w-full" asChild>
+                        <Link to={evaluateUrl}>Quay lại trang đánh giá</Link>
+                      </Button>
+                    </>
+                  ) : null}
+                </div>
               </CardContent>
             </Card>
           </div>

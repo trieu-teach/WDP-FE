@@ -7,6 +7,7 @@ import Chapters from '@/pages/Admin/Chapters/Chapters.jsx'
 import Users from '@/pages/Admin/Users/Users.jsx'
 import Profile from '@/pages/Admin/Profile/Profile.jsx'
 import EbRepresentative from '@/pages/Admin/EbRepresentative/EbRepresentative.jsx'
+import Rankings from '@/pages/Admin/Rankings/Rankings.jsx'
 import Home from '@/pages/User/Home/Home.jsx'
 import Login from '@/pages/User/Login/Login.jsx'
 import Register from '@/pages/User/Register/Register.jsx'
@@ -69,6 +70,7 @@ export default function App() {
         <Route path="/admin" element={<AdminShell />}>
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
+          <Route path="rankings" element={<Rankings />} />
           <Route path="manga" element={<AdminManga />} />
           <Route path="chapters" element={<Chapters />} />
           <Route path="users" element={<Users />} />
