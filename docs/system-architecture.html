@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>System Architecture - Manga Workflow System</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      min-height: 100vh;
+      padding: 40px;
+    }
+    
+    .diagram-container {
+      max-width: 1400px;
+      margin: 0 auto;
+      background: #1e293b;
+      border-radius: 20px;
+      padding: 40px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    }
+    
+    .header {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+    
+    .header h1 {
+      color: #fff;
+      font-size: 28px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    
+    .header p {
+      color: #94a3b8;
+      font-size: 14px;
+    }
+    
+    .architecture {
+      display: flex;
+      flex-direction: column;
+      gap: 30px;
+    }
+    
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 40px;
+      position: relative;
+    }
+    
+    .box {
+      background: #334155;
+      border-radius: 16px;
+      padding: 20px;
+      text-align: center;
+      position: relative;
+      transition: transform 0.3s, box-shadow 0.3s;
+    }
+    
+    .box:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+    }
+    
+    .box-icon {
+      width: 60px;
+      height: 60px;
+      margin: 0 auto 12px;
+      background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+    }
+    
+    .box h3 {
+      color: #fff;
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    
+    .box p {
+      color: #94a3b8;
+      font-size: 11px;
+    }
+    
+    /* Main System Box */
+    .main-system {
+      background: linear-gradient(135deg, #1e40af 0%, #3b82f6 50%, #6366f1 100%);
+      padding: 30px 50px;
+      border-radius: 20px;
+      text-align: center;
+      position: relative;
+    }
+    
+    .main-system .logo {
+      font-size: 36px;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 8px;
+    }
+    
+    .main-system .subtitle {
+      color: rgba(255,255,255,0.8);
+      font-size: 14px;
+    }
+    
+    .main-system .version {
+      display: inline-block;
+      background: rgba(255,255,255,0.2);
+      color: #fff;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 11px;
+      margin-top: 12px;
+    }
+    
+    /* Client Box */
+    .client-box {
+      background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+      min-width: 200px;
+    }
+    
+    .client-box .box-icon {
+      background: rgba(255,255,255,0.2);
+    }
+    
+    /* Service Boxes */
+    .services-row {
+      display: flex;
+      justify-content: center;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+    
+    .service-box {
+      background: #334155;
+      min-width: 180px;
+      padding: 16px;
+      border-radius: 14px;
+      text-align: center;
+    }
+    
+    .service-box .box-icon {
+      width: 48px;
+      height: 48px;
+      font-size: 20px;
+      margin-bottom: 10px;
+    }
+    
+    .service-box h4 {
+      color: #fff;
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    
+    .service-box p {
+      color: #94a3b8;
+      font-size: 10px;
+    }
+    
+    /* External Services */
+    .external-box {
+      background: #475569;
+      min-width: 160px;
+    }
+    
+    .external-box .box-icon {
+      background: linear-gradient(135deg, #f59e0b, #ef4444);
+    }
+    
+    /* Cloud Box */
+    .cloud-box {
+      background: linear-gradient(135deg, #0891b2 0%, #06b6d4 100%);
+    }
+    
+    /* Database Box */
+    .database-box {
+      background: linear-gradient(135deg, #7c3aed 0%, #8b5cf6 100%);
+    }
+    
+    /* Arrow */
+    .arrow {
+      color: #64748b;
+      font-size: 24px;
+    }
+    
+    .arrow-down {
+      text-align: center;
+      color: #64748b;
+      font-size: 28px;
+    }
+    
+    /* User Roles */
+    .roles-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    
+    .role-box {
+      background: #1e293b;
+      border: 2px solid #334155;
+      border-radius: 12px;
+      padding: 16px;
+      text-align: center;
+    }
+    
+    .role-box .icon {
+      font-size: 28px;
+      margin-bottom: 8px;
+    }
+    
+    .role-box h5 {
+      color: #fff;
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+    
+    .role-box p {
+      color: #64748b;
+      font-size: 10px;
+    }
+    
+    /* Deployment */
+    .deployment-box {
+      background: linear-gradient(135deg, #374151 0%, #4b5563 100%);
+      border-radius: 16px;
+      padding: 24px 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 40px;
+    }
+    
+    .deployment-item {
+      text-align: center;
+    }
+    
+    .deployment-item .icon {
+      font-size: 32px;
+      margin-bottom: 8px;
+    }
+    
+    .deployment-item h4 {
+      color: #fff;
+      font-size: 14px;
+    }
+    
+    .deployment-item p {
+      color: #9ca3af;
+      font-size: 11px;
+    }
+    
+    /* Features */
+    .features-section {
+      margin-top: 30px;
+    }
+    
+    .features-section h3 {
+      color: #fff;
+      text-align: center;
+      margin-bottom: 20px;
+      font-size: 16px;
+    }
+    
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+    
+    .feature-item {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 12px;
+      text-align: center;
+    }
+    
+    .feature-item .icon {
+      font-size: 20px;
+      margin-bottom: 6px;
+    }
+    
+    .feature-item span {
+      color: #cbd5e1;
+      font-size: 11px;
+    }
+    
+    /* Legend */
+    .legend {
+      display: flex;
+      justify-content: center;
+      gap: 30px;
+      margin-top: 30px;
+      padding-top: 20px;
+      border-top: 1px solid #334155;
+    }
+    
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .legend-color {
+      width: 16px;
+      height: 16px;
+      border-radius: 4px;
+    }
+    
+    .legend-label {
+      color: #94a3b8;
+      font-size: 12px;
+    }
+    
+    /* Responsive */
+    @media (max-width: 1200px) {
+      .roles-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      
+      .features-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="diagram-container">
+    <div class="header">
+      <h1>System Architecture</h1>
+      <p>Manga Creation Workflow & Publishing Management System</p>
+    </div>
+    
+    <div class="architecture">
+      <!-- Client Row -->
+      <div class="row">
+        <div class="box client-box">
+          <div class="box-icon">👤</div>
+          <h3>Web Client</h3>
+          <p>React 19 + Vite</p>
+        </div>
+        <div class="arrow">→</div>
+        <div class="box client-box">
+          <div class="box-icon">📱</div>
+          <h3>Mobile</h3>
+          <p>Responsive PWA</p>
+        </div>
+        <div class="arrow">→</div>
+        <div class="box client-box">
+          <div class="box-icon">🌐</div>
+          <h3>Browser</h3>
+          <p>Safari, Chrome, Firefox</p>
+        </div>
+      </div>
+      
+      <div class="arrow-down">↓</div>
+      
+      <!-- Main System -->
+      <div class="row">
+        <div class="main-system">
+          <div class="logo">MANGA WDP</div>
+          <div class="subtitle">Manga Creation Workflow & Publishing Management System</div>
+          <div class="version">v1.0.0</div>
+        </div>
+      </div>
+      
+      <div class="arrow-down">↓</div>
+      
+      <!-- Frontend & Backend -->
+      <div class="row">
+        <div class="box" style="background: linear-gradient(135deg, #0ea5e9, #06b6d4);">
+          <div class="box-icon">🎨</div>
+          <h3>Frontend Layer</h3>
+          <p>React + Vite</p>
+        </div>
+        <div class="arrow">↔</div>
+        <div class="box" style="background: linear-gradient(135deg, #6366f1, #8b5cf6);">
+          <div class="box-icon">🔗</div>
+          <h3>API Gateway</h3>
+          <p>REST /api</p>
+        </div>
+        <div class="arrow">↔</div>
+        <div class="box" style="background: linear-gradient(135deg, #f59e0b, #ef4444);">
+          <div class="box-icon">⚙️</div>
+          <h3>Backend</h3>
+          <p>Render Cloud</p>
+        </div>
+      </div>
+      
+      <div class="arrow-down">↓</div>
+      
+      <!-- User Roles -->
+      <div class="row">
+        <div class="roles-grid">
+          <div class="role-box">
+            <div class="icon">✍️</div>
+            <h5>Mangaka</h5>
+            <p>Tác giả manga</p>
+          </div>
+          <div class="role-box">
+            <div class="icon">🖌️</div>
+            <h5>Assistant</h5>
+            <p>Trợ lý vẽ</p>
+          </div>
+          <div class="role-box">
+            <div class="icon">📝</div>
+            <h5>Tantou Editor</h5>
+            <p>Biên tập viên</p>
+          </div>
+          <div class="role-box">
+            <div class="icon">📋</div>
+            <h5>Editor Board</h5>
+            <p>Hội đồng biên tập</p>
+          </div>
+        </div>
+      </div>
+      
+      <div class="arrow-down">↓</div>
+      
+      <!-- Core Features -->
+      <div class="features-section">
+        <h3>Core Modules</h3>
+        <div class="features-grid">
+          <div class="feature-item">
+            <div class="icon">📚</div>
+            <span>Series Management</span>
+          </div>
+          <div class="feature-item">
+            <div class="icon">📄</div>
+            <span>Chapter Upload</span>
+          </div>
+          <div class="feature-item">
+            <div class="icon">🎭</div>
+            <span>Layer System</span>
+          </div>
+          <div class="feature-item">
+            <div class="icon">✏️</div>
+            <span>Annotation Tool</span>
+          </div>
+          <div class="feature-item">
+            <div class="icon">🔍</div>
+            <span>TE Review</span>
+          </div>
+          <div class="feature-item">
+            <div class="icon">🏆</div>
+            <span>EB Evaluation</span>
+          </div>
+          <div class="feature-item">
+            <div class="icon">📊</div>
+            <span>Rankings</span>
+          </div>
+          <div class="feature-item">
+            <div class="icon">👥</div>
+            <span>User Management</span>
+          </div>
+        </div>
+      </div>
+      
+      <div class="arrow-down">↓</div>
+      
+      <!-- External Services & Database -->
+      <div class="row">
+        <div class="box external-box">
+          <div class="box-icon">☁️</div>
+          <h3>Cloud Storage</h3>
+          <p>Image CDN</p>
+        </div>
+        <div class="box database-box">
+          <div class="box-icon">💾</div>
+          <h3>Database</h3>
+          <p>MongoDB</p>
+        </div>
+        <div class="box cloud-box">
+          <div class="box-icon">📧</div>
+          <h3>Notifications</h3>
+          <p>In-app + Email</p>
+        </div>
+        <div class="box external-box">
+          <div class="box-icon">🛡️</div>
+          <h3>Auth Service</h3>
+          <p>JWT + OTP</p>
+        </div>
+      </div>
+      
+      <div class="arrow-down">↓</div>
+      
+      <!-- Deployment -->
+      <div class="row">
+        <div class="deployment-box">
+          <div class="deployment-item">
+            <div class="icon">🚀</div>
+            <h4>Vercel</h4>
+            <p>Frontend Hosting</p>
+          </div>
+          <div class="deployment-item">
+            <div class="icon">🌩️</div>
+            <h4>Render</h4>
+            <p>Backend API</p>
+          </div>
+          <div class="deployment-item">
+            <div class="icon">🗄️</div>
+            <h4>MongoDB Atlas</h4>
+            <p>Cloud Database</p>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Legend -->
+      <div class="legend">
+        <div class="legend-item">
+          <div class="legend-color" style="background: linear-gradient(135deg, #059669, #10b981);"></div>
+          <span class="legend-label">Client Layer</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-color" style="background: linear-gradient(135deg, #1e40af, #3b82f6);"></div>
+          <span class="legend-label">Core System</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-color" style="background: linear-gradient(135deg, #f59e0b, #ef4444);"></div>
+          <span class="legend-label">External Services</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-color" style="background: linear-gradient(135deg, #374151, #4b5563);"></div>
+          <span class="legend-label">Deployment</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
