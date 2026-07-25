@@ -1,87 +1,61 @@
-.auth-split-box--register {
-  max-width: 520px;
-}
-
-.auth-register-head {
-  margin-bottom: 20px;
-  text-align: center;
-}
-
-.auth-register-head h2 {
-  margin: 0 0 6px;
-  font-size: 1.75rem;
-  font-weight: 700;
-  color: #1f2937;
-}
-
-.auth-register-head p {
-  margin: 0;
-  font-size: 0.875rem;
-  line-height: 1.5;
-  color: #6b7280;
-}
-
 .auth-register-form {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 14px;
 }
 
 .auth-register-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .auth-register-section__title {
   margin: 0;
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: #9ca3af;
-}
-
-.auth-register-roles.auth-form__roles {
-  gap: 10px;
-}
-
-.auth-split-box--register .auth-register-roles .auth-role-btn {
-  padding: 0.75rem;
-  border-radius: 12px;
-}
-
-.auth-split-box--register .auth-register-roles .auth-role-btn__icon-wrap {
-  width: 2.125rem;
-  height: 2.125rem;
-}
-
-.auth-split-box--register .auth-register-roles .auth-role-btn__desc {
-  -webkit-line-clamp: 1;
 }
 
 .auth-register-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px 14px;
+  gap: 10px 12px;
+}
+
+.auth-register-grid--password {
+  grid-template-columns: 1fr 1fr;
 }
 
 .auth-register-agree {
-  margin: 0;
-}
-
-.auth-register-submit {
-  margin-top: 4px;
-  padding: 13px;
-  font-size: 1rem;
-}
-
-.auth-register-links {
   margin-top: 0;
 }
 
-@media screen and (max-width: 640px) {
-  .auth-register-grid {
+.auth-register-submit {
+  display: block;
+  width: 100%;
+  max-width: none;
+  margin-top: 2px;
+}
+
+.auth-register-links {
+  margin-top: 4px;
+  text-align: center;
+}
+
+.auth-split-box--register .auth-split-greeting {
+  margin-bottom: 16px;
+}
+
+.auth-split-box--register .auth-box-field__control input {
+  height: 42px;
+}
+
+@media (max-width: 640px) {
+  .auth-register-grid,
+  .auth-register-grid--password {
     grid-template-columns: 1fr;
   }
 }

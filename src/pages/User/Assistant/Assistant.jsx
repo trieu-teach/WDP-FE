@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
@@ -10,7 +10,6 @@ import {
   Image as ImageIcon,
   Inbox,
   Layers as LayersIcon,
-  Lightbulb,
   RefreshCw,
   Sparkles,
   TrendingUp,
@@ -18,7 +17,6 @@ import {
 } from 'lucide-react'
 import Header from '@/components/User/Header/Header.jsx'
 import Footer from '@/components/User/Footer/Footer.jsx'
-import { WorkspaceHero } from '@/components/layout/WorkspaceHero.jsx'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -28,7 +26,6 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import { getSession, logout } from '@/lib/auth.js'
 import { useAssistantAssignments } from '@/hooks/useAssistantAssignments.js'
@@ -44,6 +41,13 @@ import './Assistant.css'
 
 const NAV_LINKS = [{ to: '/', label: 'Trang chủ' }]
 
+const HERO_IMAGES = [
+  '/images/assistant1.png',
+  '/images/assistant2.png',
+  '/images/assistant3.png',
+]
+const HERO_SLIDE_MS = 5000
+
 const STATS = [
   { label: 'Đã nhận', icon: Inbox, color: 'amber' },
   { label: 'Đang làm', icon: LayersIcon, color: 'violet' },
@@ -58,73 +62,12 @@ const STAT_ICON_CLASS = {
   emerald: 'text-emerald-500',
 }
 
-const STATUS_BADGE = {
-  pending_assistant: {
-    label: 'Chờ nhận',
-    className: 'bg-amber-100 text-amber-700 hover:bg-amber-100 dark:bg-amber-500/15 dark:text-amber-400',
-  },
-  in_progress: {
-    label: 'Đang xử lý',
-    className: 'bg-violet-100 text-violet-700 hover:bg-violet-100 dark:bg-violet-500/15 dark:text-violet-400',
-  },
-  submitted: {
-    label: 'Đã gửi Mangaka',
-    className: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400',
-  },
-  submitted_to_mangaka: {
-    label: 'Đã gửi Mangaka',
-    className: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400',
-  },
-  approved: {
-    label: 'Đã duyệt',
-    className: 'bg-blue-100 text-blue-700 hover:bg-blue-100 dark:bg-blue-500/15 dark:text-blue-400',
-  },
-  revision: {
-    label: 'Cần sửa',
-    className: 'bg-red-100 text-red-700 hover:bg-red-100 dark:bg-red-500/15 dark:text-red-400',
-  },
-  TE_revision: {
-    label: 'TE sửa',
-    className: 'bg-orange-100 text-orange-700 hover:bg-orange-100 dark:bg-orange-500/15 dark:text-orange-400',
-  },
-  submitted_by_assistant: {
-    label: 'Chờ Mangaka',
-    className: 'bg-sky-100 text-sky-700 hover:bg-sky-100 dark:bg-sky-500/15 dark:text-sky-400',
-  },
-}
-
 const TASK_STATUS_LABEL = {
   pending: 'Chờ nhận',
   in_progress: 'Đang làm',
   submitted: 'Chờ duyệt',
   approved: 'Đã duyệt',
   revision: 'Cần sửa',
-}
-
-const TASK_FILTERS = [
-  { id: 'all', label: 'Tất cả' },
-  { id: 'pending', label: 'Đã nhận' },
-  { id: 'in_progress', label: 'Đang làm' },
-  { id: 'submitted', label: 'Đã gửi' },
-  { id: 'approved', label: 'Đã xong' },
-  { id: 'revision', label: 'Bị từ chối' },
-]
-
-function ChapterInboxSkeleton() {
-  return (
-    <ul className="space-y-2 p-3 pt-0">
-      {Array.from({ length: 4 }, (_, i) => (
-        <li key={i} className="flex gap-3 rounded-lg border p-3">
-          <div className="manga-page manga-page--thumb-md shrink-0 animate-pulse rounded bg-muted" />
-          <div className="min-w-0 flex-1 space-y-2">
-            <div className="h-4 w-3/4 animate-pulse rounded bg-muted" />
-            <div className="h-3 w-1/2 animate-pulse rounded bg-muted" />
-            <div className="h-5 w-16 animate-pulse rounded-full bg-muted" />
-          </div>
-        </li>
-      ))}
-    </ul>
-  )
 }
 
 export default function Assistant() {
@@ -147,27 +90,30 @@ export default function Assistant() {
   const [selectedChapterId, setSelectedChapterId] = useState(null)
   const [selectedChapterPages, setSelectedChapterPages] = useState([])
   const [selectedChapterDetail, setSelectedChapterDetail] = useState(null)
-  const [taskFilter, setTaskFilter] = useState('all')
-  const [currentPage, setCurrentPage] = useState(1)
   const [hireBusyId, setHireBusyId] = useState(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
-  const [showGuide, setShowGuide] = useState(false)
   const [showTaskDetail, setShowTaskDetail] = useState(false)
   const [hubView, setHubView] = useState('pick')
   const [selectedMangakaId, setSelectedMangakaId] = useState(null)
+  const [heroSlide, setHeroSlide] = useState(0)
 
   useNotifications({
     enabled: Boolean(user),
     onNew: (n) => {
+      // Chỉ toast yêu cầu sửa mới; bỏ type=task chung (gây lặp khi vào lại trang).
+      if (n.isRead) return
       const t = String(n.type ?? '').toLowerCase()
-      if (t === 'revision' || t === 'task' || /yêu cầu.*sửa|chỉnh sửa|revision/i.test(`${n.title ?? ''} ${n.message ?? ''}`)) {
-        toast.warning(`${n.title}${n.message ? ` — ${n.message}` : ''}`, {
-          description: 'Bấm vào chuông để xem chi tiết.',
-          duration: 8000,
-        })
-        void refreshTasks()
-        void refresh()
-      }
+      const text = `${n.title ?? ''} ${n.message ?? ''}`
+      const isRevision =
+        t === 'revision'
+        || /yêu cầu.*sửa|chỉnh sửa|revision/i.test(text)
+      if (!isRevision) return
+      toast.warning(`${n.title}${n.message ? ` — ${n.message}` : ''}`, {
+        description: 'Bấm vào chuông để xem chi tiết.',
+        duration: 8000,
+      })
+      void refreshTasks()
+      void refresh()
     },
   })
 
@@ -269,32 +215,13 @@ export default function Assistant() {
     setShowTaskDetail(isRevisionTask)
   }, [selectedChapterId, isRevisionTask])
 
-  const filteredChapters = useMemo(() => {
-    const list = hubView === 'editor' && selectedMangakaId ? mangakaAssignments : enrichedAssignments
-    if (taskFilter === 'all') return list
-    if (taskFilter === 'needs-attention') {
-      return list.filter(a => a._task?.status === 'revision' || a._task?.status === 'submitted')
-    }
-    return list.filter(a => a._task?.status === taskFilter)
-  }, [enrichedAssignments, mangakaAssignments, hubView, selectedMangakaId, taskFilter])
-
-  const ITEMS_PER_PAGE = 6
-
-  const paginatedChapters = useMemo(() => {
-    const start = (currentPage - 1) * ITEMS_PER_PAGE
-    return filteredChapters.slice(start, start + ITEMS_PER_PAGE)
-  }, [filteredChapters, currentPage])
-
-  const totalPages = Math.max(1, Math.ceil(filteredChapters.length / ITEMS_PER_PAGE))
-
-  const handleFilterChange = useCallback((f) => {
-    setTaskFilter(f)
-    setCurrentPage(1)
+  useEffect(() => {
+    if (HERO_IMAGES.length < 2) return undefined
+    const timer = window.setInterval(() => {
+      setHeroSlide((index) => (index + 1) % HERO_IMAGES.length)
+    }, HERO_SLIDE_MS)
+    return () => window.clearInterval(timer)
   }, [])
-
-  const listForCount = useMemo(() => {
-    return hubView === 'editor' && selectedMangakaId ? mangakaAssignments : enrichedAssignments
-  }, [enrichedAssignments, mangakaAssignments, hubView, selectedMangakaId])
 
   const statsDisplayed = useMemo(() => {
     const byChapter = {}
@@ -344,8 +271,6 @@ export default function Assistant() {
     setSelectedChapterId(null)
     setSelectedChapterPages([])
     setSelectedChapterDetail(null)
-    setTaskFilter('all')
-    setCurrentPage(1)
   }
 
   function handleBackToMangakaPicker() {
@@ -390,37 +315,46 @@ export default function Assistant() {
     }
   }
 
-  function filterCount(filterId) {
-    if (filterId === 'all') return listForCount.length
-    return listForCount.filter(a => a._task?.status === filterId).length
-  }
-
   return (
     <div className="ws-page--assistant flex min-h-screen flex-col bg-background">
       <Header links={NAV_LINKS} onLogout={user ? handleLogout : undefined} />
 
-      <WorkspaceHero
-        className="ws-hero--assistant border-b border-white/5"
-        label="Không gian Assistant"
-        title={`Xin chào${user?.name ? `, ${user.name.split(' ')[0]}` : ''}`}
-        description="Nhận chapter từ Mangaka · upload layer theo thứ tự · gộp và gửi lại."
-      >
-        <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-zinc-300">
-          <Badge variant="secondary" className="bg-white/10 text-white hover:bg-white/15">
-            <LayersIcon className="size-3" />
-            Layer Editor
-          </Badge>
-          <Badge variant="secondary" className="bg-white/10 text-white hover:bg-white/15">
-            <Sparkles className="size-3" />
-            1 chapter = 1 task
-          </Badge>
-          {!loading && (
-            <span className="text-zinc-500">
-              · {assignments.length} chapter được giao
-            </span>
-          )}
+      <section className="ws-hero--assistant relative overflow-hidden border-b border-white/5 text-white">
+        <div className="as-hero-slides" aria-hidden>
+          {HERO_IMAGES.map((src, index) => (
+            <img
+              key={src}
+              src={src}
+              alt=""
+              className={cn(
+                'as-hero-slides__img',
+                index === heroSlide && 'as-hero-slides__img--active',
+              )}
+            />
+          ))}
         </div>
-      </WorkspaceHero>
+        <div className="as-hero-slides__veil" aria-hidden />
+        <div className="page-container relative py-10 md:py-14">
+          <div className="max-w-2xl space-y-3">
+            <Badge variant="secondary" className="bg-white/10 text-white hover:bg-white/15">
+              Không gian Assistant
+            </Badge>
+            <h1 className="text-3xl font-bold tracking-tight md:text-4xl">
+              {`Xin chào${user?.name ? `, ${user.name.split(' ')[0]}` : ''}`}
+            </h1>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-zinc-300">
+            <Badge variant="secondary" className="bg-white/10 text-white hover:bg-white/15">
+              <LayersIcon className="size-3" />
+              Layer Editor
+            </Badge>
+            <Badge variant="secondary" className="bg-white/10 text-white hover:bg-white/15">
+              <Sparkles className="size-3" />
+              1 chapter = 1 task
+            </Badge>
+          </div>
+        </div>
+      </section>
 
       <main className="page-container ws-main--assistant flex-1 py-6">
         {error ? (
@@ -539,137 +473,9 @@ export default function Assistant() {
             </Button>
             <span className="text-xs text-muted-foreground">· Layer Editor</span>
           </div>
-          <aside className="flex min-h-0 flex-col gap-3 overflow-hidden">
-            <Card className="flex min-h-0 flex-1 flex-col overflow-hidden shadow-sm">
-              <CardHeader className="shrink-0 space-y-3 pb-3">
-                <div>
-                  <CardTitle className="text-base">Chapter được giao</CardTitle>
-                  <CardDescription>Chọn chapter để mở Layer Editor</CardDescription>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {TASK_FILTERS.map(f => {
-                    const count = filterCount(f.id)
-                    return (
-                      <button
-                        key={f.id}
-                        type="button"
-                        onClick={() => handleFilterChange(f.id)}
-                        className={cn(
-                          'rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors',
-                          taskFilter === f.id
-                            ? 'border-primary bg-primary/10 text-primary'
-                            : 'border-muted text-muted-foreground hover:border-foreground/30 hover:text-foreground',
-                        )}
-                      >
-                        {f.label}
-                        {count > 0 ? (
-                          <span className={cn(
-                            'ml-1 rounded-full px-1 py-0.5 text-[10px] font-bold tabular-nums',
-                            taskFilter === f.id ? 'bg-primary/20 text-primary' : 'bg-muted text-muted-foreground',
-                          )}>
-                            {count}
-                          </span>
-                        ) : null}
-                      </button>
-                    )
-                  })}
-                </div>
-              </CardHeader>
-              <CardContent className="flex min-h-0 flex-1 flex-col px-0 pb-0">
-                {loading && assignments.length === 0 ? (
-                  <ChapterInboxSkeleton />
-                ) : paginatedChapters.length === 0 ? (
-                  <div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
-                    <Inbox className="size-8 text-muted-foreground/40" />
-                    <p className="text-sm text-muted-foreground">Không có chapter nào.</p>
-                    {taskFilter !== 'all' ? (
-                      <Button size="sm" variant="outline" onClick={() => handleFilterChange('all')}>
-                        Xem tất cả
-                      </Button>
-                    ) : null}
-                  </div>
-                ) : (
-                  <>
-                    <ScrollArea className="min-h-0 flex-1">
-                      <ul className="space-y-1.5 p-3 pt-0">
-                        {paginatedChapters.map(ch => {
-                          const badge =
-                            STATUS_BADGE[ch._task?.status] ??
-                            STATUS_BADGE[ch.status] ??
-                            STATUS_BADGE.pending_assistant
-                          const coverUrl = ch.coverUrl ?? null
-                          const pageCount = ch.pageCount ?? ch.pages?.length ?? 0
-                          const isSelected = ch.chapterId === selectedChapterId
-                          const needsAttention = ch._task?.status === 'revision'
-                          return (
-                            <li key={ch.chapterId}>
-                              <button
-                                type="button"
-                                onClick={() => void handleOpenChapter(ch)}
-                                className={cn(
-                                  'as-inbox-card group w-full text-left',
-                                  isSelected && 'active',
-                                  needsAttention && 'border-amber-300/60 dark:border-amber-500/40',
-                                )}
-                              >
-                                <span className="as-inbox-card__thumb manga-page manga-page--thumb-md overflow-hidden rounded-md">
-                                  {coverUrl ? (
-                                    <img src={coverUrl} alt="" className="manga-page__media" />
-                                  ) : (
-                                    <ImageIcon className="size-4 text-muted-foreground/50" />
-                                  )}
-                                </span>
-                                <span className="as-inbox-card__body">
-                                  <strong className="truncate">
-                                    {ch.seriesTitle?.trim() || `Chương ${ch.chapterNum || ''}`.trim()}
-                                  </strong>
-                                  <span className="as-inbox-card__meta truncate">
-                                    Ch.{ch.chapterNum}
-                                    {ch.title ? ` · ${ch.title}` : ''}
-                                    {' · '}{pageCount} trang
-                                  </span>
-                                  <Badge className={cn('mt-1 w-fit text-[10px]', badge.className)} variant="secondary">
-                                    {badge.label}
-                                  </Badge>
-                                </span>
-                              </button>
-                            </li>
-                          )
-                        })}
-                      </ul>
-                    </ScrollArea>
-                    {totalPages > 1 ? (
-                      <div className="flex items-center justify-center gap-3 border-t px-3 py-2 text-xs">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 px-2"
-                          disabled={currentPage === 1}
-                          onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                        >
-                          Trước
-                        </Button>
-                        <span className="text-muted-foreground tabular-nums">
-                          {currentPage} / {totalPages}
-                        </span>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 px-2"
-                          disabled={currentPage === totalPages}
-                          onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                        >
-                          Sau
-                        </Button>
-                      </div>
-                    ) : null}
-                  </>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card className="shrink-0 shadow-sm">
-              <CardHeader className="pb-2">
+          <aside className="flex min-h-0 flex-col gap-3 overflow-y-auto overflow-x-hidden">
+            <Card className="shrink-0 gap-0 py-0 shadow-sm">
+              <CardHeader className="px-4 py-4 pb-2">
                 <CardTitle className="flex items-center gap-2 text-sm">
                   <TrendingUp className="size-4 text-primary" />
                   Tóm tắt
@@ -678,7 +484,7 @@ export default function Assistant() {
                   ) : null}
                 </CardTitle>
               </CardHeader>
-              <CardContent className="pt-0">
+              <CardContent className="px-4 pb-4 pt-0">
                 <div className="grid grid-cols-2 gap-2">
                   {statsDisplayed.map((s, i) => {
                     const Icon = s.icon
@@ -694,41 +500,6 @@ export default function Assistant() {
                   })}
                 </div>
               </CardContent>
-            </Card>
-
-            <Card className="shrink-0 shadow-sm">
-              <button
-                type="button"
-                className="flex w-full items-center justify-between px-6 py-4 text-left"
-                onClick={() => setShowGuide(v => !v)}
-              >
-                <CardTitle className="flex items-center gap-2 text-sm">
-                  <Lightbulb className="size-4 text-primary" />
-                  Quy trình làm việc
-                </CardTitle>
-                <ChevronDown className={cn('size-4 text-muted-foreground transition-transform', showGuide && 'rotate-180')} />
-              </button>
-              {showGuide ? (
-                <CardContent className="pt-0">
-                  <ol className="relative space-y-2 border-l border-muted pl-5">
-                    {[
-                      'Mangaka gửi chapter cho bạn',
-                      'Chọn chapter trong danh sách',
-                      'Tải ảnh gốc từng trang về',
-                      'Chỉnh trong Photoshop / CSP',
-                      'Upload layer theo thứ tự (0, 1, 2…)',
-                      'Gộp layer & gửi Mangaka',
-                    ].map((text, i) => (
-                      <li key={text} className="relative text-xs text-muted-foreground">
-                        <span className="absolute -left-[22px] flex size-4 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground">
-                          {i + 1}
-                        </span>
-                        {text}
-                      </li>
-                    ))}
-                  </ol>
-                </CardContent>
-              ) : null}
             </Card>
           </aside>
 

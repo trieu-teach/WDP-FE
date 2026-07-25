@@ -195,7 +195,7 @@ export function useMangakaWorkspace(user) {
                 series: row.series,
                 num: row.num,
                 pages: pageList,
-                cover: null,
+                cover: row.coverUrl ? { url: row.coverUrl, name: 'cover' } : null,
               }
             : {
                 id: chapterId,

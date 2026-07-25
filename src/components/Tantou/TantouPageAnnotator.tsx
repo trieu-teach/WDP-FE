@@ -76,7 +76,6 @@ export const TantouPageAnnotator = forwardRef<
     editorialNotes,
     onEditorialNotesChange,
     readOnly = false,
-    viewerMode = "tantou",
     onClose,
   },
   ref,
@@ -98,8 +97,6 @@ export const TantouPageAnnotator = forwardRef<
   );
 
   const pageUrl = pageImageUrl ?? submission.mangakaImageUrl;
-  const tantouLegendLabel =
-    viewerMode === "mangaka" ? "Tantou (TE)" : "Tantou (bạn)";
   const activePageLabel =
     pageLabel ?? storyPages[currentPageIndex]?.pageLabel ?? submission.pageLabel;
   const pageCount = storyPages.length;
@@ -718,15 +715,6 @@ export const TantouPageAnnotator = forwardRef<
           </div>
         </div>
         <div className="mt-3 flex flex-wrap gap-1.5">{renderToolButtons()}</div>
-        <p className="te-editor__legend mt-2 text-xs text-muted-foreground">
-          <span className="te-legend te-legend--mangaka">■ Mangaka</span>
-          <span className="te-editor__legend-sep">·</span>
-          <span className="te-legend te-legend--tantou">■ {tantouLegendLabel}</span>
-          <span className="te-editor__legend-sep">·</span>
-          <span className="te-editor__count">
-            {editorialNotes.length} ô nhận xét
-          </span>
-        </p>
       </div>
 
       <div className="te-editor__workspace te-editor__workspace--simple min-h-0 flex-1">

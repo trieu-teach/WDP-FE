@@ -4,6 +4,8 @@ import { EB_COUNCIL_MEMBERS } from '@/utils/ebCouncilStorage.js'
 
 export const EB_SCORE_MAX = 5
 export const EB_COUNCIL_SIZE = 5
+/** Số thành viên HĐ tối thiểu để vào trang xác nhận lịch phát hành. */
+export const EB_COUNCIL_MIN_FOR_PUBLISH = 3
 
 /** Tiêu chí chấm điểm — khớp BE EB_CRITERIA_KEYS */
 export const EB_SCORE_CRITERIA = [
@@ -19,8 +21,8 @@ export const EB_SCORE_CRITERIA = [
   },
   {
     key: 'panel_camera',
-    label: 'Phân khung & Góc máy',
-    hint: 'Panel & Camera',
+    label: 'Phân khung',
+    hint: 'Panel',
   },
   {
     key: 'pacing_climax',
@@ -491,6 +493,34 @@ export function validateMemberScoresPayload(memberScores, requiredCount = EB_COU
   }
 
   return ''
+}
+
+/** Thành viên đã nhập đủ mọi tiêu chí (bước 0.5 hợp lệ). */
+export function isCouncilMemberFullyScored(scores, scoreKeys = EB_SCORE_KEYS) {
+  if (!scores || typeof scores !== 'object') return false
+  return scoreKeys.every((key) => validateEbScore(scores[key]) === '')
+}
+
+/**
+ * Tất cả thành viên trong roster đã nhập đủ điểm.
+ * Có thể gộp draft đang nhập của activeMemberId.
+ */
+export function areAllCouncilMembersFullyScored({
+  roster = [],
+  councilRecord = null,
+  activeMemberId = null,
+  draftScores = null,
+  scoreKeys = EB_SCORE_KEYS,
+} = {}) {
+  if (!Array.isArray(roster) || roster.length === 0) return false
+
+  const merged = activeMemberId && draftScores
+    ? mergeCouncilDraft(councilRecord, activeMemberId, { scores: draftScores })
+    : councilRecord
+
+  return roster.every((member) =>
+    isCouncilMemberFullyScored(merged?.members?.[member.id]?.scores, scoreKeys),
+  )
 }
 
 export const EB_PUBLICATION_SCHEDULES = [

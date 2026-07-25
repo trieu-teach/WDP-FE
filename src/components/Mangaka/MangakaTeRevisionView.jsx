@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { TantouPageAnnotator } from '@/components/Tantou/TantouPageAnnotator'
 import { useMangakaTeRevisionChapter } from '@/hooks/useMangakaTeRevisionChapter.js'
 import { Button } from '@/components/ui/button'
+import { markTeRevisionSeen } from '@/utils/teRevisionSeenStorage.js'
 
 export function MangakaTeRevisionView({
   chapterId,
@@ -56,6 +57,11 @@ export function MangakaTeRevisionView({
   )
 
   const currentNotes = notesByPage[pageIndex] ?? []
+
+  useEffect(() => {
+    if (loading || error || !chapterId) return
+    markTeRevisionSeen(chapterId)
+  }, [loading, error, chapterId])
 
   if (loading) {
     return (

@@ -7,7 +7,75 @@
 }
 
 .ws-hero--assistant {
-  background: linear-gradient(135deg, #1a1917 0%, #1f1f2e 50%, #2a1f3d 100%);
+  min-height: clamp(20rem, 42vw, 28rem);
+  background-color: #120f18;
+}
+
+.ws-hero--assistant > .page-container {
+  display: flex;
+  min-height: inherit;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding-top: clamp(2.75rem, 7vw, 5rem);
+  padding-bottom: clamp(2.25rem, 5vw, 3.5rem);
+}
+
+.as-hero-slides {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.as-hero-slides__img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* Ưu tiên phần dưới ảnh (bàn làm việc) — tránh cắt mất đáy */
+  object-position: center 72%;
+  opacity: 0;
+  transition: opacity 0.9s ease;
+}
+
+.as-hero-slides__img--active {
+  opacity: 1;
+}
+
+.as-hero-slides__veil {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    95deg,
+    rgba(10, 8, 16, 0.7) 0%,
+    rgba(10, 8, 16, 0.4) 28%,
+    rgba(10, 8, 16, 0.1) 55%,
+    rgba(10, 8, 16, 0.06) 100%
+  );
+  pointer-events: none;
+}
+
+.ws-hero--assistant h1 {
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55), 0 4px 18px rgba(0, 0, 0, 0.45);
+}
+
+@media (max-width: 767px) {
+  .ws-hero--assistant {
+    min-height: 18rem;
+  }
+
+  .as-hero-slides__veil {
+    background: linear-gradient(
+      180deg,
+      rgba(10, 8, 16, 0.32) 0%,
+      rgba(10, 8, 16, 0.42) 40%,
+      rgba(10, 8, 16, 0.75) 100%
+    );
+  }
+
+  .as-hero-slides__img {
+    object-position: center 68%;
+  }
 }
 
 .ws-page--assistant .ws-tab.active {
@@ -131,26 +199,14 @@
 .as-mangaka-board__scroll {
   overflow-y: auto;
   overflow-x: hidden;
-  padding-right: 2px;
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in oklch, var(--muted-foreground) 35%, transparent) transparent;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
 .as-mangaka-board__scroll::-webkit-scrollbar {
-  width: 6px;
-}
-
-.as-mangaka-board__scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.as-mangaka-board__scroll::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: color-mix(in oklch, var(--muted-foreground) 30%, transparent);
-}
-
-.as-mangaka-board__scroll::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in oklch, var(--muted-foreground) 50%, transparent);
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 @media (max-width: 1023px) {
@@ -165,7 +221,7 @@
 }
 
 .as-workspace > aside {
-  max-height: min(720px, calc(100vh - 260px));
+  max-height: min(780px, calc(100vh - 220px));
 }
 
 @media (max-width: 1023px) {

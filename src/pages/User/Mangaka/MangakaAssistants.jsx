@@ -33,7 +33,6 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   Select,
   SelectContent,
@@ -111,26 +110,22 @@ function ActionButton({ profile }) {
   )
 }
 
+const DEFAULT_ASSISTANT_BIO = 'Assistant đã đăng ký trên hệ thống.'
+
 function AssistantCardSkeleton() {
   return (
-    <Card className="overflow-hidden">
+    <Card className="overflow-hidden p-0">
       <div className="h-1 animate-pulse bg-muted" />
       <div className="space-y-4 p-5">
-        <div className="flex gap-3">
-          <div className="size-12 shrink-0 animate-pulse rounded-full bg-muted" />
-          <div className="min-w-0 flex-1 space-y-2">
-            <div className="h-4 w-2/3 animate-pulse rounded bg-muted" />
-            <div className="h-5 w-20 animate-pulse rounded-full bg-muted" />
-            <div className="h-3 w-1/2 animate-pulse rounded bg-muted" />
+        <div className="flex items-start gap-3">
+          <div className="size-14 shrink-0 animate-pulse rounded-full bg-muted" />
+          <div className="min-w-0 flex-1 space-y-2 pt-0.5">
+            <div className="flex items-center gap-2">
+              <div className="h-4 w-1/2 animate-pulse rounded bg-muted" />
+              <div className="ml-auto h-5 w-16 animate-pulse rounded-full bg-muted" />
+            </div>
+            <div className="h-3 w-2/5 animate-pulse rounded bg-muted" />
           </div>
-        </div>
-        <div className="space-y-2">
-          <div className="h-3 w-full animate-pulse rounded bg-muted" />
-          <div className="h-3 w-4/5 animate-pulse rounded bg-muted" />
-        </div>
-        <div className="flex gap-2">
-          <div className="h-6 w-16 animate-pulse rounded-full bg-muted" />
-          <div className="h-6 w-14 animate-pulse rounded-full bg-muted" />
         </div>
         <div className="h-9 animate-pulse rounded-md bg-muted" />
       </div>
@@ -143,13 +138,25 @@ function AssistantProfileCard({ profile, onHire, highlighted = false, entranceDe
   const canHire = profile.availability === 'available'
   const accent = profile.avatarColor ?? '#e63946'
 
+  const bioText = String(profile.bio ?? '').trim()
+  const hasRealBio = bioText && bioText !== DEFAULT_ASSISTANT_BIO
+  const hasSpecialties = Array.isArray(profile.specialties) && profile.specialties.length > 0
+  const hasCustomStyle = Boolean(profile.style) && profile.style !== 'manga'
+  const showTags = hasSpecialties || hasCustomStyle
+  const responseTime = String(profile.responseTime ?? '').trim()
+  const hasResponseTime = responseTime && responseTime !== '—'
+  const languages = Array.isArray(profile.languages) ? profile.languages.filter(Boolean) : []
+  const hasLanguages = languages.length > 1 || (languages.length === 1 && languages[0] !== 'VI')
+  const showMeta = hasResponseTime || hasLanguages
+  const hasRating = Number(profile.rating) > 0
+
   return (
     <Card
       id={profile.accountId ? `assistant-${profile.accountId}` : `assistant-${profile.id}`}
       style={{ animationDelay: `${entranceDelayMs}ms` }}
       className={cn(
         'group relative flex h-full flex-col gap-0 overflow-hidden p-0 transition-all duration-200',
-        'hover:-translate-y-0.5 hover:shadow-lg',
+        'hover:-translate-y-0.5 hover:shadow-md',
         profile.availability === 'mine' && 'ring-1 ring-violet-500/35',
         highlighted && 'ring-2 ring-primary shadow-md',
       )}
@@ -159,66 +166,82 @@ function AssistantProfileCard({ profile, onHire, highlighted = false, entranceDe
         style={{ background: accent }}
       />
 
-      <div className="flex flex-1 flex-col p-5 pb-4 pt-6">
-        <div className="flex gap-3">
-          <AssistantAvatar profile={profile} size="lg" className="shrink-0" />
+      <div className="flex flex-1 flex-col gap-4 p-5 pb-4 pt-6">
+        <div className="flex items-start gap-3.5">
+          <AssistantAvatar
+            profile={profile}
+            size="lg"
+            className="size-14 shrink-0 text-base shadow-sm"
+          />
           <div className="min-w-0 flex-1">
-            <p className="truncate text-base font-semibold leading-tight">{profile.name}</p>
-            <Badge
-              className={cn(
-                'mt-1.5 w-fit',
-                badge.className,
-                profile.availability === 'pending' && 'gap-1',
-              )}
-            >
-              {profile.availability === 'pending' ? (
-                <span className="mk-pulse" aria-hidden />
-              ) : null}
-              {badge.label}
-            </Badge>
-            <p className="mt-1 truncate text-sm text-muted-foreground">{profile.handle}</p>
-            <div className="mt-2 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
-              {profile.rating > 0 ? (
-                <>
-                  <Star className="size-3 shrink-0 fill-amber-500 text-amber-500" />
-                  <strong className="text-amber-600 dark:text-amber-400">{profile.rating}</strong>
-                  <span>· {profile.completedPages} trang</span>
-                </>
-              ) : (
-                <span className="truncate">{profile.email || profile.handle}</span>
-              )}
+            <div className="flex items-start gap-2">
+              <p className="min-w-0 flex-1 truncate text-[0.95rem] font-semibold leading-snug tracking-tight">
+                {profile.name}
+              </p>
+              <Badge
+                className={cn(
+                  'mt-0.5 shrink-0',
+                  badge.className,
+                  profile.availability === 'pending' && 'gap-1',
+                )}
+              >
+                {profile.availability === 'pending' ? (
+                  <span className="mk-pulse" aria-hidden />
+                ) : null}
+                {badge.label}
+              </Badge>
             </div>
+            <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
+              {profile.handle}
+            </p>
+            {hasRating ? (
+              <div className="mt-2 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+                <Star className="size-3 shrink-0 fill-amber-500 text-amber-500" />
+                <strong className="text-amber-600 dark:text-amber-400">{profile.rating}</strong>
+                <span>· {profile.completedPages} trang</span>
+              </div>
+            ) : null}
           </div>
         </div>
 
-        <p className="mt-4 line-clamp-2 text-sm leading-relaxed text-muted-foreground">
-          {profile.bio}
-        </p>
+        {hasRealBio ? (
+          <p className="line-clamp-2 text-sm leading-relaxed text-muted-foreground">
+            {bioText}
+          </p>
+        ) : null}
 
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {profile.specialties.map(s => (
-            <Badge key={s} variant="secondary" className="h-6 shrink-0 text-xs">
-              {specialtyLabel(s)}
+        {showTags ? (
+          <div className="flex flex-wrap gap-1.5">
+            {(profile.specialties ?? []).map(s => (
+              <Badge key={s} variant="secondary" className="h-6 shrink-0 text-xs">
+                {specialtyLabel(s)}
+              </Badge>
+            ))}
+            <Badge variant="outline" className="h-6 shrink-0 text-xs">
+              {styleLabel(profile.style)}
             </Badge>
-          ))}
-          <Badge variant="outline" className="h-6 shrink-0 text-xs">
-            {styleLabel(profile.style)}
-          </Badge>
-        </div>
+          </div>
+        ) : null}
 
-        <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-          <span className="inline-flex min-w-0 items-center gap-1">
-            <Clock className="size-3 shrink-0" />
-            <span className="truncate">{profile.responseTime}</span>
-          </span>
-          <span className="inline-flex min-w-0 items-center justify-end gap-1">
-            <Globe className="size-3 shrink-0" />
-            <span className="truncate">{profile.languages.join(' · ')}</span>
-          </span>
-        </div>
+        {showMeta ? (
+          <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+            {hasResponseTime ? (
+              <span className="inline-flex min-w-0 items-center gap-1">
+                <Clock className="size-3 shrink-0" />
+                <span className="truncate">{responseTime}</span>
+              </span>
+            ) : <span />}
+            {hasLanguages ? (
+              <span className="inline-flex min-w-0 items-center gap-1">
+                <Globe className="size-3 shrink-0" />
+                <span className="truncate">{languages.join(' · ')}</span>
+              </span>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
-      <CardFooter className="shrink-0 border-t bg-muted/20 p-4 pt-3">
+      <CardFooter className="shrink-0 border-t p-4 pt-3">
         {canHire ? (
           <Button className="h-9 w-full" size="sm" onClick={() => onHire(profile)}>
             <Send className="size-3.5" />
@@ -360,56 +383,60 @@ export default function MangakaAssistants() {
         </div>
       </header>
 
-      <div className="grid items-start gap-5 xl:grid-cols-[260px_minmax(0,1fr)]">
-        <aside className="space-y-4">
-          <Card className="flex flex-col shadow-sm">
+      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,280px)_minmax(0,1fr)]">
+        <aside className="min-w-0 space-y-4">
+          <Card className="flex min-w-0 flex-col overflow-hidden shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-base">
-                <Users className="size-4 text-primary" />
+                <Users className="size-4 shrink-0 text-primary" />
                 Đội Assistant
               </CardTitle>
               <CardDescription>Đã chốt hợp tác</CardDescription>
             </CardHeader>
-            <CardContent className="min-h-[100px] flex-1">
+            <CardContent className="min-h-[100px] min-w-0 flex-1">
               {roster.length === 0 ? (
                 <p className="text-xs leading-relaxed text-muted-foreground">
                   Chưa có Assistant — gửi yêu cầu thuê và chờ họ chấp nhận.
                 </p>
               ) : (
-                <ScrollArea className="max-h-72 pr-2">
-                  <ul className="space-y-2">
-                    {roster.map(r => {
-                      const active = spotlightAssistantId === String(r.assistantId)
-                      return (
-                        <li key={r.assistantId}>
-                          <button
-                            type="button"
-                            onClick={() => focusAssistant(r.assistantId, 'mine')}
-                            className={cn(
-                              'flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors',
-                              'hover:border-primary/30 hover:bg-muted/50',
-                              active && 'border-primary/40 bg-primary/5 ring-1 ring-primary/20',
-                            )}
-                          >
-                            <Avatar size="sm" className="shrink-0">
-                              <AvatarFallback
-                                className="text-[10px] font-semibold text-white"
-                                style={{ background: r.avatarColor ?? '#8b5cf6' }}
-                              >
-                                {r.name.slice(0, 2).toUpperCase()}
-                              </AvatarFallback>
-                            </Avatar>
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-sm font-medium">{r.name}</p>
-                              <p className="truncate text-[11px] text-muted-foreground">{r.handle ?? 'Assistant'}</p>
+                <ul className="max-h-72 space-y-2 overflow-y-auto overflow-x-hidden pr-0.5">
+                  {roster.map(r => {
+                    const active = spotlightAssistantId === String(r.assistantId)
+                    return (
+                      <li key={r.assistantId} className="min-w-0">
+                        <button
+                          type="button"
+                          onClick={() => focusAssistant(r.assistantId, 'mine')}
+                          className={cn(
+                            'flex w-full min-w-0 items-start gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors',
+                            'hover:border-primary/30 hover:bg-muted/50',
+                            active && 'border-primary/40 bg-primary/5 ring-1 ring-primary/20',
+                          )}
+                        >
+                          <Avatar size="sm" className="mt-0.5 shrink-0">
+                            <AvatarFallback
+                              className="text-[10px] font-semibold text-white"
+                              style={{ background: r.avatarColor ?? '#8b5cf6' }}
+                            >
+                              {r.name.slice(0, 2).toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="min-w-0 flex-1 space-y-1.5">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-medium leading-tight">{r.name}</p>
+                              <p className="truncate text-[11px] text-muted-foreground">
+                                {r.handle ?? 'Assistant'}
+                              </p>
                             </div>
-                            <Badge variant="secondary" className="shrink-0 text-[10px]">Đang hợp tác</Badge>
-                          </button>
-                        </li>
-                      )
-                    })}
-                  </ul>
-                </ScrollArea>
+                            <Badge variant="secondary" className="h-5 max-w-full truncate px-1.5 text-[10px]">
+                              Đang hợp tác
+                            </Badge>
+                          </div>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
               )}
             </CardContent>
           </Card>

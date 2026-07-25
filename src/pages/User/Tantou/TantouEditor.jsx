@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
-import { Calendar, FileText, History, Sparkles } from "lucide-react";
+import { ArrowLeft, FileText, Sparkles } from "lucide-react";
 import Header from "@/components/User/Header/Header.jsx";
 import Footer from "@/components/User/Footer/Footer.jsx";
 import { WorkspaceHero } from "@/components/layout/WorkspaceHero.jsx";
@@ -15,7 +15,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import {
   Dialog,
   DialogContent,
@@ -38,6 +37,7 @@ import {
   teReviewsService,
 } from "@/api/teReviews.service.js";
 import { getApiErrorMessage, resolveMediaUrl } from "@/api/http.js";
+import { cn } from "@/lib/utils";
 import { apiSeriesToUi } from "@/utils/apiMappers.js";
 import {
   getAllowedTePublicationStatuses,
@@ -47,7 +47,12 @@ import {
   LABEL_EDITOR_BOARD,
   LABEL_TANTOU_EDITOR,
   PATH_EDITOR_BOARD,
+  PATH_TANTOU_EDITOR,
 } from "@/constants/roleTerminology.js";
+import {
+  getTantouSection,
+  TANTOU_SECTION_IDS,
+} from "@/constants/tantouSections.js";
 import { readEbDebutApproved } from "@/utils/ebDebutStorage.js";
 import {
   phaseToPipeline,
@@ -75,7 +80,6 @@ import TantouPageReview from "./TantouPageReview.jsx";
 
 const NAV_LINKS = [
   { to: "/", label: "Trang chủ" },
-  { to: "/mangaka", label: "Mangaka" },
   { to: PATH_EDITOR_BOARD, label: LABEL_EDITOR_BOARD },
 ];
 
@@ -126,10 +130,13 @@ function SubmissionCard({ sub, onReview, onQuickApprove, showQuickApprove }) {
 
   return (
     <Card
-      className={`group transition-all hover:shadow-md${!canReview ? " opacity-75" : ""}`}
+      className={cn(
+        "gap-0 py-0 transition-all hover:shadow-md",
+        !canReview && "opacity-75",
+      )}
     >
-      <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
-        <div className="flex size-16 shrink-0 overflow-hidden rounded-lg bg-muted sm:size-20">
+      <CardContent className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:p-3.5">
+        <div className="flex size-14 shrink-0 overflow-hidden rounded-lg bg-muted sm:size-16">
           {sub.mangakaImageUrl ? (
             <img
               src={sub.mangakaImageUrl}
@@ -187,6 +194,8 @@ function SubmissionCard({ sub, onReview, onQuickApprove, showQuickApprove }) {
 
 export default function TantouEditor() {
   const navigate = useNavigate();
+  const { section: sectionId } = useParams();
+  const sectionMeta = getTantouSection(sectionId);
   const user = getSession();
   const currentTeId = user?.id ?? null;
   const [submissions, setSubmissions] = useState([]);
@@ -195,12 +204,17 @@ export default function TantouEditor() {
   const [saving, setSaving] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [reviewOpen, setReviewOpen] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
   const [tick, setTick] = useState(0);
   const [publicationSeries, setPublicationSeries] = useState([]);
   const [publicationLoading, setPublicationLoading] = useState(false);
   const [publicationSavingId, setPublicationSavingId] = useState(null);
   const [publicationConfirm, setPublicationConfirm] = useState(null);
+
+  const needsQueue =
+    sectionId === "series-pending"
+    || sectionId === "series-approved"
+    || sectionId === "schedule";
+  const needsPublication = sectionId === "publication-status";
 
   const refresh = useCallback(() => setTick((n) => n + 1), []);
 
@@ -295,12 +309,14 @@ export default function TantouEditor() {
   }, [currentTeId]);
 
   useEffect(() => {
+    if (!needsQueue) return;
     void loadQueue();
-  }, [loadQueue, tick]);
+  }, [loadQueue, tick, needsQueue]);
 
   useEffect(() => {
+    if (!needsPublication) return;
     void loadPublicationSeries();
-  }, [loadPublicationSeries, tick]);
+  }, [loadPublicationSeries, tick, needsPublication]);
 
   async function handlePublicationStatusChange(seriesId, nextStatus) {
     const id = String(seriesId ?? "").trim();
@@ -342,7 +358,7 @@ export default function TantouEditor() {
 
   const schedules = useMemo(() => listPublishSchedules(), [tick]);
   const ebApproved = useMemo(() => readEbDebutApproved(), [tick]);
-  const reviewHistory = useMemo(() => listTantouReviewHistory(), [tick, historyOpen]);
+  const reviewHistory = useMemo(() => listTantouReviewHistory(), [tick]);
 
   const selected = useMemo(
     () => submissions.find((s) => s.id === selectedId) ?? null,
@@ -767,6 +783,10 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
     refresh();
   }
 
+  if (!sectionMeta || !TANTOU_SECTION_IDS.includes(sectionId)) {
+    return <Navigate to={PATH_TANTOU_EDITOR} replace />;
+  }
+
   if (reviewOpen && selected) {
     return (
       <div className="flex min-h-screen flex-col bg-background">
@@ -798,297 +818,349 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
       <WorkspaceHero
         className="from-sky-950 to-zinc-950"
         label={LABEL_TANTOU_EDITOR}
-        title={`Xin chào${user?.name ? `, ${user.name}` : ""}`}
-        description={`Nhận bản thảo từ Mangaka · viết nhận xét · chuyển ${LABEL_EDITOR_BOARD} hoặc duyệt phát hành.`}
+        title={sectionMeta.title}
+        description={sectionMeta.description}
       />
 
-      <main className="page-container flex-1 space-y-8 py-8">
-        <section className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
-          <Card className="flex max-h-[min(640px,calc(100vh-280px))] flex-col overflow-hidden">
-            <CardHeader className="shrink-0">
-              <CardTitle className="flex items-center gap-2">
-                <Sparkles className="size-5 text-amber-500" />
-                {pendingSections?.seriesLevel?.label ?? "Duyệt series (giai đoạn 1)"}
-                <Badge variant="secondary" className="font-normal">
-                  {debutQueue.length || pendingSections?.seriesLevel?.count || 0}
-                </Badge>
-              </CardTitle>
-              <CardDescription>
-                {pendingSections?.seriesLevel?.description
-                  ?? `Series chưa EB-approved — duyệt series + chapter, gửi ${LABEL_EDITOR_BOARD} hoặc yêu cầu Mangaka sửa.`}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
-              {debutQueue.length === 0 ? (
+      <main className="page-container flex-1 space-y-6 py-8">
+        <Button type="button" variant="ghost" size="sm" asChild>
+          <Link to={PATH_TANTOU_EDITOR}>
+            <ArrowLeft className="size-4" />
+            Về khu vực làm việc
+          </Link>
+        </Button>
+
+        {sectionId === "series-pending" ? (
+          <section className="space-y-4">
+            <Card className="flex flex-col gap-0 overflow-hidden py-0 shadow-sm">
+              <CardHeader className="shrink-0 px-6 py-4">
+                <CardTitle className="flex items-center gap-2">
+                  <Sparkles className="size-5 text-amber-500" />
+                  {pendingSections?.seriesLevel?.label ?? "Series chưa được duyệt"}
+                  <Badge variant="secondary" className="font-normal">
+                    {debutQueue.length || pendingSections?.seriesLevel?.count || 0}
+                  </Badge>
+                </CardTitle>
+              </CardHeader>
+              {/* Cao tối đa ~4 card; từ chapter thứ 5 trở đi cuộn (ẩn scrollbar) */}
+              <CardContent className="scrollbar-hide max-h-[min(460px,calc(100vh-280px))] space-y-3 overflow-y-auto px-6 pb-4">
+                {debutQueue.length === 0 ? (
+                  <Card>
+                    <CardContent className="py-12 text-center text-muted-foreground">
+                      {loading ? "Đang tải hàng chờ..." : "Không có series chờ duyệt."}
+                    </CardContent>
+                  </Card>
+                ) : (
+                  debutQueue.map((sub) => (
+                    <SubmissionCard
+                      key={sub.id}
+                      sub={sub}
+                      onReview={openReview}
+                    />
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          </section>
+        ) : null}
+
+        {sectionId === "series-approved" ? (
+          <section className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="size-5 text-sky-500" />
+                  {pendingSections?.chapterLevel?.label ?? "Series đã được duyệt"}
+                  <Badge variant="secondary" className="font-normal">
+                    {recurringQueue.length || pendingSections?.chapterLevel?.count || 0}
+                  </Badge>
+                </CardTitle>
+                <CardDescription>
+                  {pendingSections?.chapterLevel?.description
+                    ?? "Series đã EB-approved — TE duyệt chapter để publish ngay."}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {recurringQueue.length === 0 ? (
+                  <Card>
+                    <CardContent className="py-12 text-center text-muted-foreground">
+                      {loading ? "Đang tải hàng chờ..." : "Không có chapter chờ duyệt."}
+                    </CardContent>
+                  </Card>
+                ) : (
+                  recurringQueue.map((sub) => (
+                    <SubmissionCard
+                      key={sub.id}
+                      sub={sub}
+                      onReview={openReview}
+                      onQuickApprove={(id) => void handleQuickApprove(id)}
+                      showQuickApprove
+                    />
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          </section>
+        ) : null}
+
+        {sectionId === "publication-status" ? (
+          <>
+            <Dialog
+              open={Boolean(publicationConfirm)}
+              onOpenChange={(open) => {
+                if (!open && !publicationSavingId) setPublicationConfirm(null);
+              }}
+            >
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Xác nhận đổi trạng thái</DialogTitle>
+                  <DialogDescription>
+                    Bạn có chắc muốn đổi trạng thái phát hành của series{" "}
+                    <span className="font-medium text-foreground">
+                      {publicationConfirm?.title}
+                    </span>
+                    ?
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
+                  <p>
+                    <span className="text-muted-foreground">Hiện tại: </span>
+                    {getPublicationStatusLabel(publicationConfirm?.fromStatus)}
+                  </p>
+                  <p>
+                    <span className="text-muted-foreground">Đổi thành: </span>
+                    <span className="font-medium">
+                      {getPublicationStatusLabel(publicationConfirm?.toStatus)}
+                    </span>
+                  </p>
+                </div>
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={Boolean(publicationSavingId)}
+                    onClick={() => setPublicationConfirm(null)}
+                  >
+                    Huỷ
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={Boolean(publicationSavingId)}
+                    onClick={() => {
+                      if (!publicationConfirm) return;
+                      void handlePublicationStatusChange(
+                        publicationConfirm.seriesId,
+                        publicationConfirm.toStatus,
+                      );
+                    }}
+                  >
+                    {publicationSavingId ? "Đang cập nhật..." : "Xác nhận đổi"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            <section className="space-y-4">
+              <div>
+                <h2 className="text-xl font-semibold">Trạng thái phát hành</h2>
+                <p className="text-sm text-muted-foreground">
+                  TE cập nhật sau khi series đã published: ongoing ↔ hiatus / completed / dropped.
+                  upcoming do job tự chuyển, completed chỉ đọc.
+                </p>
+              </div>
+              {publicationLoading && publicationSeries.length === 0 ? (
                 <Card>
                   <CardContent className="py-12 text-center text-muted-foreground">
-                    {loading ? "Đang tải hàng chờ..." : "Không có series chờ duyệt."}
+                    Đang tải trạng thái phát hành...
+                  </CardContent>
+                </Card>
+              ) : publicationSeries.length === 0 ? (
+                <Card>
+                  <CardContent className="py-12 text-center text-muted-foreground">
+                    Chưa có series có publication_status.
                   </CardContent>
                 </Card>
               ) : (
-                debutQueue.map((sub) => (
-                  <SubmissionCard
-                    key={sub.id}
-                    sub={sub}
-                    onReview={openReview}
-                  />
-                ))
+                publicationSeries.map((row) => {
+                  const allowed = getAllowedTePublicationStatuses(row.publicationStatus);
+                  const busy = publicationSavingId === row.id;
+                  return (
+                    <Card key={row.id}>
+                      <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
+                        <div className="flex size-14 shrink-0 overflow-hidden rounded-lg bg-muted">
+                          {row.coverImage ? (
+                            <img
+                              src={row.coverImage}
+                              alt=""
+                              className="size-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex size-full items-center justify-center text-xl">
+                              📚
+                            </div>
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="font-semibold">{row.title}</h3>
+                            <Badge variant="secondary">
+                              {getPublicationStatusLabel(row.publicationStatus)}
+                            </Badge>
+                          </div>
+                          {allowed.length === 0 ? (
+                            <p className="text-xs text-muted-foreground">
+                              {row.publicationStatus === "upcoming"
+                                ? "Chuẩn bị phát hành — chờ job tự chuyển sang đang phát hành."
+                                : row.publicationStatus === "completed"
+                                  ? "Đã hoàn thành — không đổi được."
+                                  : "Không có chuyển trạng thái khả dụng."}
+                            </p>
+                          ) : null}
+                        </div>
+                        {allowed.length > 0 ? (
+                          <Select
+                            key={`${row.id}-${row.publicationStatus}-${
+                              publicationConfirm?.seriesId === row.id ? "confirming" : "idle"
+                            }`}
+                            disabled={busy}
+                            onValueChange={(v) => {
+                              if (v) requestPublicationStatusChange(row, v);
+                            }}
+                          >
+                            <SelectTrigger className="w-[200px]">
+                              <SelectValue
+                                placeholder={busy ? "Đang cập nhật..." : "Đổi trạng thái"}
+                              />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {allowed.map((status) => (
+                                <SelectItem key={status} value={status}>
+                                  {getPublicationStatusLabel(status)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : null}
+                      </CardContent>
+                    </Card>
+                  );
+                })
               )}
-            </CardContent>
-          </Card>
+            </section>
+          </>
+        ) : null}
 
-          <SidebarFlow onOpenHistory={() => setHistoryOpen(true)} />
-        </section>
-
-        <TantouReviewHistoryDialog
-          open={historyOpen}
-          onOpenChange={setHistoryOpen}
-          items={reviewHistory}
-        />
-
-        <Dialog
-          open={Boolean(publicationConfirm)}
-          onOpenChange={(open) => {
-            if (!open && !publicationSavingId) setPublicationConfirm(null);
-          }}
-        >
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Xác nhận đổi trạng thái</DialogTitle>
-              <DialogDescription>
-                Bạn có chắc muốn đổi trạng thái phát hành của series{" "}
-                <span className="font-medium text-foreground">
-                  {publicationConfirm?.title}
-                </span>
-                ?
-              </DialogDescription>
-            </DialogHeader>
-            <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
-              <p>
-                <span className="text-muted-foreground">Hiện tại: </span>
-                {getPublicationStatusLabel(publicationConfirm?.fromStatus)}
-              </p>
-              <p>
-                <span className="text-muted-foreground">Đổi thành: </span>
-                <span className="font-medium">
-                  {getPublicationStatusLabel(publicationConfirm?.toStatus)}
-                </span>
+        {sectionId === "history" ? (
+          <section className="space-y-4">
+            <div>
+              <h2 className="text-xl font-semibold">Lịch sử duyệt</h2>
+              <p className="text-sm text-muted-foreground">
+                Các lần bạn lưu hoặc gửi nhận xét gần đây.
               </p>
             </div>
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={Boolean(publicationSavingId)}
-                onClick={() => setPublicationConfirm(null)}
-              >
-                Huỷ
-              </Button>
-              <Button
-                type="button"
-                disabled={Boolean(publicationSavingId)}
-                onClick={() => {
-                  if (!publicationConfirm) return;
-                  void handlePublicationStatusChange(
-                    publicationConfirm.seriesId,
-                    publicationConfirm.toStatus,
-                  );
-                }}
-              >
-                {publicationSavingId ? "Đang cập nhật..." : "Xác nhận đổi"}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        <section className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FileText className="size-5 text-sky-500" />
-                {pendingSections?.chapterLevel?.label ?? "Duyệt chapter (giai đoạn 2)"}
-                <Badge variant="secondary" className="font-normal">
-                  {recurringQueue.length || pendingSections?.chapterLevel?.count || 0}
-                </Badge>
-              </CardTitle>
-              <CardDescription>
-                {pendingSections?.chapterLevel?.description
-                  ?? "Series đã EB-approved — TE duyệt chapter để publish ngay."}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {recurringQueue.length === 0 ? (
-                <Card>
-                  <CardContent className="py-12 text-center text-muted-foreground">
-                    Không có chapter chờ duyệt.
-                  </CardContent>
-                </Card>
-              ) : (
-                recurringQueue.map((sub) => (
-                  <SubmissionCard
-                    key={sub.id}
-                    sub={sub}
-                    onReview={openReview}
-                    onQuickApprove={(id) => void handleQuickApprove(id)}
-                    showQuickApprove
-                  />
-                ))
-              )}
-            </CardContent>
-          </Card>
-        </section>
-
-        <section className="space-y-4">
-          <div>
-            <h2 className="text-xl font-semibold">Trạng thái phát hành</h2>
-            <p className="text-sm text-muted-foreground">
-              TE cập nhật sau khi series đã published: ongoing ↔ hiatus / completed / dropped.
-              upcoming do job tự chuyển, completed chỉ đọc.
-            </p>
-          </div>
-          {publicationLoading && publicationSeries.length === 0 ? (
-            <Card>
-              <CardContent className="py-12 text-center text-muted-foreground">
-                Đang tải trạng thái phát hành...
-              </CardContent>
-            </Card>
-          ) : publicationSeries.length === 0 ? (
-            <Card>
-              <CardContent className="py-12 text-center text-muted-foreground">
-                Chưa có series có publication_status.
-              </CardContent>
-            </Card>
-          ) : (
-            publicationSeries.map((row) => {
-              const allowed = getAllowedTePublicationStatuses(row.publicationStatus);
-              const busy = publicationSavingId === row.id;
-              return (
-                <Card key={row.id}>
-                  <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
-                    <div className="flex size-14 shrink-0 overflow-hidden rounded-lg bg-muted">
-                      {row.coverImage ? (
-                        <img
-                          src={row.coverImage}
-                          alt=""
-                          className="size-full object-cover"
-                        />
-                      ) : (
-                        <div className="flex size-full items-center justify-center text-xl">
-                          📚
-                        </div>
-                      )}
+            {reviewHistory.length === 0 ? (
+              <Card>
+                <CardContent className="py-12 text-center text-muted-foreground">
+                  Chưa có lịch sử duyệt.
+                </CardContent>
+              </Card>
+            ) : (
+              reviewHistory.map((item) => (
+                <Card key={item.id} className="border-border/70">
+                  <CardContent className="space-y-2 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-medium">{item.seriesName}</p>
+                      <Badge variant="secondary">
+                        {reviewStatusLabel(item.status)}
+                      </Badge>
                     </div>
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="font-semibold">{row.title}</h3>
-                        <Badge variant="secondary">
-                          {getPublicationStatusLabel(row.publicationStatus)}
-                        </Badge>
-                      </div>
-                      {allowed.length === 0 ? (
-                        <p className="text-xs text-muted-foreground">
-                          {row.publicationStatus === "upcoming"
-                            ? "Chuẩn bị phát hành — chờ job tự chuyển sang đang phát hành."
-                            : row.publicationStatus === "completed"
-                              ? "Đã hoàn thành — không đổi được."
-                              : "Không có chuyển trạng thái khả dụng."}
-                        </p>
-                      ) : null}
-                    </div>
-                    {allowed.length > 0 ? (
-                      <Select
-                        key={`${row.id}-${row.publicationStatus}-${
-                          publicationConfirm?.seriesId === row.id ? "confirming" : "idle"
-                        }`}
-                        disabled={busy}
-                        onValueChange={(v) => {
-                          if (v) requestPublicationStatusChange(row, v);
-                        }}
-                      >
-                        <SelectTrigger className="w-[200px]">
-                          <SelectValue
-                            placeholder={busy ? "Đang cập nhật..." : "Đổi trạng thái"}
-                          />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {allowed.map((status) => (
-                            <SelectItem key={status} value={status}>
-                              {getPublicationStatusLabel(status)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                    <p className="text-sm text-muted-foreground">
+                      Ch. {item.chapterNumber}
+                      {item.authorName ? ` · ${item.authorName}` : ""}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {formatReviewedAt(item.reviewedAt)}
+                      {item.averageScore != null
+                        ? ` · Điểm TB ${Number(item.averageScore).toFixed(1)}`
+                        : ""}
+                    </p>
+                    {item.feedback ? (
+                      <p className="line-clamp-3 text-sm">{item.feedback}</p>
                     ) : null}
                   </CardContent>
                 </Card>
-              );
-            })
-          )}
-        </section>
+              ))
+            )}
+          </section>
+        ) : null}
 
-        <section className="space-y-4">
-          <div>
-            <h2 className="text-xl font-semibold">Lịch phát hành</h2>
-            <p className="text-sm text-muted-foreground">
-              Series đã được {LABEL_EDITOR_BOARD} chấp nhận.
-            </p>
-          </div>
-          {scheduleSeries.length === 0 ? (
-            <Card>
-              <CardContent className="py-12 text-center text-muted-foreground">
-                Chưa có series qua {LABEL_EDITOR_BOARD}.
-              </CardContent>
-            </Card>
-          ) : (
-            scheduleSeries.map((row) => (
-              <Card key={row.title}>
-                <CardHeader>
-                  <CardTitle>{row.title}</CardTitle>
-                  <CardDescription>
-                    Chất lượng {row.qualityScore}% · Độ nổi{" "}
-                    {row.popularityScore}%{" · Gợi ý: "}
-                    {row.suggested === "weekly"
-                      ? "Theo tuần"
-                      : row.suggested === "biweekly"
-                        ? "2 tuần/lần"
-                        : "Theo tháng"}
-                    {row.label ? ` · Đang: ${row.label}` : ""}
-                  </CardDescription>
-                </CardHeader>
-                <CardFooter className="gap-2">
-                  <Button
-                    variant={row.cadence === "weekly" ? "default" : "outline"}
-                    size="sm"
-                    onClick={() =>
-                      handleSetSchedule(
-                        row.title,
-                        row.qualityScore,
-                        row.popularityScore,
-                        "weekly",
-                      )
-                    }
-                  >
-                    Theo tuần
-                  </Button>
-                  <Button
-                    variant={row.cadence === "monthly" ? "default" : "outline"}
-                    size="sm"
-                    onClick={() =>
-                      handleSetSchedule(
-                        row.title,
-                        row.qualityScore,
-                        row.popularityScore,
-                        "monthly",
-                      )
-                    }
-                  >
-                    Theo tháng
-                  </Button>
-                </CardFooter>
+        {sectionId === "schedule" ? (
+          <section className="space-y-4">
+            <div>
+              <h2 className="text-xl font-semibold">Lịch phát hành</h2>
+              <p className="text-sm text-muted-foreground">
+                Series đã được {LABEL_EDITOR_BOARD} chấp nhận.
+              </p>
+            </div>
+            {scheduleSeries.length === 0 ? (
+              <Card>
+                <CardContent className="py-12 text-center text-muted-foreground">
+                  {loading
+                    ? "Đang tải..."
+                    : `Chưa có series qua ${LABEL_EDITOR_BOARD}.`}
+                </CardContent>
               </Card>
-            ))
-          )}
-        </section>
+            ) : (
+              scheduleSeries.map((row) => (
+                <Card key={row.title}>
+                  <CardHeader>
+                    <CardTitle>{row.title}</CardTitle>
+                    <CardDescription>
+                      Chất lượng {row.qualityScore}% · Độ nổi{" "}
+                      {row.popularityScore}%{" · Gợi ý: "}
+                      {row.suggested === "weekly"
+                        ? "Theo tuần"
+                        : row.suggested === "biweekly"
+                          ? "2 tuần/lần"
+                          : "Theo tháng"}
+                      {row.label ? ` · Đang: ${row.label}` : ""}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardFooter className="gap-2">
+                    <Button
+                      variant={row.cadence === "weekly" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() =>
+                        handleSetSchedule(
+                          row.title,
+                          row.qualityScore,
+                          row.popularityScore,
+                          "weekly",
+                        )
+                      }
+                    >
+                      Theo tuần
+                    </Button>
+                    <Button
+                      variant={row.cadence === "monthly" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() =>
+                        handleSetSchedule(
+                          row.title,
+                          row.qualityScore,
+                          row.popularityScore,
+                          "monthly",
+                        )
+                      }
+                    >
+                      Theo tháng
+                    </Button>
+                  </CardFooter>
+                </Card>
+              ))
+            )}
+          </section>
+        ) : null}
       </main>
 
       <Footer />
@@ -1096,83 +1168,3 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
   );
 }
 
-function SidebarFlow({ onOpenHistory }) {
-  return (
-    <Card className="h-fit">
-      <CardHeader>
-        <CardTitle className="text-base">Luồng công việc</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4 text-sm text-muted-foreground">
-        <div>
-          <p className="font-medium text-foreground">Lần đầu</p>
-          <p>Mangaka → Assistant → Mangaka → Tantou → {LABEL_EDITOR_BOARD}</p>
-        </div>
-        <Separator />
-        <div>
-          <p className="font-medium text-foreground">Lần 2+</p>
-          <p>Mangaka → chỉ Tantou duyệt → phát hành</p>
-        </div>
-        <Button variant="link" className="h-auto p-0" asChild>
-          <Link to={PATH_EDITOR_BOARD}>Mở {LABEL_EDITOR_BOARD} →</Link>
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          className="w-full"
-          onClick={onOpenHistory}
-        >
-          <History className="size-4" />
-          Lịch sử duyệt
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}
-
-function TantouReviewHistoryDialog({ open, onOpenChange, items }) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] overflow-hidden sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Lịch sử duyệt</DialogTitle>
-          <DialogDescription>
-            Các lần bạn lưu hoặc gửi nhận xét gần đây.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-1">
-          {items.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">
-              Chưa có lịch sử duyệt.
-            </p>
-          ) : (
-            items.map((item) => (
-              <Card key={item.id} className="border-border/70">
-                <CardContent className="space-y-2 p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="font-medium">{item.seriesName}</p>
-                    <Badge variant="secondary">
-                      {reviewStatusLabel(item.status)}
-                    </Badge>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    Ch. {item.chapterNumber}
-                    {item.authorName ? ` · ${item.authorName}` : ""}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatReviewedAt(item.reviewedAt)}
-                    {item.averageScore != null
-                      ? ` · Điểm TB ${Number(item.averageScore).toFixed(1)}`
-                      : ""}
-                  </p>
-                  {item.feedback ? (
-                    <p className="line-clamp-2 text-sm">{item.feedback}</p>
-                  ) : null}
-                </CardContent>
-              </Card>
-            ))
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}

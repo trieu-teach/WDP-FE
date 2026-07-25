@@ -39,13 +39,7 @@ export function ChapterListTable({
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <BookOpen className="size-4 text-primary" />
-          <div>
-            <h3 className="font-semibold text-foreground">Danh sách chương</h3>
-            <p className="text-xs text-muted-foreground">
-              Bấm <strong className="font-medium">Mở</strong> chương — lật trang
-              bằng mũi tên phía dưới ảnh
-            </p>
-          </div>
+          <h3 className="font-semibold text-foreground">Danh sách chương</h3>
         </div>
         <Badge variant="outline">{rows.length}</Badge>
       </div>

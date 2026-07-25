@@ -1,4 +1,5 @@
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useEffect } from 'react'
 import { ArrowLeft, ListChecks } from 'lucide-react'
 import Header from '@/components/User/Header/Header.jsx'
 import Footer from '@/components/User/Footer/Footer.jsx'
@@ -6,6 +7,7 @@ import { MangakaTeRevisionView } from '@/components/Mangaka/MangakaTeRevisionVie
 import { Button } from '@/components/ui/button'
 import { getSession, logout } from '@/lib/auth.js'
 import { LABEL_TANTOU_EDITOR } from '@/constants/roleTerminology.js'
+import { markTeRevisionSeen } from '@/utils/teRevisionSeenStorage.js'
 
 const NAV_LINKS = [
   { to: '/', label: 'Trang chủ' },
@@ -16,6 +18,10 @@ export default function MangakaTeRevision() {
   const navigate = useNavigate()
   const { chapterId } = useParams()
   const user = getSession()
+
+  useEffect(() => {
+    if (chapterId) markTeRevisionSeen(chapterId)
+  }, [chapterId])
 
   function handleLogout() {
     logout()

@@ -33,6 +33,8 @@ export function useNotifications({ pollInterval = POLL_INTERVAL_MS, enabled = tr
   const [loading, setLoading] = useState(false)
   const timerRef = useRef(null)
   const seenIdsRef = useRef(new Set())
+  /** Bỏ qua onNew ở lần hydrate đầu — tránh toast lại toàn bộ list cũ khi vào trang. */
+  const hydratedRef = useRef(false)
   const onNewRef = useRef(onNew)
   onNewRef.current = onNew
 
@@ -42,13 +44,16 @@ export function useNotifications({ pollInterval = POLL_INTERVAL_MS, enabled = tr
     try {
       const res = await notificationsService.list({ limit: 20 })
       const list = (Array.isArray(res.items) ? res.items : []).map(normalize).filter(n => n.id)
-      // Phát hiện notification mới (chưa thấy id lần nào)
       const seen = seenIdsRef.current
       const fresh = list.filter(n => !seen.has(n.id))
       for (const n of list) seen.add(n.id)
       setItems(list)
       setUnreadCount(Number(res.unreadCount ?? list.filter(n => !n.isRead).length))
-      if (fresh.length) {
+
+      const isHydrated = hydratedRef.current
+      if (!isHydrated) {
+        hydratedRef.current = true
+      } else if (fresh.length) {
         const handler = onNewRef.current
         if (typeof handler === 'function') {
           for (const n of fresh) handler(n)

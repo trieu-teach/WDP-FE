@@ -1,15 +1,24 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
-import { ArrowLeft, BookOpen, Calendar, CheckCircle2, Gavel, Plus, Star } from "lucide-react";
+import {
+  ArrowLeft,
+  BookOpen,
+  Calendar,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Gavel,
+  Maximize2,
+  Plus,
+  Star,
+} from "lucide-react";
 import Header from "@/components/User/Header/Header.jsx";
 import Footer from "@/components/User/Footer/Footer.jsx";
-import { WorkspaceHero } from "@/components/layout/WorkspaceHero.jsx";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -17,7 +26,20 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { getSession, logout } from "@/lib/auth.js";
+import { cn } from "@/lib/utils";
 import { ebEvaluationsService } from "@/api/ebEvaluations.service.js";
 import { ebScoresService } from "@/api/ebScores.service.js";
 import { getApiErrorMessage } from "@/api/http.js";
@@ -27,6 +49,8 @@ import { LABEL_EDITOR_BOARD } from "@/constants/roleTerminology.js";
 import {
   EB_SCORE_CRITERIA,
   EB_SCORE_MAX,
+  EB_COUNCIL_MIN_FOR_PUBLISH,
+  areAllCouncilMembersFullyScored,
   buildEmptyEbComments,
   buildEmptyEbScores,
   buildMemberScoresPayload,
@@ -54,12 +78,19 @@ import "./Eb.css";
 
 const NAV_LINKS = [
   { to: "/", label: "Trang chủ" },
-  { to: "/mangaka", label: "Mangaka" },
-  { to: "/tantou", label: "Tantou Editor" },
 ];
+
+const HERO_IMAGES = [
+  "/images/eb1.png",
+  "/images/eb2.png",
+  "/images/eb3.png",
+  "/images/eb4.png",
+];
+const HERO_SLIDE_MS = 5000;
 
 const SCORE_FIELDS = EB_SCORE_CRITERIA;
 const SCORE_MAX = EB_SCORE_MAX;
+const SCORE_STEP = 0.5;
 
 function clampScore(value) {
   return clampEbScore(value);
@@ -79,6 +110,13 @@ function buildInitialScores() {
 
 function buildEmptyScoreErrors() {
   return Object.fromEntries(SCORE_FIELDS.map((field) => [field.key, ""]));
+}
+
+function formatScoreOrEmpty(value, { scored = true } = {}) {
+  if (!scored || value == null || Number.isNaN(Number(value))) {
+    return { text: "—", muted: true };
+  }
+  return { text: Number(value).toFixed(1), muted: false };
 }
 
 function isSeriesPendingShape(item) {
@@ -117,23 +155,28 @@ function seriesItemToQueueChapter(seriesItem) {
   };
 }
 
-function ScoreStars({ value }) {
+function ScoreStars({ value, size = "size-4" }) {
   const safe = clampScore(value);
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-0.5" aria-hidden>
       {Array.from({ length: SCORE_MAX }, (_, idx) => {
         const score = idx + 1;
         const isFull = safe >= score;
         const isHalf = !isFull && safe >= score - 0.5;
         return (
-          <span key={score} className="relative inline-flex size-4">
-            <Star className="size-4 text-muted-foreground/35" />
+          <span key={score} className={cn("relative inline-flex", size)}>
+            <Star className={cn(size, "text-muted-foreground/35")} />
             {isFull ? (
-              <Star className="absolute inset-0 size-4 fill-amber-400 text-amber-400" />
+              <Star
+                className={cn(
+                  "absolute inset-0 fill-amber-400 text-amber-400",
+                  size,
+                )}
+              />
             ) : null}
             {isHalf ? (
               <span className="absolute inset-0 w-1/2 overflow-hidden">
-                <Star className="size-4 fill-amber-400 text-amber-400" />
+                <Star className={cn("fill-amber-400 text-amber-400", size)} />
               </span>
             ) : null}
           </span>
@@ -143,7 +186,133 @@ function ScoreStars({ value }) {
   );
 }
 
-function getClassification(average) {
+function InteractiveScoreStars({ value, onChange, disabled = false }) {
+  const safe = clampScore(value);
+  return (
+    <div
+      className="flex items-center gap-0.5"
+      role="radiogroup"
+      aria-label="Chấm sao"
+    >
+      {Array.from({ length: SCORE_MAX }, (_, idx) => {
+        const full = idx + 1;
+        const half = idx + 0.5;
+        const isFull = safe >= full;
+        const isHalf = !isFull && safe >= half;
+        return (
+          <span key={full} className="relative inline-flex size-7 shrink-0">
+            <Star className="size-7 text-muted-foreground/30" />
+            {isFull ? (
+              <Star className="pointer-events-none absolute inset-0 size-7 fill-amber-400 text-amber-400" />
+            ) : null}
+            {isHalf ? (
+              <span className="pointer-events-none absolute inset-0 w-1/2 overflow-hidden">
+                <Star className="size-7 fill-amber-400 text-amber-400" />
+              </span>
+            ) : null}
+            <button
+              type="button"
+              disabled={disabled}
+              aria-label={`${half} điểm`}
+              className="absolute inset-y-0 left-0 z-10 w-1/2 rounded-l-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed"
+              onClick={() => onChange(half.toFixed(1))}
+            />
+            <button
+              type="button"
+              disabled={disabled}
+              aria-label={`${full} điểm`}
+              className="absolute inset-y-0 right-0 z-10 w-1/2 rounded-r-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed"
+              onClick={() => onChange(full.toFixed(1))}
+            />
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function CriterionScoreRow({
+  field,
+  value,
+  error,
+  note,
+  onScoreChange,
+  onScoreBlur,
+  onNoteChange,
+  disabled = false,
+}) {
+  const numeric = clampScore(value);
+  const display = String(value ?? "").trim() === "" ? "" : numeric.toFixed(1);
+
+  return (
+    <div className="space-y-2 rounded-xl border bg-card px-3 py-3 sm:px-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+        <div className="min-w-0 lg:w-44 lg:shrink-0">
+          <Label htmlFor={field.key} className="text-sm font-medium">
+            {field.label}
+          </Label>
+          <p className="text-xs text-muted-foreground">{field.hint}</p>
+        </div>
+
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
+          <InteractiveScoreStars
+            value={value}
+            disabled={disabled}
+            onChange={(next) => onScoreChange(next)}
+          />
+          <input
+            type="range"
+            min={0}
+            max={SCORE_MAX}
+            step={SCORE_STEP}
+            value={numeric}
+            disabled={disabled}
+            aria-label={`Slider ${field.label}`}
+            className="eb-score-slider h-2 min-w-[7rem] flex-1 cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-50"
+            onChange={(event) =>
+              onScoreChange(clampScore(event.target.value).toFixed(1))
+            }
+          />
+          <Input
+            id={field.key}
+            type="number"
+            min="0"
+            max={String(SCORE_MAX)}
+            step={String(SCORE_STEP)}
+            value={display}
+            disabled={disabled}
+            className="h-9 w-[4.5rem] shrink-0 tabular-nums"
+            onChange={(event) => onScoreChange(event.target.value)}
+            onBlur={onScoreBlur}
+            aria-invalid={Boolean(error)}
+          />
+          <span className="shrink-0 text-xs text-muted-foreground">
+            / {SCORE_MAX}
+          </span>
+        </div>
+      </div>
+      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      <Textarea
+        id={`${field.key}-note`}
+        value={note}
+        disabled={disabled}
+        onChange={(event) => onNoteChange(event.target.value)}
+        placeholder="Ghi chú tiêu chí (tuỳ chọn)..."
+        className="min-h-16 text-sm"
+      />
+    </div>
+  );
+}
+
+function getClassification(average, { scored = true } = {}) {
+  if (!scored || average == null || Number.isNaN(Number(average))) {
+    return {
+      label: "CHƯA CHẤM",
+      note: "Chưa có điểm Hội đồng để phân loại.",
+      className: "border-border bg-muted/40 text-muted-foreground",
+    };
+  }
+
   if (average < 2.5) {
     return {
       label: "KHÔNG ĐẠT",
@@ -183,6 +352,11 @@ function CouncilScoresTable({
   scoredCount,
   activeMemberId,
 }) {
+  const hasScored = scoredCount > 0;
+  const councilAvgDisplay = formatScoreOrEmpty(councilAverage, {
+    scored: hasScored,
+  });
+
   return (
     <div className="eb-council-table-wrap overflow-x-auto rounded-xl border bg-card">
       <table className="eb-council-table w-full min-w-[640px] text-sm">
@@ -204,49 +378,54 @@ function CouncilScoresTable({
                 colSpan={scoreFields.length + 2}
                 className="px-3 py-10 text-center text-sm text-muted-foreground"
               >
-                Chưa có thành viên Hội đồng — thêm tên ở trên để bắt đầu chấm điểm.
+                Chưa có thành viên Hội đồng.
               </td>
             </tr>
           ) : (
             memberRows.map((row) => {
-            const isActive = row.id === activeMemberId;
-            return (
-              <tr
-                key={row.id}
-                className={isActive ? "bg-primary/5" : undefined}
-              >
-                <td className="px-3 py-2.5">
-                  <p className="font-medium text-foreground">{row.name}</p>
-                  <p className="text-xs text-muted-foreground">{row.title}</p>
-                  {isActive ? (
-                    <Badge variant="outline" className="mt-1 text-[10px]">
-                      Đang nhập
-                    </Badge>
-                  ) : null}
-                </td>
-                {scoreFields.map((field) => (
-                  <td
-                    key={field.key}
-                    className="px-2 py-2.5 text-center tabular-nums"
-                  >
-                    {row.scored ? (
-                      <span className="inline-flex flex-col items-center gap-0.5">
-                        <span className="font-medium">
-                          {clampScore(row.scores?.[field.key]).toFixed(1)}
-                        </span>
-                        <ScoreStars value={row.scores?.[field.key]} />
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
+              const isActive = row.id === activeMemberId;
+              return (
+                <tr
+                  key={row.id}
+                  className={isActive ? "bg-primary/5" : undefined}
+                >
+                  <td className="px-3 py-2.5">
+                    <p className="font-medium text-foreground">{row.name}</p>
+                    <p className="text-xs text-muted-foreground">{row.title}</p>
+                    {isActive ? (
+                      <Badge variant="outline" className="mt-1 text-[10px]">
+                        Đang nhập
+                      </Badge>
+                    ) : null}
                   </td>
-                ))}
-                <td className="px-3 py-2.5 text-center font-semibold tabular-nums">
-                  {row.scored ? row.average.toFixed(1) : "—"}
-                </td>
-              </tr>
-            );
-          })
+                  {scoreFields.map((field) => (
+                    <td
+                      key={field.key}
+                      className="px-2 py-2.5 text-center tabular-nums"
+                    >
+                      {row.scored ? (
+                        <span className="inline-flex flex-col items-center gap-0.5">
+                          <span className="font-medium">
+                            {clampScore(row.scores?.[field.key]).toFixed(1)}
+                          </span>
+                          <ScoreStars value={row.scores?.[field.key]} />
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground/70">N/A</span>
+                      )}
+                    </td>
+                  ))}
+                  <td
+                    className={cn(
+                      "px-3 py-2.5 text-center font-semibold tabular-nums",
+                      !row.scored && "text-muted-foreground/70",
+                    )}
+                  >
+                    {row.scored ? row.average.toFixed(1) : "N/A"}
+                  </td>
+                </tr>
+              );
+            })
           )}
           <tr className="eb-council-table__avg border-t-2 bg-muted/25 font-medium">
             <td className="px-3 py-3">
@@ -255,18 +434,33 @@ function CouncilScoresTable({
                 {scoredCount}/{memberRows.length} thành viên đã chấm
               </span>
             </td>
-            {scoreFields.map((field) => (
-              <td
-                key={field.key}
-                className="px-2 py-3 text-center tabular-nums text-foreground"
-              >
-                {criterionAverages?.[field.key] != null
-                  ? criterionAverages[field.key].toFixed(1)
-                  : "—"}
-              </td>
-            ))}
-            <td className="px-3 py-3 text-center text-base font-bold tabular-nums text-primary">
-              {councilAverage.toFixed(1)}
+            {scoreFields.map((field) => {
+              const cell = formatScoreOrEmpty(criterionAverages?.[field.key], {
+                scored: hasScored,
+              });
+              return (
+                <td
+                  key={field.key}
+                  className={cn(
+                    "px-2 py-3 text-center tabular-nums",
+                    cell.muted
+                      ? "text-muted-foreground/70"
+                      : "text-foreground",
+                  )}
+                >
+                  {cell.text}
+                </td>
+              );
+            })}
+            <td
+              className={cn(
+                "px-3 py-3 text-center text-base font-bold tabular-nums",
+                councilAvgDisplay.muted
+                  ? "text-muted-foreground/70"
+                  : "text-primary",
+              )}
+            >
+              {councilAvgDisplay.text}
             </td>
           </tr>
         </tbody>
@@ -298,7 +492,18 @@ export default function Eb() {
   const [lastEvaluation, setLastEvaluation] = useState(null);
   const [scoreErrors, setScoreErrors] = useState(buildEmptyScoreErrors);
   const [pinnedChapter, setPinnedChapter] = useState(null);
+  const [previewPageIndex, setPreviewPageIndex] = useState(0);
+  const [zoomOpen, setZoomOpen] = useState(false);
+  const [heroSlide, setHeroSlide] = useState(0);
   const refresh = useCallback(() => bumpCouncil((n) => n + 1), []);
+
+  useEffect(() => {
+    if (HERO_IMAGES.length < 2) return undefined;
+    const timer = window.setInterval(() => {
+      setHeroSlide((index) => (index + 1) % HERO_IMAGES.length);
+    }, HERO_SLIDE_MS);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const loadPending = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setApiLoading(true);
@@ -395,8 +600,12 @@ export default function Eb() {
         if (cancelled) return;
         const mapped = mapEbChapterPreviewResponse(data);
         setChapterPages(mapped?.pages ?? []);
+        setPreviewPageIndex(0);
       } catch {
-        if (!cancelled) setChapterPages([]);
+        if (!cancelled) {
+          setChapterPages([]);
+          setPreviewPageIndex(0);
+        }
       } finally {
         if (!cancelled) setPagesLoading(false);
       }
@@ -528,13 +737,59 @@ export default function Eb() {
     );
     return scoreFields.length ? total / scoreFields.length : 0;
   }, [scoreFields, scores]);
-  const classification = getClassification(average);
+  const hasPersonalScores = useMemo(
+    () =>
+      scoreFields.some((field) => String(scores[field.key] ?? "").trim() !== ""),
+    [scoreFields, scores],
+  );
+  const personalAvgDisplay = formatScoreOrEmpty(average, {
+    scored: hasPersonalScores,
+  });
   const councilAggregate = useMemo(() => {
     const keys = scoreFields.map((field) => field.key);
     return buildCouncilAggregate(councilRecord, keys, councilRoster);
   }, [councilRecord, scoreFields, councilRoster]);
-  const councilClassification = getClassification(councilAggregate.councilAverage);
+  const councilClassification = getClassification(
+    councilAggregate.councilAverage,
+    { scored: councilAggregate.scoredCount > 0 },
+  );
   const activeMember = councilRoster.find((m) => m.id === activeMemberId) ?? null;
+  const allMembersFullyScored = useMemo(
+    () =>
+      areAllCouncilMembersFullyScored({
+        roster: councilRoster,
+        councilRecord,
+        activeMemberId,
+        draftScores: scores,
+        scoreKeys: scoreFields.map((field) => field.key),
+      }),
+    [councilRoster, councilRecord, activeMemberId, scores, scoreFields],
+  );
+  const canConfirmPublish = useMemo(() => {
+    if (!activeChapter?.id) return false;
+    if (councilRoster.length < EB_COUNCIL_MIN_FOR_PUBLISH) return false;
+    if (!allMembersFullyScored) return false;
+    // Phải đã nộp điểm Hội đồng (có DTB từ API / lần submit gần nhất)
+    return (
+      lastEvaluation?.council_average != null
+      || activeChapter?.councilAverage != null
+    );
+  }, [
+    activeChapter,
+    allMembersFullyScored,
+    councilRoster.length,
+    lastEvaluation,
+  ]);
+  const previewPageCount = chapterPages.length;
+  const activePreviewPage =
+    previewPageCount > 0
+      ? chapterPages[
+          Math.min(Math.max(previewPageIndex, 0), previewPageCount - 1)
+        ]
+      : null;
+  const previewImageSrc =
+    activePreviewPage?.imageUrl
+    || activeSeriesImage;
 
   function handleAddCouncilMember() {
     const name = newCouncilMemberName.trim();
@@ -718,7 +973,9 @@ export default function Eb() {
     const updatedRecord = readCouncilSeriesScores(councilKey);
     const keys = scoreFields.map((field) => field.key);
     const aggregate = buildCouncilAggregate(updatedRecord, keys, councilRoster);
-    const councilClass = getClassification(aggregate.councilAverage);
+    const councilClass = getClassification(aggregate.councilAverage, {
+      scored: aggregate.scoredCount > 0,
+    });
 
     const memberAssessments = aggregate.memberRows
       .filter((row) => row.scored)
@@ -770,15 +1027,41 @@ export default function Eb() {
       <Header links={NAV_LINKS} onLogout={user ? handleLogout : undefined} />
 
       {!isChapterDetail ? (
-        <WorkspaceHero
-          label={LABEL_EDITOR_BOARD}
-          title={`Xin chào${user?.name ? `, ${user.name}` : ""}`}
-          description="Chọn series trong hàng chờ để xem nội dung và chấm điểm."
-          className="ws-hero--eb"
-        />
+        <section className="ws-hero--eb eb-hero-slideshow relative overflow-hidden border-b border-white/5 text-white">
+          <div className="eb-hero-slides" aria-hidden>
+            {HERO_IMAGES.map((src, index) => (
+              <img
+                key={src}
+                src={src}
+                alt=""
+                className={cn(
+                  "eb-hero-slides__img",
+                  index === heroSlide && "eb-hero-slides__img--active",
+                )}
+              />
+            ))}
+          </div>
+          <div className="eb-hero-slides__veil" aria-hidden />
+          <div className="page-container relative py-10 md:py-14">
+            <div className="max-w-2xl space-y-3">
+              <Badge
+                variant="secondary"
+                className="bg-white/10 text-white hover:bg-white/15"
+              >
+                {LABEL_EDITOR_BOARD}
+              </Badge>
+              <h1 className="text-3xl font-bold tracking-tight md:text-4xl">
+                {`Xin chào${user?.name ? `, ${user.name}` : ""}`}
+              </h1>
+              <p className="leading-relaxed text-zinc-300">
+                Chọn series trong hàng chờ để xem nội dung và chấm điểm.
+              </p>
+            </div>
+          </div>
+        </section>
       ) : null}
 
-      <main className="page-container flex-1 space-y-8 py-8">
+      <main className={cn("page-container flex-1 space-y-8 py-8", isChapterDetail && "pb-28")}>
         {isChapterDetail ? (
           <>
             <header className="flex flex-wrap items-center gap-3 border-b border-border/60 pb-4">
@@ -825,26 +1108,9 @@ export default function Eb() {
           <Card>
             <CardHeader className="space-y-2">
               <CardTitle>Nhập điểm (tài khoản đại diện)</CardTitle>
-              <CardDescription>
-                Đại diện Hội đồng nhập điểm cho từng thành viên. Bảng bên dưới
-                luôn hiển thị đủ điểm của cả Hội đồng và DTB chung.
-              </CardDescription>
             </CardHeader>
 
             <CardContent className="space-y-6">
-              <div className="eb-rep-banner rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm">
-                <p className="font-medium text-foreground">
-                  Tài khoản đại diện:{" "}
-                  <span className="text-primary">
-                    {user?.name ?? "Thư ký Hội đồng"}
-                  </span>
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Chọn thành viên HĐ, nhập điểm thay họ, rồi lưu — có thể lần
-                  lượt nhập cho từng người trong cùng series.
-                </p>
-              </div>
-
               <div className="space-y-3">
                 <Label htmlFor="eb-council-member-name">Thêm thành viên Hội đồng</Label>
                 <div className="flex gap-2">
@@ -890,33 +1156,35 @@ export default function Eb() {
                       );
                     })}
                   </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    Chưa có thành viên — nhập tên và bấm Thêm để bắt đầu chấm điểm.
-                  </p>
-                )}
+                ) : null}
                 {activeMember ? (
-                  <p className="text-xs text-muted-foreground">
-                    Đang nhập điểm cho{" "}
-                    <strong className="text-foreground">{activeMember.name}</strong>
-                    {" "}— DTB cá nhân tạm tính:{" "}
-                    <strong className="text-foreground">
-                      {average.toFixed(1)}
-                    </strong>
-                  </p>
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2.5">
+                    <p className="text-sm text-muted-foreground">
+                      Đang nhập điểm cho{" "}
+                      <strong className="text-foreground">{activeMember.name}</strong>
+                    </p>
+                    <p className="text-sm">
+                      <span className="text-muted-foreground">Điểm TB cá nhân: </span>
+                      <strong
+                        className={cn(
+                          "tabular-nums",
+                          personalAvgDisplay.muted
+                            ? "text-muted-foreground/70"
+                            : "text-foreground",
+                        )}
+                      >
+                        {personalAvgDisplay.text}
+                      </strong>
+                      <span className="text-muted-foreground"> / {SCORE_MAX}</span>
+                    </p>
+                  </div>
                 ) : null}
               </div>
 
               <div className="space-y-3">
-                <div>
-                  <h3 className="text-sm font-semibold text-foreground">
-                    Điểm các thành viên Hội đồng
-                  </h3>
-                  <p className="text-xs text-muted-foreground">
-                    Hiển thị đầy đủ điểm đã lưu của từng thành viên và trung
-                    bình chung.
-                  </p>
-                </div>
+                <h3 className="text-sm font-semibold text-foreground">
+                  Điểm các thành viên Hội đồng
+                </h3>
                 <CouncilScoresTable
                   memberRows={councilAggregate.memberRows}
                   scoreFields={scoreFields}
@@ -927,63 +1195,42 @@ export default function Eb() {
                 />
               </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                {scoreFields.map((field) => (
-                  <div
-                    key={field.key}
-                    className="space-y-3 rounded-xl border bg-card p-4"
-                  >
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between gap-3">
-                        <Label htmlFor={field.key}>{field.label}</Label>
-                        <span className="text-sm font-semibold tabular-nums text-foreground">
-                          {clampScore(scores[field.key]).toFixed(1)} / {SCORE_MAX}
-                        </span>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        {field.hint}
-                      </p>
-                      <ScoreStars value={scores[field.key]} />
-                    </div>
-                    <Input
-                      id={field.key}
-                      type="number"
-                      min="0"
-                      max={String(SCORE_MAX)}
-                      step="0.5"
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-end justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-foreground">
+                    Tiêu chí chấm điểm
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    Điểm TB:{" "}
+                    <strong
+                      className={cn(
+                        "tabular-nums",
+                        personalAvgDisplay.muted
+                          ? "text-muted-foreground/70"
+                          : "text-foreground",
+                      )}
+                    >
+                      {personalAvgDisplay.text}
+                    </strong>
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  {scoreFields.map((field) => (
+                    <CriterionScoreRow
+                      key={field.key}
+                      field={field}
                       value={scores[field.key]}
-                      onChange={(event) =>
-                        updateScore(field.key, event.target.value)
+                      error={scoreErrors[field.key]}
+                      note={criterionNotes[field.key]}
+                      disabled={!activeMemberId}
+                      onScoreChange={(next) => updateScore(field.key, next)}
+                      onScoreBlur={() => normalizeScoreField(field.key)}
+                      onNoteChange={(next) =>
+                        updateCriterionNote(field.key, next)
                       }
-                      onBlur={() => normalizeScoreField(field.key)}
-                      aria-invalid={Boolean(scoreErrors[field.key])}
                     />
-                    {scoreErrors[field.key] ? (
-                      <p className="text-xs text-red-600">{scoreErrors[field.key]}</p>
-                    ) : (
-                      <p className="text-xs text-muted-foreground">
-                        Nhập điểm từ 0 đến {SCORE_MAX}, bước 0.5.
-                      </p>
-                    )}
-                    <div className="space-y-2">
-                      <Label
-                        htmlFor={`${field.key}-note`}
-                        className="text-xs text-muted-foreground"
-                      >
-                        Ghi chú riêng cho tiêu chí này
-                      </Label>
-                      <Textarea
-                        id={`${field.key}-note`}
-                        value={criterionNotes[field.key]}
-                        onChange={(event) =>
-                          updateCriterionNote(field.key, event.target.value)
-                        }
-                        placeholder="Nhận xét ngắn cho tiêu chí này..."
-                        className="min-h-20"
-                      />
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">
@@ -1014,8 +1261,17 @@ export default function Eb() {
                   DTB Hội đồng (tổng hợp)
                 </p>
                 <div className="mt-2 flex items-end justify-between gap-3">
-                  <div className="text-4xl font-bold tracking-tight text-foreground">
-                    {councilAggregate.councilAverage.toFixed(1)}
+                  <div
+                    className={cn(
+                      "text-4xl font-bold tracking-tight tabular-nums",
+                      councilAggregate.scoredCount > 0
+                        ? "text-foreground"
+                        : "text-muted-foreground/60",
+                    )}
+                  >
+                    {councilAggregate.scoredCount > 0
+                      ? councilAggregate.councilAverage.toFixed(1)
+                      : "—"}
                   </div>
                   <Badge variant="outline">/ {SCORE_MAX}.0</Badge>
                 </div>
@@ -1029,7 +1285,7 @@ export default function Eb() {
                       <strong className="text-foreground">
                         {activeMember.name}
                       </strong>{" "}
-                      (DTB {average.toFixed(1)})
+                      (DTB {personalAvgDisplay.text})
                     </>
                   ) : null}
                 </p>
@@ -1043,31 +1299,6 @@ export default function Eb() {
                   {councilClassification.note}
                 </p>
 
-                <div className="mt-4 space-y-2 text-sm">
-                  <div className="flex items-center justify-between gap-3">
-                    <span>Dưới 2.5 điểm</span>
-                    <span className="font-medium text-red-700">KHÔNG ĐẠT</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span>Từ 2.5 đến dưới 3.5 điểm</span>
-                    <span className="font-medium text-amber-700">ĐẠT</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span>Từ 3.5 đến dưới 4.25 điểm</span>
-                    <span className="font-medium text-sky-700">TỐT</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span>Từ 4.25 đến 5.0 điểm</span>
-                    <span className="font-medium text-emerald-700">
-                      XUẤT SẮC
-                    </span>
-                  </div>
-                </div>
-
-                <Button className="mt-4 w-full" onClick={handleSaveAssessment}>
-                  Lưu nháp thành viên đang chọn
-                </Button>
-
                 <div className="mt-4 space-y-2">
                   <Label htmlFor="eb-evaluation-notes">Ghi chú đánh giá (optional)</Label>
                   <Textarea
@@ -1078,15 +1309,6 @@ export default function Eb() {
                     className="min-h-20"
                   />
                 </div>
-
-                <Button
-                  className="mt-2 w-full"
-                  variant="secondary"
-                  disabled={submitting || !activeChapter?.id}
-                  onClick={() => void handleSubmitScores()}
-                >
-                  Gửi điểm Hội đồng
-                </Button>
 
                 {lastEvaluation?.council_average != null ? (
                   <p className="mt-2 text-xs text-muted-foreground">
@@ -1101,43 +1323,59 @@ export default function Eb() {
                 ) : null}
 
                 {activeChapter?.id ? (
-                  <Button className="mt-4 w-full" variant="outline" asChild>
-                    <Link
-                      to={`/eb/chapter/${encodeURIComponent(activeChapter.id)}/publish`}
-                    >
-                      <Calendar className="size-4" />
-                      Sang trang xác nhận publish
-                    </Link>
-                  </Button>
+                  <div className="mt-4 space-y-2">
+                    {canConfirmPublish ? (
+                      <Button className="w-full" variant="outline" asChild>
+                        <Link
+                          to={`/eb/chapter/${encodeURIComponent(activeChapter.id)}/publish`}
+                        >
+                          <Calendar className="size-4" />
+                          Sang trang xác nhận publish
+                        </Link>
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        className="w-full"
+                        variant="outline"
+                        disabled
+                        title="Nộp kết quả chấm điểm Hội đồng trước khi xác nhận publish"
+                      >
+                        <Calendar className="size-4" />
+                        Sang trang xác nhận publish
+                      </Button>
+                    )}
+                    {!canConfirmPublish ? (
+                      <p className="text-xs text-muted-foreground">
+                        Cần ít nhất {EB_COUNCIL_MIN_FOR_PUBLISH} thành viên Hội đồng,{" "}
+                        <strong>Nộp kết quả chấm</strong> trước khi vào trang xác
+                        nhận lịch phát hành (hiện {councilRoster.length} thành viên,{" "}
+                        {councilAggregate.scoredCount}/{councilRoster.length || 0} đã
+                        chấm đủ).
+                      </p>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
             </CardContent>
           </Card>
 
           <Card className="overflow-hidden">
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
               <CardTitle>Preview chapter</CardTitle>
-              <CardDescription>
-                Tất cả pages từ{" "}
-                <code className="text-[10px]">
-                  GET /eb-scores/chapter/:id/preview
-                </code>
-                .
-              </CardDescription>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 gap-1.5"
+                disabled={!previewImageSrc}
+                onClick={() => setZoomOpen(true)}
+              >
+                <Maximize2 className="size-3.5" />
+                Phóng to
+              </Button>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="secondary">pending_EB</Badge>
-                {activeChapter?.classification ? (
-                  <Badge variant="outline">{activeChapter.classification}</Badge>
-                ) : null}
-                {activeChapter?.chapterNumber != null ? (
-                  <Badge variant="outline">Ch. {activeChapter.chapterNumber}</Badge>
-                ) : null}
-                {chapterPages.length > 0 ? (
-                  <Badge variant="outline">{chapterPages.length} trang</Badge>
-                ) : null}
-              </div>
               <p className="text-sm font-medium text-foreground">
                 {activeChapter
                   ? `${activeChapter.seriesName}${activeChapter.title ? ` — ${activeChapter.title}` : ""}`
@@ -1145,40 +1383,83 @@ export default function Eb() {
               </p>
               {pagesLoading && chapterPages.length === 0 ? (
                 <p className="text-sm text-muted-foreground">Đang tải pages...</p>
-              ) : chapterPages.length > 0 ? (
-                <div className="eb-chapter-pages-scroll">
-                  {chapterPages.map((page) => (
-                    <figure key={page.id ?? page.pageNumber} className="eb-page-item">
-                      <img
-                        src={page.imageUrl}
-                        alt={`Trang ${page.pageNumber}`}
-                        loading="lazy"
-                        className="eb-page-item__img"
-                      />
-                      <figcaption className="eb-page-item__caption">
-                        Trang {page.pageNumber}
-                      </figcaption>
-                    </figure>
-                  ))}
-                </div>
               ) : (
-                <div className="overflow-hidden rounded-2xl border bg-muted/30">
-                  <img
-                    src={activeSeriesImage}
-                    alt={
-                      activeChapter
-                        ? `${activeChapter.seriesName} Ch.${activeChapter.chapterNumber}`
-                        : "Ảnh chapter đang chấm"
-                    }
-                    className="h-[320px] w-full object-cover"
-                  />
+                <div className="space-y-3">
+                  <button
+                    type="button"
+                    className="group relative block w-full overflow-hidden rounded-2xl border bg-muted/30 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => setZoomOpen(true)}
+                    aria-label="Phóng to trang truyện"
+                  >
+                    <img
+                      src={previewImageSrc}
+                      alt={
+                        activePreviewPage
+                          ? `Trang ${activePreviewPage.pageNumber}`
+                          : activeChapter
+                            ? `${activeChapter.seriesName} Ch.${activeChapter.chapterNumber}`
+                            : "Ảnh chapter đang chấm"
+                      }
+                      className="max-h-[min(70vh,720px)] w-full object-contain"
+                    />
+                    <span className="pointer-events-none absolute right-3 top-3 rounded-md bg-black/55 px-2 py-1 text-[10px] font-medium text-white opacity-0 transition group-hover:opacity-100">
+                      Click để phóng to
+                    </span>
+                  </button>
+
+                  {previewPageCount > 0 ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8 gap-1"
+                        disabled={previewPageIndex <= 0}
+                        onClick={() =>
+                          setPreviewPageIndex((idx) => Math.max(0, idx - 1))
+                        }
+                      >
+                        <ChevronLeft className="size-3.5" />
+                        Trang trước
+                      </Button>
+                      <Select
+                        value={String(previewPageIndex)}
+                        onValueChange={(value) =>
+                          setPreviewPageIndex(Number(value))
+                        }
+                      >
+                        <SelectTrigger className="h-8 w-[9.5rem]">
+                          <SelectValue
+                            placeholder={`Trang ${previewPageIndex + 1}/${previewPageCount}`}
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {chapterPages.map((page, index) => (
+                            <SelectItem key={page.id ?? index} value={String(index)}>
+                              Trang {page.pageNumber ?? index + 1}/{previewPageCount}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8 gap-1"
+                        disabled={previewPageIndex >= previewPageCount - 1}
+                        onClick={() =>
+                          setPreviewPageIndex((idx) =>
+                            Math.min(previewPageCount - 1, idx + 1),
+                          )
+                        }
+                      >
+                        Trang sau
+                        <ChevronRight className="size-3.5" />
+                      </Button>
+                    </div>
+                  ) : null}
                 </div>
               )}
-              <p className="text-sm text-muted-foreground">
-                {activeChapter?.classificationText ||
-                  activeChapter?.mangakaName ||
-                  "Xem đủ pages trước khi chấm điểm."}
-              </p>
               {activeChapter?.seriesId ? (
                 <Button variant="outline" size="sm" asChild>
                   <Link to={`/eb/series/${encodeURIComponent(activeChapter.seriesId)}`}>
@@ -1318,6 +1599,101 @@ export default function Eb() {
         </section>
         ) : null}
       </main>
+
+      {isChapterDetail ? (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+          <div className="page-container flex flex-wrap items-center justify-between gap-3 py-3">
+            <p className="text-xs text-muted-foreground">
+              Điểm TB cá nhân:{" "}
+              <strong
+                className={cn(
+                  "tabular-nums",
+                  personalAvgDisplay.muted
+                    ? "text-muted-foreground/70"
+                    : "text-foreground",
+                )}
+              >
+                {personalAvgDisplay.text}
+              </strong>
+              {activeMember ? (
+                <>
+                  {" "}
+                  · {activeMember.name}
+                </>
+              ) : null}
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => void handleSaveAssessment()}
+              >
+                Lưu nháp
+              </Button>
+              <Button
+                type="button"
+                disabled={submitting || !activeChapter?.id}
+                onClick={() => void handleSubmitScores()}
+              >
+                {submitting ? "Đang nộp..." : "Nộp kết quả chấm"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <Dialog open={zoomOpen} onOpenChange={setZoomOpen}>
+        <DialogContent className="max-h-[95vh] max-w-[min(96vw,56rem)] overflow-hidden border-none bg-zinc-950 p-2 text-white sm:p-3">
+          <DialogTitle className="sr-only">
+            Phóng to trang{" "}
+            {activePreviewPage?.pageNumber ?? previewPageIndex + 1}
+          </DialogTitle>
+          <div className="flex max-h-[88vh] items-center justify-center overflow-auto">
+            <img
+              src={previewImageSrc}
+              alt={
+                activePreviewPage
+                  ? `Trang ${activePreviewPage.pageNumber}`
+                  : "Preview chapter"
+              }
+              className="max-h-[86vh] w-auto max-w-full object-contain"
+            />
+          </div>
+          {previewPageCount > 1 ? (
+            <div className="flex items-center justify-center gap-2 pb-1 pt-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                disabled={previewPageIndex <= 0}
+                onClick={() =>
+                  setPreviewPageIndex((idx) => Math.max(0, idx - 1))
+                }
+              >
+                <ChevronLeft className="size-3.5" />
+                Trước
+              </Button>
+              <span className="text-xs text-zinc-300">
+                {previewPageIndex + 1} / {previewPageCount}
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                disabled={previewPageIndex >= previewPageCount - 1}
+                onClick={() =>
+                  setPreviewPageIndex((idx) =>
+                    Math.min(previewPageCount - 1, idx + 1),
+                  )
+                }
+              >
+                Sau
+                <ChevronRight className="size-3.5" />
+              </Button>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
 
       <Footer />
     </div>

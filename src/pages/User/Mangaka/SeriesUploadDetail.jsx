@@ -181,9 +181,20 @@ export default function SeriesUploadDetail() {
 
   const chapterCards = useMemo(() => chapterRows.map(row => {
     const annot = annotatorChapters.find(ch => ch.id === row.id)
-    const cover = annot?.cover?.url
-      ? { url: annot.cover.url, name: annot.cover.name ?? 'cover' }
-      : annot?.pages?.find(p => p?.url) ?? annot?.pages?.[0]
+    // 1) Ảnh bìa chapter (local / BE cover_url)
+    // 2) Fallback trang đầu — BE hiện chưa có API lưu cover chapter riêng
+    const pageThumb =
+      annot?.pages?.find((p) => p?.url)?.url
+      ?? annot?.pages?.[0]?.url
+      ?? null
+    const coverUrl =
+      annot?.cover?.url
+      || row.coverUrl
+      || pageThumb
+      || null
+    const cover = coverUrl
+      ? { url: coverUrl, name: annot?.cover?.name ?? 'cover' }
+      : null
     const uploaded = annot?.pages?.length ?? row.pages ?? 0
     return { row, annot, cover, uploaded }
   }), [chapterRows, annotatorChapters])
@@ -350,7 +361,7 @@ export default function SeriesUploadDetail() {
                 return (
                   <Link key={row.id} to={`${basePath}/chapter/${row.id}`} className="group block h-full">
                     <Card className="flex h-full flex-col overflow-hidden transition-shadow hover:shadow-md">
-                      <div className="aspect-[16/9] w-full shrink-0 overflow-hidden bg-muted">
+                      <div className="aspect-[3/4] w-full shrink-0 overflow-hidden bg-muted">
                         {cover?.url ? (
                           <img src={cover.url} alt="" className="size-full object-cover transition-transform group-hover:scale-[1.02]" />
                         ) : (

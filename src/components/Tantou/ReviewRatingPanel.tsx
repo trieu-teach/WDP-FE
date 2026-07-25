@@ -67,13 +67,13 @@ export function ReviewRatingPanel({
           <Star className="size-5 shrink-0 fill-amber-400/20 text-amber-400" />
           {requiresEbSubmit ? "Series Review" : "Đánh giá Chapter"}
         </CardTitle>
-        <CardDescription className="text-pretty text-xs leading-relaxed text-zinc-400 sm:text-[0.8125rem]">
-          {requiresEbSubmit
-            ? "Giai đoạn 1 — đánh giá series, gửi EB hoặc yêu cầu Mangaka sửa."
-            : publishOnlyMode
+        {!requiresEbSubmit ? (
+          <CardDescription className="text-pretty text-xs leading-relaxed text-zinc-400 sm:text-[0.8125rem]">
+            {publishOnlyMode
               ? "Chapter đã EB duyệt — bấm Publish để phát hành."
               : "Giai đoạn 2 — duyệt và publish chapter."}
-        </CardDescription>
+          </CardDescription>
+        ) : null}
       </CardHeader>
 
       <CardContent className="flex-1 space-y-4 overflow-y-auto p-4 lg:p-5">

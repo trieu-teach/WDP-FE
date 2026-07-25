@@ -181,9 +181,6 @@ export function AssistantMangakaPicker({ mangakas, assignmentsByMangaka, loading
     <div className="space-y-4">
       <div>
         <h2 className="text-xl font-bold tracking-tight">Chọn Mangaka</h2>
-        <p className="text-sm text-muted-foreground">
-          Mỗi Mangaka có danh sách chapter riêng — nhận việc, gửi bài và chỉnh sửa.
-        </p>
       </div>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {mangakas.map(m => {

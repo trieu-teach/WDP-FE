@@ -26,6 +26,8 @@ import { getApiErrorMessage } from "@/api/http.js";
 import { LABEL_EDITOR_BOARD } from "@/constants/roleTerminology.js";
 import {
   EB_PUBLICATION_SCHEDULES,
+  EB_COUNCIL_MIN_FOR_PUBLISH,
+  areAllCouncilMembersFullyScored,
   formatEbClassification,
   formatEbScheduledPublishDateTime,
   formatEbScheduledPublishDisplay,
@@ -35,13 +37,15 @@ import {
   mapEbChapterPendingItem,
   normalizeEbEvaluateResponse,
 } from "@/utils/ebEvaluationMappers.js";
+import {
+  readCouncilRoster,
+  readCouncilSeriesScores,
+} from "@/utils/ebCouncilStorage.js";
 import { cn } from "@/lib/utils";
 import "./Eb.css";
 
 const NAV_LINKS = [
   { to: "/", label: "Trang chủ" },
-  { to: "/mangaka", label: "Mangaka" },
-  { to: "/tantou", label: "Tantou Editor" },
 ];
 
 const HOUR_OPTIONS = Array.from({ length: 24 }, (_, i) =>
@@ -264,7 +268,18 @@ export default function EbPublish() {
     return null;
   }, [chapter, lastEvaluation]);
 
-  const hasScores = councilAverage != null;
+  const allMembersFullyScored = useMemo(() => {
+    if (!chapterId) return false;
+    const roster = readCouncilRoster(chapterId);
+    const record = readCouncilSeriesScores(chapterId);
+    if (roster.length < EB_COUNCIL_MIN_FOR_PUBLISH) return false;
+    return areAllCouncilMembersFullyScored({
+      roster,
+      councilRecord: record,
+    });
+  }, [chapterId, councilAverage, lastEvaluation]);
+
+  const hasScores = councilAverage != null && allMembersFullyScored;
 
   const vietnamDateNow = getEbVietnamDateNow();
 
@@ -325,7 +340,9 @@ export default function EbPublish() {
       }
     }
     if (!hasScores) {
-      toast.error("Gửi điểm Hội đồng trước khi xác nhận publish.");
+      toast.error(
+        `Cần ít nhất ${EB_COUNCIL_MIN_FOR_PUBLISH} thành viên Hội đồng, tất cả nhập đủ điểm và nộp kết quả trước khi xác nhận lịch phát hành.`,
+      );
       return;
     }
 
@@ -501,6 +518,14 @@ export default function EbPublish() {
                   <CheckCircle2 className="size-4" />
                   Xác nhận publish series
                 </Button>
+
+                {!hasScores ? (
+                  <p className="text-center text-xs text-muted-foreground">
+                    Chưa đủ điều kiện: cần ít nhất {EB_COUNCIL_MIN_FOR_PUBLISH} thành
+                    viên Hội đồng, tất cả nhập đủ điểm và đã nộp kết quả chấm. Nút
+                    xác nhận lịch phát hành đang bị khóa.
+                  </p>
+                ) : null}
 
                 {!hasScores ? (
                   <Button variant="outline" className="w-full" asChild>

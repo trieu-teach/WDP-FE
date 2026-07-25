@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { Eye, EyeOff } from 'lucide-react'
 import { AuthBoxField, AuthSplitLayout } from '@/components/layout/AuthSplitLayout.jsx'
-import { getSession, getRolePath, login } from '@/lib/auth.js'
+import { getSession, login } from '@/lib/auth.js'
+import { queueWelcomeBack } from '@/utils/welcomeBackStorage.js'
 
 export { ROLES, ROLE_OPTIONS, ROLE_LABELS, getRolePath, getSession, logout, login, register } from '@/lib/auth.js'
 
@@ -19,7 +20,7 @@ export default function Login() {
     const user = getSession()
     if (user) {
       const from = location.state?.from
-      navigate(typeof from === 'string' ? from : getRolePath(user.role), { replace: true })
+      navigate(typeof from === 'string' ? from : '/', { replace: true })
       return
     }
     const saved = sessionStorage.getItem('rememberEmail')
@@ -45,8 +46,11 @@ export default function Login() {
       const user = await login(form.email, form.password)
       if (remember) sessionStorage.setItem('rememberEmail', form.email.trim())
       else sessionStorage.removeItem('rememberEmail')
-      const from = location.state?.from
-      navigate(typeof from === 'string' ? from : getRolePath(user.role))
+      queueWelcomeBack({
+        name: user.name || user.username || 'MangaHub',
+        avatarUrl: user.avatarUrl || '',
+      })
+      navigate('/')
     } catch (err) {
       setError(err?.message ?? 'Đăng nhập thất bại.')
     } finally {
@@ -56,17 +60,16 @@ export default function Login() {
 
   return (
     <AuthSplitLayout
-      title={(
-        <>
-          Chào mừng
-          <br />
-          trở lại!
-        </>
-      )}
-      subtitle="Đăng nhập để tiếp tục trải nghiệm MangaHub."
+      title="Không gian sáng tạo manga"
+      subtitle="Đăng nhập để tiếp tục series, phối hợp Assistant và đẩy chapter lên biên tập."
+      heroEyebrow="MangaHub"
+      heroCaption="Mangaka · Assistant · Editorial"
     >
       <div className="auth-split-box">
-        <h2>Đăng nhập</h2>
+        <div className="auth-split-greeting">
+          <h2>Chào mừng trở lại</h2>
+          <p>Đăng nhập để vào MangaHub</p>
+        </div>
 
         {error ? (
           <div className="auth-split-error" role="alert" aria-live="polite">
@@ -114,7 +117,7 @@ export default function Login() {
           </label>
 
           <button type="submit" className="auth-split-btn" disabled={loading}>
-            {loading ? 'Đang đăng nhập...' : 'Đăng nhập ngay'}
+            {loading ? 'Đang đăng nhập...' : 'Đăng nhập'}
           </button>
 
           <div className="auth-split-links">
