@@ -3,6 +3,7 @@ import { Ban, CheckCircle, Eye, Loader2, Plus, Search, Trash2, UserCog } from 'l
 import { toast } from 'sonner'
 import { api } from '@/api/index.js'
 import { Badge } from '@/components/ui/badge'
+import { ConfirmDialog } from '@/components/Admin/ConfirmDialog/ConfirmDialog'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -126,7 +127,7 @@ function CreateUserDialog({ open, onClose, onCreated }) {
   )
 }
 
-function ManageUserDialog({ userId, open, onClose, onUpdated }) {
+function ManageUserDialog({ userId, open, onClose, onUpdated, requestDelete }) {
   const [detail, setDetail] = useState(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -178,7 +179,7 @@ function ManageUserDialog({ userId, open, onClose, onUpdated }) {
   }
 
   async function handleDelete() {
-    if (!userId || !confirm('Xoá người dùng này? Hành động không thể hoàn tác.')) return
+    if (!userId) return
     setSaving(true)
     try {
       await api.deleteUser(userId)
@@ -234,7 +235,7 @@ function ManageUserDialog({ userId, open, onClose, onUpdated }) {
           <p className="py-6 text-center text-sm text-destructive">{error}</p>
         ) : null}
         <DialogFooter className="gap-2 sm:justify-between">
-          <Button type="button" variant="destructive" onClick={handleDelete} disabled={saving || loading}>
+          <Button type="button" variant="destructive" onClick={requestDelete} disabled={saving || loading}>
             <Trash2 className="size-4" />
             Xoá
           </Button>
@@ -259,6 +260,7 @@ export default function Users() {
   const [updating, setUpdating] = useState(null)
   const [manageUserId, setManageUserId] = useState(null)
   const [createOpen, setCreateOpen] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(null)
 
   useEffect(() => {
     loadUsers()
@@ -430,7 +432,31 @@ export default function Users() {
         userId={manageUserId}
         open={manageUserId !== null}
         onClose={() => setManageUserId(null)}
-        onUpdated={loadUsers}
+        onUpdated={() => { loadUsers(); setManageUserId(null) }}
+        requestDelete={() => {
+          const u = users.find(x => x.id === manageUserId || x.username === manageUserId)
+          setConfirmDelete({ id: manageUserId, name: u?.username || u?.name || u?.email || '' })
+        }}
+      />
+
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        onOpenChange={(open) => !open && setConfirmDelete(null)}
+        title="Xoá người dùng?"
+        description={confirmDelete ? `Bạn sắp xoá người dùng "${confirmDelete.name}". Hành động này không thể hoàn tác.` : ''}
+        onConfirm={async () => {
+          if (!confirmDelete) return
+          try {
+            await api.deleteUser(confirmDelete.id)
+            toast.success('Đã xoá người dùng.')
+            setConfirmDelete(null)
+            setManageUserId(null)
+            await loadUsers()
+          } catch (err) {
+            toast.error(err?.response?.data?.message || 'Không thể xoá.')
+            setConfirmDelete(null)
+          }
+        }}
       />
     </div>
   )

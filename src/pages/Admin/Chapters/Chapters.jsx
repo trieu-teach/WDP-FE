@@ -28,6 +28,7 @@ import { api } from '@/api/index.js'
 import { realService } from '@/api/real.service.js'
 import { getSession } from '@/lib/auth.js'
 import { Badge } from '@/components/ui/badge'
+import { ConfirmDialog } from '@/components/Admin/ConfirmDialog/ConfirmDialog'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
@@ -687,6 +688,11 @@ export default function Chapters() {
   const [seriesDetail, setSeriesDetail] = useState(null)
   const [seriesComments, setSeriesComments] = useState([])
 
+  // Confirm delete
+  const [deleting, setDeleting] = useState(null)
+  const [deletingComment, setDeletingComment] = useState(null)
+  const [deletingLoading, setDeletingLoading] = useState(false)
+
   const currentUser = getSession()
   const isAdmin = currentUser?.role === 'admin'
 
@@ -762,13 +768,17 @@ export default function Chapters() {
   }, [tab, legacyFilter])
 
   async function handleDelete(id) {
-    if (!confirm('Xoá chương này?')) return
+    if (!deleting) return
+    setDeletingLoading(true)
     try {
-      await api.deleteChapter(id)
-      setChapters(c => c.filter(ch => ch.id !== id))
+      await api.deleteChapter(deleting.id)
+      setChapters(c => c.filter(ch => ch.id !== deleting.id))
       toast.success('Đã xoá chương')
+      setDeleting(null)
     } catch (err) {
       toast.error(err?.response?.data?.message || 'Không thể xoá chương')
+    } finally {
+      setDeletingLoading(false)
     }
   }
 
@@ -823,8 +833,8 @@ export default function Chapters() {
           chapters={chapters}
           comments={seriesComments}
           onDeleteComment={(id) => {
-            setSeriesComments(prev => prev.filter(c => c.id !== id))
-            toast.success('Đã xoá bình luận')
+            const c = seriesComments.find(x => x.id === id)
+            setDeletingComment(c || { id })
           }}
           onBack={() => navigate('/admin/manga')}
           isAdmin={isAdmin}
@@ -963,7 +973,7 @@ export default function Chapters() {
                   key={chapter.id}
                   chapter={chapter}
                   onStatusChange={(status) => handleStatusChange(chapter.id, status)}
-                  onDelete={() => handleDelete(chapter.id)}
+                  onDelete={() => setDeleting(chapter)}
                   canDelete={!isAdmin}
                 />
               ) : (
@@ -973,7 +983,7 @@ export default function Chapters() {
                   mangaTitle={selectedManga?.title}
                   mangaThumbnail={selectedManga?.thumbnail}
                   showStatus={false}
-                  onDelete={() => handleDelete(chapter.id)}
+                  onDelete={() => setDeleting(chapter)}
                   canDelete={!isAdmin}
                 />
               )
@@ -988,6 +998,28 @@ export default function Chapters() {
         open={modal}
         onClose={() => setModal(false)}
         onSave={handleSave}
+      />
+
+      <ConfirmDialog
+        open={deleting !== null}
+        onOpenChange={(open) => !open && setDeleting(null)}
+        title="Xoá chương?"
+        description={deleting ? `Bạn sắp xoá chương "${deleting.title || deleting.number || ''}". Hành động này không thể hoàn tác.` : ''}
+        loading={deletingLoading}
+        onConfirm={() => handleDelete()}
+      />
+
+      <ConfirmDialog
+        open={deletingComment !== null}
+        onOpenChange={(open) => !open && setDeletingComment(null)}
+        title="Xoá bình luận?"
+        description="Bạn sắp xoá bình luận này. Hành động này không thể hoàn tác."
+        onConfirm={() => {
+          if (!deletingComment) return
+          setSeriesComments(prev => prev.filter(c => c.id !== deletingComment.id))
+          toast.success('Đã xoá bình luận')
+          setDeletingComment(null)
+        }}
       />
         </>
       )}

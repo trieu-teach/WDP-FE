@@ -44,6 +44,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
+import { ConfirmDialog } from '@/components/Admin/ConfirmDialog/ConfirmDialog'
 
 const STATUS_CONFIG = {
   draft: { label: 'Nháp', class: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400' },
@@ -396,6 +397,8 @@ export default function Manga() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [view, setView] = useState('grid')
   const [modal, setModal] = useState(null)
+  const [deleting, setDeleting] = useState(null)
+  const [deletingLoading, setDeletingLoading] = useState(false)
   const [page, setPage] = useState(1)
   const ITEMS_PER_PAGE = 10
 
@@ -425,13 +428,17 @@ export default function Manga() {
   }
 
   async function handleDelete(manga) {
-    if (!confirm('Xoá truyện này? Hành động này không thể hoàn tác.')) return
+    if (!deleting) return
+    setDeletingLoading(true)
     try {
-      await api.deleteManga(manga.id)
-      setList(l => l.filter(m => m.id !== manga.id))
+      await api.deleteManga(deleting.id)
+      setList(l => l.filter(m => m.id !== deleting.id))
       toast.success('Đã xoá truyện')
+      setDeleting(null)
     } catch (err) {
       toast.error(err?.response?.data?.message || 'Không thể xoá truyện')
+    } finally {
+      setDeletingLoading(false)
     }
   }
 
@@ -603,7 +610,7 @@ export default function Manga() {
                   key={m.id}
                   manga={m}
                   onEdit={() => setModal(m)}
-                  onDelete={() => handleDelete(m)}
+                  onDelete={() => setDeleting(m)}
                   onClick={() => handleCardClick(m)}
                 />
               ))}
@@ -705,7 +712,7 @@ export default function Manga() {
                       key={m.id}
                       manga={m}
                       onEdit={() => setModal(m)}
-                      onDelete={() => handleDelete(m)}
+                      onDelete={() => setDeleting(m)}
                       onClick={() => handleCardClick(m)}
                     />
                   ))}
@@ -800,6 +807,15 @@ export default function Manga() {
 
       {/* Dialog */}
       <MangaDialog manga={modal?.id ? modal : null} open={modal !== null} onClose={() => setModal(null)} onSave={handleSave} />
+
+      <ConfirmDialog
+        open={deleting !== null}
+        onOpenChange={(open) => !open && setDeleting(null)}
+        title="Xoá truyện?"
+        description={deleting ? `Bạn sắp xoá truyện "${deleting.title}". Hành động này không thể hoàn tác.` : ''}
+        loading={deletingLoading}
+        onConfirm={() => handleDelete()}
+      />
     </div>
   )
 }
