@@ -39,6 +39,23 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
+import { getApiErrorMessage } from '@/api/http.js'
+import {
+  getAnnotatorPageDisplayUrl,
+  shouldHideLegacyAnnotatorNotes,
+  shouldShowAssistantEditedOnAnnotate,
+} from '@/utils/apiMappers.js'
+import {
+  isAssistantPageApproved,
+  isChapterFullyAssistantApproved,
+} from '@/utils/assistantApprovedPages.js'
+import {
+  CHAPTER_COVER_ACCEPT,
+  getPage1OriginalUrl,
+  isChapterCoverLocked,
+  resolveChapterCoverDisplay,
+  validateChapterCoverFile,
+} from '@/utils/chapterCover.js'
 
 function uid() {
   return `note-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
@@ -106,6 +123,8 @@ export default function ChapterAnnotator({
   const fsBoardRef = useRef(null)
   const noteSaveTimersRef = useRef({})
   const loadedNoteKeysRef = useRef(new Set())
+  /** Đã xóa note vòng cũ (1 lần) sau duyệt — không xóa note mới tạo. */
+  const legacyNotesClearedRef = useRef(new Set())
   const draftTextRef = useRef(new Map())
   const noteTextareaRefs = useRef(new Map())
   const revisionDraftKeysRef = useRef(new Set())
@@ -117,27 +136,83 @@ export default function ChapterAnnotator({
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [uploadUi, setUploadUi] = useState(null)
   const [uploadRejectMessage, setUploadRejectMessage] = useState(null)
+  const [coverBusy, setCoverBusy] = useState(false)
   const [sendAssistantId, setSendAssistantId] = useState('')
   const [sendingToAssistant, setSendingToAssistant] = useState(false)
 
   const activeChapter = chapters.find(c => c.id === activeChapterId)
   const chapterPages = activeChapter?.pages ?? []
-  const pages = revisionMode
-    ? chapterPages.map((p) => ({
-        ...p,
-        url: p.resultUrl ?? p.resultImageUrl ?? p.url,
-      }))
-    : chapterPages
+  const pages = useMemo(() => {
+    const apiStatus = activeChapter?.apiStatus ?? null
+    const showEdited =
+      shouldShowAssistantEditedOnAnnotate(apiStatus)
+      || isChapterFullyAssistantApproved(activeChapterId)
+    return chapterPages.map((p) => {
+      const stamped =
+        showEdited
+        || p.assistantApproved
+        || isAssistantPageApproved(activeChapterId, p.pageNumber)
+        || Boolean(p.resultUrl && p.assistantApproved)
+      // Có resultUrl từ task đã duyệt → luôn ưu tiên ảnh mới
+      const preferResult =
+        revisionMode
+        || stamped
+        || (Boolean(p.resultUrl) && (
+          p.assistantApproved
+          || isAssistantPageApproved(activeChapterId, p.pageNumber)
+          || showEdited
+        ))
+      const page = (stamped || preferResult)
+        ? { ...p, assistantApproved: true }
+        : p
+      return {
+        ...page,
+        url: getAnnotatorPageDisplayUrl(page, apiStatus, { preferResult }),
+      }
+    })
+  }, [
+    chapterPages,
+    activeChapter?.apiStatus,
+    activeChapterId,
+    revisionMode,
+  ])
   const pageKey = activeChapter ? `${activeChapterId}-${pageIndex}` : ''
   const currentPageId = pages[pageIndex]?.id ?? null
-  // Phòng thủ: chỉ gọi BE khi có ObjectId hợp lệ (24 ký tự hex).
-  // Nếu page chưa sync _id từ BE (id là placeholder "page-X" hoặc rỗng), bỏ qua.
   const isValidObjectId = (id) => typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id)
+  const hideLegacyNotes =
+    shouldHideLegacyAnnotatorNotes(
+      activeChapter?.apiStatus,
+      pages[pageIndex],
+    )
+    || isChapterFullyAssistantApproved(activeChapterId)
+    || shouldShowAssistantEditedOnAnnotate(activeChapter?.apiStatus)
+    || Boolean(pages[pageIndex]?.assistantApproved)
+    || Boolean(pages[pageIndex]?.resultUrl && (
+      isAssistantPageApproved(activeChapterId, pages[pageIndex]?.pageNumber)
+      || pages[pageIndex]?.assistantApproved
+    ))
+  // Luôn hiện note trong state — cho phép tạo note mới sau khi duyệt
   const pageNotes = notes[pageKey] ?? []
 
   useEffect(() => {
     revisionDraftKeysRef.current.clear()
   }, [revisionMode, activeChapterId])
+
+  useEffect(() => {
+    legacyNotesClearedRef.current.clear()
+  }, [activeChapterId])
+
+  // Chỉ xóa note vòng cũ MỘT LẦN khi chuyển sang chế độ ảnh đã duyệt — không chặn note mới
+  useEffect(() => {
+    if (!hideLegacyNotes || !pageKey || !setNotes) return
+    if (legacyNotesClearedRef.current.has(pageKey)) return
+    legacyNotesClearedRef.current.add(pageKey)
+    loadedNoteKeysRef.current.add(pageKey) // đánh dấu đã xử lý — không nạp lại note cũ từ BE
+    setNotes((prev) => {
+      if (!prev[pageKey]?.length) return prev
+      return { ...prev, [pageKey]: [] }
+    })
+  }, [hideLegacyNotes, pageKey, setNotes])
 
   useEffect(() => {
     if (!isFullscreen) return undefined
@@ -194,6 +269,8 @@ export default function ChapterAnnotator({
     () => chapters.find(c => c.id === activeChapterId && c.series === selectedSeriesTitle.trim()) ?? null,
     [chapters, activeChapterId, selectedSeriesTitle],
   )
+  const coverLocked = isChapterCoverLocked(uploadTargetChapter?.apiStatus)
+  const coverInteractive = Boolean(uploadTargetChapter) && !coverLocked && !coverBusy
 
   useEffect(() => {
     if (hiredAssistants.length === 1 && !sendAssistantId) {
@@ -201,33 +278,58 @@ export default function ChapterAnnotator({
     }
   }, [hiredAssistants, sendAssistantId])
 
-  const persistNoteById = useCallback(async (stableKey) => {
+  const persistNoteById = useCallback(async (stableKey, noteOverride = null) => {
     const page = pages[pageIndex]
-    if (!workspaceApi?.savePageNote || !page?.id || !pageKey || !stableKey) return
+    if (!workspaceApi?.savePageNote || !page?.id || !pageKey || !stableKey) return null
 
     const draftValue = draftTextRef.current.get(stableKey)
+    let noteSnapshot = noteOverride
+
+    if (!noteSnapshot) {
+      setNotes((prev) => {
+        const list = prev[pageKey] ?? []
+        const found = list.find((n) => noteStableKey(n) === stableKey) ?? null
+        if (!found) {
+          noteSnapshot = null
+          return prev
+        }
+        noteSnapshot =
+          draftValue !== undefined ? { ...found, text: draftValue } : { ...found }
+        if (draftValue === undefined) return prev
+        return {
+          ...prev,
+          [pageKey]: list.map((n) =>
+            noteStableKey(n) === stableKey ? { ...n, text: draftValue } : n,
+          ),
+        }
+      })
+    } else if (draftValue !== undefined && noteOverride) {
+      noteSnapshot = { ...noteOverride, text: draftValue }
+    }
+
     if (draftValue !== undefined) {
-      setNotes(prev => ({
-        ...prev,
-        [pageKey]: (prev[pageKey] ?? []).map(n =>
-          noteStableKey(n) === stableKey ? { ...n, text: draftValue } : n
-        ),
-      }))
       draftTextRef.current.delete(stableKey)
     }
 
-    let noteSnapshot = null
-    setNotes(prev => {
-      noteSnapshot = (prev[pageKey] ?? []).find(n => noteStableKey(n) === stableKey) ?? null
-      return prev
-    })
-    if (!noteSnapshot) return
+    if (!noteSnapshot) return null
+
+    const text = String(noteSnapshot.text ?? '').trim()
+    const hasServerId =
+      noteSnapshot.id
+      && !String(noteSnapshot.id).startsWith('note-')
+    // BE yêu cầu text — ô mới chưa gõ thì chỉ giữ local, không POST
+    if (!text && !hasServerId) return noteSnapshot
+
+    const toSave = text
+      ? noteSnapshot
+      : { ...noteSnapshot, text: 'Cần xử lý.' }
 
     try {
-      await workspaceApi.savePageNote(page.id, pageKey, noteSnapshot)
+      await workspaceApi.savePageNote(page.id, pageKey, toSave)
     } catch {
       /* giữ bản local, thử lại lần sau */
     }
+    return toSave
   }, [pageIndex, pageKey, pages, workspaceApi, setNotes])
 
   const flushNotesBeforeSend = useCallback(async () => {
@@ -236,10 +338,14 @@ export default function ChapterAnnotator({
     }
     noteSaveTimersRef.current = {}
 
-    for (const stableKey of [...draftTextRef.current.keys()]) {
-      await persistNoteById(stableKey)
+    // Đọc chữ đang gõ trên DOM (defaultValue không luôn đồng bộ notes state)
+    for (const [stableKey, el] of noteTextareaRefs.current.entries()) {
+      if (el && typeof el.value === 'string') {
+        draftTextRef.current.set(String(stableKey), el.value)
+      }
     }
 
+    // 1) Gộp draft text vào snapshot TRƯỚC (tránh race setState)
     const snapshot = {}
     for (const [pk, list] of Object.entries(notes)) {
       snapshot[pk] = (list ?? []).map((n) => {
@@ -248,8 +354,52 @@ export default function ChapterAnnotator({
         return draft !== undefined ? { ...n, text: draft } : n
       })
     }
+
+    // 2) Đồng bộ UI state + xóa draft đã merge
+    setNotes((prev) => {
+      const next = { ...prev }
+      for (const [pk, list] of Object.entries(snapshot)) {
+        next[pk] = list
+      }
+      return next
+    })
+    draftTextRef.current.clear()
+
+    // 3) Persist từng note đã có chữ (hoặc đã có id BE)
+    for (const [pk, list] of Object.entries(snapshot)) {
+      for (const note of list ?? []) {
+        const key = noteStableKey(note)
+        const text = String(note.text ?? '').trim()
+        const hasServerId = note.id && !String(note.id).startsWith('note-')
+        if (!text && !hasServerId) continue
+        if (pk === pageKey) {
+          await persistNoteById(key, note)
+        } else if (workspaceApi?.savePageNote) {
+          const pageIdx = Number(String(pk).split('-').pop())
+          const chapterPage = pages[pageIdx]
+          if (!chapterPage?.id) continue
+          try {
+            await workspaceApi.savePageNote(
+              chapterPage.id,
+              pk,
+              text ? note : { ...note, text: 'Cần xử lý.' },
+            )
+          } catch {
+            /* syncChapterNotes sẽ thử lại */
+          }
+        }
+      }
+    }
+
     return snapshot
-  }, [notes, persistNoteById])
+  }, [
+    notes,
+    persistNoteById,
+    pageKey,
+    pages,
+    workspaceApi,
+    setNotes,
+  ])
 
   const scheduleNoteSave = useCallback((stableKey, currentText) => {
     if (!stableKey) return
@@ -401,14 +551,31 @@ export default function ChapterAnnotator({
             return
           }
           try {
+            if (hasProgress) {
+              onUploadProgress(trimmedSeries, 70)
+              setUploadUi({
+                series: trimmedSeries,
+                chapter: target.num,
+                pct: 70,
+              })
+            }
             const ch = await workspaceApi.createChapterWithPages(
-              seriesMeta.id, trimmedSeries, target.num, assistantId, filesToAdd,
+              seriesMeta.id,
+              trimmedSeries,
+              target.num,
+              assistantId,
+              filesToAdd,
+              { coverFile: target.cover?.file ?? null },
             )
             setChapters(prev => prev.map(c => (c.id !== targetId ? c : ch)))
             setActiveChapterId(ch.id)
             setPageIndex(0)
             setUploadRejectMessage(null)
             if (hasProgress) onUploadProgress(trimmedSeries, 100)
+            setUploadUi(null)
+            if (target.cover?.file && !ch.cover?.url) {
+              toast.warning('Chapter đã tạo nhưng chưa lưu được ảnh bìa — bạn có thể đặt lại sau.')
+            }
             return
           } catch (err) {
             const status = err?.response?.status
@@ -488,19 +655,50 @@ export default function ChapterAnnotator({
 
   const handleCoverFile = useCallback(async (file) => {
     if (!file || !activeChapterId) return
-    const ok = file.type.startsWith('image/') || /\.(png|jpe?g|webp)$/i.test(file.name)
-    if (!ok) {
-      setUploadRejectMessage('Ảnh bìa cần là PNG/JPG/WEBP.')
+    const validation = validateChapterCoverFile(file)
+    if (!validation.ok) {
+      setUploadRejectMessage(validation.message)
       return
     }
+
+    const target = chapters.find((c) => c.id === activeChapterId)
+    if (!target) return
+    if (isChapterCoverLocked(target.apiStatus)) {
+      setUploadRejectMessage('Chapter đã published — không đổi ảnh bìa được.')
+      return
+    }
+
+    const isServerChapter = /^[0-9a-f]{24}$/i.test(String(activeChapterId))
+
     try {
       const url = await fileToStorableDataUrl(file)
-      setChapters(prev => prev.map(c => (c.id === activeChapterId ? { ...c, cover: { url, name: file.name } } : c)))
+      // Preview local trước; giữ File để upload khi tạo chapter / PATCH cover
+      setChapters((prev) =>
+        prev.map((c) =>
+          c.id === activeChapterId
+            ? { ...c, cover: { url, name: file.name, file } }
+            : c,
+        ),
+      )
       setUploadRejectMessage(null)
+
+      if (isServerChapter && workspaceApi?.updateChapterCover) {
+        setCoverBusy(true)
+        try {
+          await workspaceApi.updateChapterCover(activeChapterId, file)
+          toast.success('Đã cập nhật ảnh bìa chapter.')
+        } catch (err) {
+          setUploadRejectMessage(
+            getApiErrorMessage(err, 'Không lưu được ảnh bìa lên server.'),
+          )
+        } finally {
+          setCoverBusy(false)
+        }
+      }
     } catch {
       setUploadRejectMessage('Không đọc được ảnh bìa — thử lại.')
     }
-  }, [activeChapterId, setChapters])
+  }, [activeChapterId, chapters, setChapters, workspaceApi])
 
   function onCoverChange(e) {
     void handleCoverFile(e.target.files?.[0])
@@ -512,20 +710,80 @@ export default function ChapterAnnotator({
     void handleCoverFile(e.dataTransfer.files?.[0])
   }
 
-  const removeCover = useCallback(() => {
+  const removeCover = useCallback(async () => {
     if (!activeChapterId) return
-    setChapters(prev => prev.map(c => (c.id === activeChapterId ? { ...c, cover: null } : c)))
-  }, [activeChapterId, setChapters])
-
-  const deleteChapter = useCallback((chapterId) => {
-    if (!chapterId) return
-    const target = chapters.find(c => c.id === chapterId)
+    const target = chapters.find((c) => c.id === activeChapterId)
     if (!target) return
-    const label = `Ch. ${target.num}${target.pages.length ? ` (${target.pages.length} trang)` : ''}`
-    if (typeof window !== 'undefined' && !window.confirm(`Xóa ${label}? Hành động không thể hoàn tác.`)) return
+    if (isChapterCoverLocked(target.apiStatus)) {
+      setUploadRejectMessage('Chapter đã published — không xóa ảnh bìa được.')
+      return
+    }
 
-    setChapters(prev => prev.filter(c => c.id !== chapterId))
-    setNotes(prev => {
+    const isServerChapter = /^[0-9a-f]{24}$/i.test(String(activeChapterId))
+    if (isServerChapter && workspaceApi?.removeChapterCover) {
+      setCoverBusy(true)
+      try {
+        await workspaceApi.removeChapterCover(activeChapterId)
+        toast.success('Đã gỡ ảnh bìa chapter.')
+      } catch (err) {
+        setUploadRejectMessage(
+          getApiErrorMessage(err, 'Không gỡ được ảnh bìa trên server.'),
+        )
+        setCoverBusy(false)
+        return
+      } finally {
+        setCoverBusy(false)
+      }
+    }
+
+    setChapters((prev) =>
+      prev.map((c) => (c.id === activeChapterId ? { ...c, cover: null } : c)),
+    )
+  }, [activeChapterId, chapters, setChapters, workspaceApi])
+
+  const deleteChapter = useCallback(async (chapterId) => {
+    if (!chapterId) return
+    const target = chapters.find((c) => c.id === chapterId)
+    if (!target) return
+
+    const apiStatus = String(target.apiStatus ?? '').toLowerCase()
+    const isServerChapter = /^[0-9a-f]{24}$/i.test(String(chapterId))
+    const pageCount = Array.isArray(target.pages) ? target.pages.length : 0
+    const deletableStatuses = new Set(['draft', 'pending_assistant', ''])
+
+    if (isServerChapter && pageCount > 0) {
+      toast.error('Chỉ xóa được chapter chưa có trang nào.')
+      return
+    }
+    if (isServerChapter && apiStatus && !deletableStatuses.has(apiStatus)) {
+      toast.error(
+        `Chỉ xóa được chapter bản nháp hoặc đang chờ Assistant (hiện tại: "${apiStatus}").`,
+      )
+      return
+    }
+
+    const label = `Ch. ${target.num}`
+    const isPendingAssistant = apiStatus === 'pending_assistant'
+    const confirmMsg = isPendingAssistant
+      ? `Xóa ${label}?\n\nChapter đang chờ Assistant nhưng chưa có trang. Xóa sẽ gỡ khỏi hàng chờ Assistant. Không hoàn tác được.`
+      : `Xóa ${label}? Chapter chưa có trang. Hành động không thể hoàn tác.`
+
+    if (typeof window !== 'undefined' && !window.confirm(confirmMsg)) {
+      return
+    }
+
+    if (isServerChapter && workspaceApi?.deleteChapter) {
+      try {
+        await workspaceApi.deleteChapter(chapterId)
+        toast.success(`Đã xóa ${label}.`)
+      } catch (err) {
+        toast.error(getApiErrorMessage(err, 'Không xóa được chapter.'))
+        return
+      }
+    }
+
+    setChapters((prev) => prev.filter((c) => c.id !== chapterId))
+    setNotes((prev) => {
       const next = {}
       for (const k of Object.keys(prev)) {
         if (!k.startsWith(`${chapterId}-`)) next[k] = prev[k]
@@ -537,7 +795,15 @@ export default function ChapterAnnotator({
       setPageIndex(0)
       setSelectedNoteId(null)
     }
-  }, [chapters, activeChapterId, setChapters, setNotes, setActiveChapterId, setPageIndex])
+  }, [
+    chapters,
+    activeChapterId,
+    setChapters,
+    setNotes,
+    setActiveChapterId,
+    setPageIndex,
+    workspaceApi,
+  ])
 
   function getPercent(e, ref) {
     const el = ref?.current
@@ -608,7 +874,6 @@ export default function ChapterAnnotator({
   function updateNoteField(stableKey, field, value) {
     if (field === 'text') {
       draftTextRef.current.set(stableKey, value)
-      setDraftText(prev => ({ ...prev, [stableKey]: value }))
     } else {
       setNotes(prev => ({
         ...prev,
@@ -633,18 +898,26 @@ export default function ChapterAnnotator({
 
   useEffect(() => {
     if (!activeChapterId || !workspaceApi?.loadChapterPages) return
-    void workspaceApi.loadChapterPages(activeChapterId)
+    // Luôn force khi mở annotate — tránh cache ảnh gốc thiếu result_image_url
+    void workspaceApi.loadChapterPages(activeChapterId, { force: true })
   }, [activeChapterId, workspaceApi?.loadChapterPages])
 
   useEffect(() => {
-    // Revision mode: không nạp note cũ (round trước) — Mangaka chỉ khoanh vùng mới.
-    if (revisionMode) return
+    // Sau duyệt Assistant / revision: không nạp note cũ từ BE (đã xóa 1 lần ở effect trên)
+    if (revisionMode || hideLegacyNotes) return
     if (!workspaceApi?.loadPageNotes || !currentPageId || !pageKey) return
     if (!isValidObjectId(currentPageId)) return
     if (loadedNoteKeysRef.current.has(pageKey)) return
     loadedNoteKeysRef.current.add(pageKey)
     void workspaceApi.loadPageNotes(currentPageId, pageKey)
-  }, [currentPageId, pageKey, workspaceApi?.loadPageNotes, isValidObjectId, revisionMode])
+  }, [
+    currentPageId,
+    pageKey,
+    workspaceApi?.loadPageNotes,
+    isValidObjectId,
+    revisionMode,
+    hideLegacyNotes,
+  ])
 
   useEffect(() => {
     loadedNoteKeysRef.current.clear()
@@ -730,6 +1003,8 @@ export default function ChapterAnnotator({
     && selectedSeriesTitle.trim().length > 0
     && !!uploadTargetChapter
     && (hiredAssistants.length === 0 || !!sendAssistantId)
+    && !coverBusy
+    && !uploadUi
 
   function ToolButtons({ onDark = false }) {
     const outlineOnDark =
@@ -1287,19 +1562,21 @@ export default function ChapterAnnotator({
               </Button>
             </div>
           ) : hiredAssistants.length > 0 ? (
-            <div className="space-y-1">
-              <Label className="text-xs">Chọn Assistant nhận chapter</Label>
-              <Select value={sendAssistantId ? String(sendAssistantId) : '__none__'} onValueChange={v => setSendAssistantId(v === '__none__' ? '' : v)}>
-                <SelectTrigger className="h-9">
-                  <SelectValue placeholder="— Chọn Assistant —" />
-                </SelectTrigger>
-                <SelectContent>
-                  {hiredAssistants.map(a => (
-                    <SelectItem key={a.assistantId} value={String(a.assistantId)}>{a.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <Select
+              value={sendAssistantId ? String(sendAssistantId) : undefined}
+              onValueChange={setSendAssistantId}
+            >
+              <SelectTrigger className="h-9 w-full min-w-0">
+                <SelectValue placeholder="— Chọn Assistant —" />
+              </SelectTrigger>
+              <SelectContent>
+                {hiredAssistants.map(a => (
+                  <SelectItem key={a.assistantId} value={String(a.assistantId)}>
+                    {a.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           ) : (
             <p className="text-xs text-muted-foreground">
               Chưa có Assistant trong đội — {onOpenAssistantsTab ? (
@@ -1408,7 +1685,26 @@ export default function ChapterAnnotator({
                     {seriesChapters.map(ch => {
                       const isPick = ch.id === activeChapterId
                       const noteCount = countChapterNotes(ch.id, ch.pages, notes)
-                      const thumb = ch.cover?.url ?? ch.pages?.[0]?.url
+                      const seriesMeta = seriesOptions.find((s) => s.title === ch.series)
+                      const thumb = resolveChapterCoverDisplay({
+                        coverImageUrl: ch.cover?.url,
+                        page1OriginalUrl: getPage1OriginalUrl(ch.pages),
+                        seriesCoverUrl: seriesMeta?.coverImage,
+                      })
+                      const status = String(ch.apiStatus ?? '').toLowerCase()
+                      const isLocalId = !/^[0-9a-f]{24}$/i.test(String(ch.id))
+                      const pageCount = Array.isArray(ch.pages) ? ch.pages.length : 0
+                      // Khớp BE: draft | pending_assistant + 0 page (hoặc chapter local chưa sync)
+                      const canDelete =
+                        isLocalId
+                        || (
+                          pageCount === 0
+                          && (!status || status === 'draft' || status === 'pending_assistant')
+                        )
+                      const deleteTitle =
+                        status === 'pending_assistant'
+                          ? `Xóa Ch. ${ch.num} (đang chờ Assistant, chưa có trang)`
+                          : `Xóa Ch. ${ch.num}`
                       return (
                         <li
                           key={ch.id}
@@ -1441,16 +1737,22 @@ export default function ChapterAnnotator({
                               </Badge>
                             ) : null}
                           </button>
-                          <Button
-                            size="xs"
-                            variant="ghost"
-                            className="size-7 shrink-0 p-0 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100 data-[active=true]:opacity-100"
-                            data-active={isPick || undefined}
-                            title={`Xóa Ch. ${ch.num}`}
-                            onClick={(e) => { e.stopPropagation(); deleteChapter(ch.id) }}
-                          >
-                            <Trash2 className="size-3.5" />
-                          </Button>
+                          {canDelete ? (
+                            <Button
+                              type="button"
+                              size="xs"
+                              variant="ghost"
+                              className="size-7 shrink-0 p-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                              title={deleteTitle}
+                              aria-label={deleteTitle}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                void deleteChapter(ch.id)
+                              }}
+                            >
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          ) : null}
                         </li>
                       )
                     })}
@@ -1481,9 +1783,9 @@ export default function ChapterAnnotator({
               <input
                 ref={coverFileRef}
                 type="file"
-                accept="image/png,image/jpeg,image/jpg,image/webp"
+                accept={CHAPTER_COVER_ACCEPT}
                 hidden
-                disabled={!uploadTargetChapter}
+                disabled={!coverInteractive}
                 onChange={onCoverChange}
               />
               <div className="rounded-xl border bg-muted/20 p-3">
@@ -1491,55 +1793,80 @@ export default function ChapterAnnotator({
                   <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     <ImageIcon className="size-3.5" />
                     Ảnh bìa chapter
+                    <span className="font-normal normal-case tracking-normal">(tuỳ chọn)</span>
                   </div>
-                  {uploadTargetChapter?.cover ? (
-                    <Button size="xs" variant="ghost" className="text-destructive" onClick={removeCover}>
+                  {uploadTargetChapter?.cover && coverInteractive ? (
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      className="text-destructive"
+                      disabled={coverBusy}
+                      onClick={() => { void removeCover() }}
+                    >
                       <Trash2 className="size-3" />
                       Gỡ
                     </Button>
                   ) : null}
                 </div>
+                {coverBusy ? (
+                  <p className="mb-2 text-xs text-muted-foreground">Đang lưu ảnh bìa...</p>
+                ) : null}
+                {coverLocked ? (
+                  <p className="mb-2 text-xs text-amber-700 dark:text-amber-300">
+                    Chapter đã published — không đổi / xóa ảnh bìa.
+                  </p>
+                ) : null}
                 {uploadTargetChapter?.cover ? (
                   <div className="flex items-center gap-3">
                     <button
                       type="button"
-                      onClick={() => uploadTargetChapter && coverFileRef.current?.click()}
-                      className="group relative h-24 w-20 shrink-0 overflow-hidden rounded-lg border bg-background"
+                      disabled={!coverInteractive}
+                      onClick={() => coverInteractive && coverFileRef.current?.click()}
+                      className="group relative h-24 w-20 shrink-0 overflow-hidden rounded-lg border bg-background disabled:cursor-not-allowed disabled:opacity-70"
                       title="Bấm để đổi ảnh bìa"
                     >
                       <img src={uploadTargetChapter.cover.url} alt="Ảnh bìa" className="size-full object-cover transition-transform group-hover:scale-105" />
                     </button>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium">{uploadTargetChapter.cover.name || 'cover.png'}</p>
-                      <p className="text-xs text-muted-foreground">Bấm vào ảnh để đổi.</p>
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        className="mt-2"
-                        onClick={() => uploadTargetChapter && coverFileRef.current?.click()}
-                      >
-                        <Upload className="size-3" />
-                        Đổi ảnh
-                      </Button>
+                      {coverLocked ? (
+                        <p className="text-xs text-muted-foreground">Không thể chỉnh sửa.</p>
+                      ) : null}
+                      {coverInteractive ? (
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          className="mt-2"
+                          disabled={coverBusy}
+                          onClick={() => coverFileRef.current?.click()}
+                        >
+                          <Upload className="size-3" />
+                          Đổi ảnh
+                        </Button>
+                      ) : null}
                     </div>
                   </div>
                 ) : (
                   <div
                     className={cn(
-                      'flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed px-4 py-5 text-center transition-colors',
-                      uploadTargetChapter
-                        ? 'hover:border-primary/50 hover:bg-muted/50'
+                      'flex flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed px-4 py-5 text-center transition-colors',
+                      coverInteractive
+                        ? 'cursor-pointer hover:border-primary/50 hover:bg-muted/50'
                         : 'cursor-not-allowed opacity-60',
                     )}
-                    onDrop={uploadTargetChapter ? onCoverDrop : e => e.preventDefault()}
+                    onDrop={coverInteractive ? onCoverDrop : e => e.preventDefault()}
                     onDragOver={e => e.preventDefault()}
-                    onClick={() => { if (uploadTargetChapter) coverFileRef.current?.click() }}
-                    role={uploadTargetChapter ? 'button' : undefined}
+                    onClick={() => { if (coverInteractive) coverFileRef.current?.click() }}
+                    role={coverInteractive ? 'button' : undefined}
                   >
                     <ImageIcon className="size-5 text-muted-foreground" />
-                    <p className="text-xs font-medium">Bấm hoặc kéo thả ảnh bìa</p>
+                    <p className="text-xs font-medium">Chọn ảnh bìa cho chapter</p>
                     <p className="text-[11px] text-muted-foreground">
-                      {uploadTargetChapter ? 'Chỉ 1 ảnh — dùng làm thumbnail chapter.' : 'Tạo / chọn chapter trước'}
+                      {!uploadTargetChapter
+                        ? 'Tạo / chọn chapter trước'
+                        : coverLocked
+                          ? 'Chapter đã published'
+                          : 'Tuỳ chọn · JPEG/PNG/WEBP · tối đa 10MB'}
                     </p>
                   </div>
                 )}

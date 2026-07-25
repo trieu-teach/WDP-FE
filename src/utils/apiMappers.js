@@ -147,14 +147,18 @@ export function apiChapterToAnnotator(chapter, pages = [], seriesTitle) {
   const coverUrl = resolveMediaUrl(
     c.cover_url ?? c.coverUrl ?? c.cover_image_url ?? c.coverImageUrl ?? null,
   )
+  const pageList = Array.isArray(pages) ? pages : []
   return {
     id,
     seriesId: c.series_id?._id ?? c.series_id ?? null,
     series: seriesTitle ?? '',
     num: c.chapter_number ?? c.num ?? 0,
-    pages: pages.map(apiPageToUi),
+    pages: pageList.map((p, i) => (p && (p.originalUrl != null || p.resultUrl != null || p.url != null) && p.pageNumber != null
+      ? p
+      : apiPageToUi(p, i))),
     createdAt: formatRelativeDate(c.createdAt ?? c.created_at),
     cover: coverUrl ? { url: coverUrl, name: 'cover' } : null,
+    apiStatus: c.status ?? c.apiStatus ?? null,
   }
 }
 
@@ -178,7 +182,9 @@ export function apiPageToUi(page, index = 0) {
     p.final_image_url,
     p.finalImageUrl,
   )
-  const fallbackRaw =
+  // `url` mặc định = ảnh gốc Mangaka. Ảnh Assistant nằm ở resultUrl.
+  // Annotate chỉ chuyển sang result sau khi Mangaka duyệt (xem getAnnotatorPageDisplayUrl).
+  const displayRaw =
     originalRaw
     ?? resultRaw
     ?? p.image_url
@@ -191,7 +197,7 @@ export function apiPageToUi(page, index = 0) {
   return {
     id,
     name: p.name ?? p.filename ?? `Trang ${pageNum}`,
-    url: resolveMediaUrl(resultRaw ?? fallbackRaw),
+    url: resolveMediaUrl(displayRaw),
     originalUrl: resolveMediaUrl(originalRaw),
     resultUrl: resolveMediaUrl(resultRaw),
     pageNumber: pageNum,
@@ -354,30 +360,26 @@ export function isSpatialRegionNote(note) {
   return true
 }
 
-export function filterSpatialMangakaNotes(notes) {
-  const spatial = (notes ?? []).filter(isSpatialRegionNote)
-  if (!spatial.length) return []
-
-  // Ưu tiên nguồn có toạ độ chính xác từ DB / BE
-  const priority = ['api', 'taskNotes', 'chapterPageTasks', 'byPage', 'revisionMap', 'revisionArray', 'revisionParsed']
-  const sorted = [...spatial].sort((a, b) => {
-    const pa = priority.indexOf(a.source ?? '')
-    const pb = priority.indexOf(b.source ?? '')
-    return (pa === -1 ? 99 : pa) - (pb === -1 ? 99 : pb)
-  })
-
-  const seen = new Set()
-  const out = []
-  for (const n of sorted) {
-    const key = n.clientKey ?? n.id ?? `${n.x}-${n.y}-${n.w}-${n.h}-${n.text}`
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push(n)
-  }
-  return out
+/** Cùng vùng trên trang (làm tròn %) — dùng để gộp note trùng từ nhiều nguồn/id. */
+export function noteSpatialFingerprint(note) {
+  if (!isSpatialRegionNote(note)) return null
+  const x = Math.round(Number(note.x ?? 0))
+  const y = Math.round(Number(note.y ?? 0))
+  const w = Math.round(Number(note.w ?? note.width ?? 0))
+  const h = Math.round(Number(note.h ?? note.height ?? 0))
+  return `${x}:${y}:${w}:${h}`
 }
 
-const NOTE_SOURCE_PRIORITY = ['api', 'taskNotes', 'chapterPageTasks', 'byPage', 'revisionMap', 'revisionArray', 'revisionParsed']
+const NOTE_SOURCE_PRIORITY = [
+  'api',
+  'taskNotes',
+  'chapterPageTasks',
+  'byPage',
+  'revisionMap',
+  'revisionArray',
+  'revisionParsed',
+  'chapterAnnotations',
+]
 
 function noteMergeScore(note) {
   let s = NOTE_SOURCE_PRIORITY.indexOf(note?.source ?? '')
@@ -386,24 +388,61 @@ function noteMergeScore(note) {
   return s
 }
 
-/** Gộp notes từ nhiều nguồn — ưu tiên API + toạ độ hợp lệ khi trùng id. */
+/** Chọn bản note tốt hơn khi trùng vùng / trùng id. */
+function pickPreferredMangakaNote(a, b) {
+  if (!a) return b
+  if (!b) return a
+  const sa = noteMergeScore(a)
+  const sb = noteMergeScore(b)
+  if (sa !== sb) return sa < sb ? a : b
+  const ta = String(a.text ?? a.content ?? '').trim().length
+  const tb = String(b.text ?? b.content ?? '').trim().length
+  if (ta !== tb) return ta > tb ? a : b
+  const aOther = !a.taskType || a.taskType === 'other'
+  const bOther = !b.taskType || b.taskType === 'other'
+  if (aOther && !bOther) return b
+  if (bOther && !aOther) return a
+  return a
+}
+
+export function filterSpatialMangakaNotes(notes) {
+  const spatial = (notes ?? []).filter(isSpatialRegionNote)
+  if (!spatial.length) return []
+
+  // Gộp theo vùng (không theo id) — cùng ô Mangaka từ api/task/revision chỉ hiện 1 lần
+  const byRegion = new Map()
+  for (const n of spatial) {
+    const key = noteSpatialFingerprint(n)
+      ?? String(n.clientKey ?? n.id ?? '')
+    if (!key) continue
+    byRegion.set(key, pickPreferredMangakaNote(byRegion.get(key), n))
+  }
+  return Array.from(byRegion.values())
+}
+
+/** Gộp notes từ nhiều nguồn — ưu tiên API + gộp trùng vùng khi khác id. */
 export function mergeMangakaNoteLists(...lists) {
-  const byKey = new Map()
+  const byId = new Map()
   for (const list of lists) {
     for (const note of list ?? []) {
       let key = note?.clientKey ?? note?.id
       if (key == null && note?._id != null) key = String(note._id)
       if (key == null && isSpatialRegionNote(note)) {
-        key = `spatial-${note.x}-${note.y}-${note.w}-${note.h}-${note.text ?? ''}`
+        key = `spatial-${noteSpatialFingerprint(note)}`
       }
       if (!key) continue
-      const prev = byKey.get(key)
-      if (!prev || noteMergeScore(note) < noteMergeScore(prev)) {
-        byKey.set(key, note)
-      }
+      byId.set(String(key), pickPreferredMangakaNote(byId.get(String(key)), note))
     }
   }
-  return Array.from(byKey.values())
+
+  // Pass 2: cùng toạ độ vùng → 1 note (tránh nhân bản 3 nguồn khác id)
+  const byRegionOrId = new Map()
+  for (const note of byId.values()) {
+    const region = noteSpatialFingerprint(note)
+    const key = region ? `region:${region}` : `id:${note.clientKey ?? note.id}`
+    byRegionOrId.set(key, pickPreferredMangakaNote(byRegionOrId.get(key), note))
+  }
+  return Array.from(byRegionOrId.values())
 }
 
 /** Gom ghi chú Mangaka cho 1 trang (pageIdx 0-based, pages đã sort). */
@@ -734,6 +773,50 @@ export const MANGAKA_TE_SENDABLE_STATUSES = ['approved_by_mangaka', 'TE_revision
 
 export function canMangakaSendToTe(apiStatus) {
   return MANGAKA_TE_SENDABLE_STATUSES.includes(String(apiStatus ?? ''))
+}
+
+/**
+ * Sau khi Mangaka duyệt bản Assistant (approved_by_mangaka trở đi),
+ * trang Upload & ghi chú mới hiện ảnh đã chỉnh sửa.
+ */
+const ANNOTATE_SHOW_EDITED_STATUSES = new Set([
+  'approved_by_mangaka',
+  'te_revision',
+  'pending_te',
+  'pending_eb',
+  'approved_by_eb',
+  'published',
+  // UI aliases (apiStatus đôi khi bị map nhầm sang UI)
+  'approved',
+  'done',
+  'tantou',
+])
+
+export function shouldShowAssistantEditedOnAnnotate(apiStatus) {
+  const status = String(apiStatus ?? '').trim().toLowerCase()
+  return ANNOTATE_SHOW_EDITED_STATUSES.has(status)
+}
+
+/** URL hiển thị trên Upload & ghi chú / series detail. */
+export function getAnnotatorPageDisplayUrl(page, apiStatus, { preferResult = false } = {}) {
+  const p = page ?? {}
+  const result = p.resultUrl ?? p.resultImageUrl ?? null
+  const original = p.originalUrl ?? null
+  if (
+    preferResult
+    || p.assistantApproved === true
+    || shouldShowAssistantEditedOnAnnotate(apiStatus)
+  ) {
+    // Ưu tiên ảnh Assistant đã duyệt — không dùng p.url (thường là ảnh gốc).
+    return result ?? original ?? p.url ?? null
+  }
+  return original ?? p.url ?? result ?? null
+}
+
+/** Ẩn note vòng Assistant cũ sau khi Mangaka đã duyệt ảnh. */
+export function shouldHideLegacyAnnotatorNotes(apiStatus, page) {
+  if (page?.assistantApproved === true) return true
+  return shouldShowAssistantEditedOnAnnotate(apiStatus)
 }
 
 function formatRelativeDate(iso) {

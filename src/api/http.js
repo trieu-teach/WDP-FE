@@ -119,6 +119,20 @@ export function getApiErrorMessage(err, fallback = 'Có lỗi xảy ra. Vui lòn
   return translated[message] ?? message
 }
 
+/** Lỗi mạng / proxy timeout (không có HTTP response) — thường do BE Render sleep. */
+export function isNetworkError(err) {
+  if (err?.response) return false
+  const code = String(err?.code ?? '')
+  const msg = String(err?.message ?? '')
+  return (
+    code === 'ECONNABORTED'
+    || code === 'ERR_NETWORK'
+    || code === 'ETIMEDOUT'
+    || code === 'ECONNRESET'
+    || /timeout|network error|exceeded/i.test(msg)
+  )
+}
+
 /** Lấy tên file từ header Content-Disposition (hỗ trợ filename*=UTF-8''). */
 export function parseContentDispositionFilename(header) {
   if (!header || typeof header !== 'string') return null

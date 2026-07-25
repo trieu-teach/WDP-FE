@@ -60,6 +60,9 @@ const STATUS_CONFIG = {
 
 const SERIES_STATUS_VALUES = ['draft', 'submitted', 'approved', 'rejected', 'published', 'cancelled']
 
+/** Soft delete chỉ cho các status này (khớp BE). */
+const SOFT_DELETABLE_STATUSES = new Set(['draft', 'rejected', 'cancelled'])
+
 function formatNumber(n) {
   const num = Number(n) || 0
   if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`
@@ -79,6 +82,7 @@ function formatDate(value) {
 function normalizeManga(raw, index = 0) {
   const title = raw.title ?? raw.name ?? '—'
   const tags = Array.isArray(raw.tags) ? raw.tags : Array.isArray(raw.genre) ? raw.genre : []
+  const deletedAt = raw.deletedAt ?? raw.deleted_at ?? null
   return {
     id: raw.id ?? raw._id,
     title,
@@ -94,7 +98,14 @@ function normalizeManga(raw, index = 0) {
     initials: title.slice(0, 2).toUpperCase(),
     bg: `linear-gradient(135deg, hsl(${(title.charCodeAt(0) || index) * 37 % 360} 60% 45%), hsl(${(title.charCodeAt(0) || index) * 17 % 360} 70% 55%))`,
     thumbnail: raw.thumbnail ?? raw.cover_image_url ?? '',
+    deletedAt,
+    isDeleted: Boolean(deletedAt ?? raw.isDeleted),
   }
+}
+
+function canSoftDeleteManga(manga) {
+  if (!manga || manga.isDeleted) return false
+  return SOFT_DELETABLE_STATUSES.has(String(manga.status ?? '').toLowerCase())
 }
 
 function MangaCard({ manga, onEdit, onDelete, onClick }) {
@@ -133,10 +144,15 @@ function MangaCard({ manga, onEdit, onDelete, onClick }) {
           </div>
 
           {/* Status badge */}
-          <div className="absolute left-2 top-2">
+          <div className="absolute left-2 top-2 flex flex-col gap-1">
             <Badge className="bg-white/95 text-foreground shadow-lg backdrop-blur-sm font-bold tracking-wide border-0">
               {statusConfig.label}
             </Badge>
+            {manga.isDeleted ? (
+              <Badge className="border-0 bg-zinc-900/85 text-white shadow-lg">
+                Đã ẩn
+              </Badge>
+            ) : null}
           </div>
 
           {/* Chapter count */}
@@ -174,6 +190,14 @@ function MangaCard({ manga, onEdit, onDelete, onClick }) {
               variant="outline"
               size="sm"
               className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              disabled={!canSoftDeleteManga(manga)}
+              title={
+                manga.isDeleted
+                  ? 'Truyện đã được ẩn'
+                  : canSoftDeleteManga(manga)
+                    ? 'Ẩn truyện (soft delete)'
+                    : 'Chỉ ẩn được truyện nháp / từ chối / đã huỷ'
+              }
               onClick={(e) => { e.stopPropagation(); onDelete() }}
             >
               <Trash2 className="size-3.5" />
@@ -224,9 +248,16 @@ function MangaRow({ manga, onEdit, onDelete, onClick }) {
       <td className="px-4 py-3 font-mono">{manga.chapters}</td>
       <td className="px-4 py-3">{formatNumber(manga.views)}</td>
       <td className="px-4 py-3">
-        <Badge className={cn('font-semibold tracking-wide', statusConfig.class)}>
-          {statusConfig.label}
-        </Badge>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Badge className={cn('font-semibold tracking-wide', statusConfig.class)}>
+            {statusConfig.label}
+          </Badge>
+          {manga.isDeleted ? (
+            <Badge variant="outline" className="text-[10px]">
+              Đã ẩn
+            </Badge>
+          ) : null}
+        </div>
       </td>
       <td className="px-4 py-3 text-xs text-muted-foreground">{manga.updatedAt}</td>
       <td className="px-4 py-3">
@@ -234,7 +265,20 @@ function MangaRow({ manga, onEdit, onDelete, onClick }) {
           <Button variant="ghost" size="icon-sm" onClick={(e) => { e.stopPropagation(); onEdit() }}>
             <Edit3 className="size-4" />
           </Button>
-          <Button variant="ghost" size="icon-sm" onClick={(e) => { e.stopPropagation(); onDelete() }} className="text-destructive hover:bg-destructive/10">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            disabled={!canSoftDeleteManga(manga)}
+            title={
+              manga.isDeleted
+                ? 'Truyện đã được ẩn'
+                : canSoftDeleteManga(manga)
+                  ? 'Ẩn truyện (soft delete)'
+                  : 'Chỉ ẩn được truyện nháp / từ chối / đã huỷ'
+            }
+            onClick={(e) => { e.stopPropagation(); onDelete() }}
+            className="text-destructive hover:bg-destructive/10"
+          >
             <Trash2 className="size-4" />
           </Button>
         </div>
@@ -394,44 +438,78 @@ export default function Manga() {
   const [search, setSearch] = useState('')
   const [chapterSearch, setChapterSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
+  const [includeDeleted, setIncludeDeleted] = useState(false)
   const [view, setView] = useState('grid')
   const [modal, setModal] = useState(null)
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [deleting, setDeleting] = useState(false)
   const [page, setPage] = useState(1)
   const ITEMS_PER_PAGE = 10
 
   // Reset page when search or filter changes
   useEffect(() => {
     setPage(1)
-  }, [search, chapterSearch, statusFilter])
+  }, [search, chapterSearch, statusFilter, includeDeleted])
 
-  useEffect(() => {
-    setLoading(true)
-    api.getMangaList()
-      .then(d => setList(Array.isArray(d) ? d.map(normalizeManga) : []))
-      .catch(() => setList([]))
-      .finally(() => setLoading(false))
-  }, [])
-
-  async function handleSave() {
-    setModal(null)
+  async function loadList(withDeleted = includeDeleted) {
     setLoading(true)
     try {
-      const d = await api.getMangaList()
+      const d = await api.getMangaList({ includeDeleted: withDeleted })
       setList(Array.isArray(d) ? d.map(normalizeManga) : [])
     } catch {
       setList([])
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
-  async function handleDelete(manga) {
-    if (!confirm('Xoá truyện này? Hành động này không thể hoàn tác.')) return
+  useEffect(() => {
+    void loadList(includeDeleted)
+  }, [includeDeleted])
+
+  async function handleSave() {
+    setModal(null)
+    await loadList(includeDeleted)
+  }
+
+  function handleDelete(manga) {
+    if (!canSoftDeleteManga(manga)) {
+      toast.error('Chỉ ẩn được truyện ở trạng thái nháp, từ chối hoặc đã huỷ.')
+      return
+    }
+    setDeleteTarget(manga)
+  }
+
+  async function confirmSoftDelete() {
+    const manga = deleteTarget
+    if (!manga?.id) return
+    setDeleting(true)
     try {
       await api.deleteManga(manga.id)
-      setList(l => l.filter(m => m.id !== manga.id))
-      toast.success('Đã xoá truyện')
+      if (includeDeleted) {
+        setList((l) =>
+          l.map((m) =>
+            m.id === manga.id
+              ? { ...m, isDeleted: true, deletedAt: new Date().toISOString() }
+              : m,
+          ),
+        )
+      } else {
+        setList((l) => l.filter((m) => m.id !== manga.id))
+      }
+      toast.success('Đã ẩn truyện')
+      setDeleteTarget(null)
     } catch (err) {
-      toast.error(err?.response?.data?.message || 'Không thể xoá truyện')
+      const status = err?.response?.status
+      if (status === 410) {
+        toast.error(err?.response?.data?.message || 'Truyện đã được ẩn trước đó.')
+        await loadList(includeDeleted)
+        setDeleteTarget(null)
+        return
+      }
+      toast.error(err?.response?.data?.message || 'Không thể ẩn truyện')
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -564,6 +642,16 @@ export default function Manga() {
                 })}
               </SelectContent>
             </Select>
+
+            <Button
+              type="button"
+              variant={includeDeleted ? 'secondary' : 'outline'}
+              className="h-11 gap-2"
+              onClick={() => setIncludeDeleted((v) => !v)}
+              title="GET /admin/manga?include_deleted=true"
+            >
+              {includeDeleted ? 'Đang hiện cả truyện đã ẩn' : 'Hiện truyện đã ẩn'}
+            </Button>
 
             {/* View Toggle */}
             <div className="flex rounded-xl border bg-muted/50 p-1">
@@ -800,6 +888,58 @@ export default function Manga() {
 
       {/* Dialog */}
       <MangaDialog manga={modal?.id ? modal : null} open={modal !== null} onClose={() => setModal(null)} onSave={handleSave} />
+
+      <Dialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setDeleteTarget(null)
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <span className="flex size-9 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+                <Trash2 className="size-4" />
+              </span>
+              Ẩn truyện?
+            </DialogTitle>
+            <DialogDescription className="text-left leading-relaxed">
+              {deleteTarget?.title ? (
+                <>
+                  Bạn sắp ẩn truyện <strong className="text-foreground">{deleteTarget.title}</strong>.
+                  {' '}Truyện sẽ không còn hiện trong danh sách, nhưng dữ liệu vẫn được giữ lại.
+                </>
+              ) : (
+                'Truyện sẽ không còn hiện trong danh sách, nhưng dữ liệu vẫn được giữ lại.'
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={deleting}
+              onClick={() => setDeleteTarget(null)}
+            >
+              Huỷ
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={deleting}
+              className="gap-1.5"
+              onClick={() => void confirmSoftDelete()}
+            >
+              {deleting ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Trash2 className="size-4" />
+              )}
+              {deleting ? 'Đang ẩn…' : 'Ẩn truyện'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

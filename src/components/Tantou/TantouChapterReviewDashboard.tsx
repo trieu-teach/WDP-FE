@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, ImageIcon } from "lucide-react";
 import { resolveMediaUrl } from "@/api/http.js";
 import { seriesService } from "@/api/series.service.js";
@@ -11,6 +11,7 @@ import {
 } from "@/api/teReviews.service.js";
 import {
   isChapterAwaitingTePublish,
+  TE_CHAPTER_APPROVED_STATUS,
   tePhaseLabel,
 } from "@/utils/teReviewPhase.js";
 import {
@@ -19,15 +20,13 @@ import {
 } from "@/utils/teReviewPending.js";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import { ChapterListTable } from "./ChapterListTable";
 import { TantouPageAnnotator } from "./TantouPageAnnotator";
 import { ReviewRatingPanel } from "./ReviewRatingPanel";
@@ -157,25 +156,51 @@ type TantouChapterReviewDashboardProps = {
   onCancel: () => void;
   onSaveReview: (
     payload: ReviewSavePayload,
-    options?: { submitAction?: "reject" | "publish"; saveDraftOnly?: boolean },
+    options?: { submitAction?: "reject" | "publish" | "release"; saveDraftOnly?: boolean },
   ) => void;
   onSelectChapter: (submissionId: string) => void;
   saving?: boolean;
 };
 
-function SelectedPills({ items }: { items: string[] }) {
-  if (!items.length) {
-    return (
-      <p className="min-h-9 rounded-md border border-dashed border-border/60 bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
-        Chưa chọn
+function MetaField({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="min-w-0 space-y-1">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
       </p>
-    );
+      <div className="text-sm text-foreground">{children}</div>
+    </div>
+  );
+}
+
+function ChipList({
+  items,
+  emptyLabel = "—",
+  prefix = "#",
+}: {
+  items: string[];
+  emptyLabel?: string;
+  prefix?: string;
+}) {
+  if (!items.length) {
+    return <span className="text-muted-foreground">{emptyLabel}</span>;
   }
   return (
-    <div className="flex min-h-9 flex-wrap gap-1.5 rounded-md border border-border/60 bg-muted/10 px-3 py-2">
+    <div className="flex flex-wrap gap-1.5">
       {items.map((item) => (
-        <Badge key={item} variant="secondary">
-          {item}
+        <Badge
+          key={item}
+          variant="secondary"
+          className="rounded-full border border-border/60 bg-muted/50 px-2.5 py-0.5 font-normal text-foreground"
+        >
+          {prefix}
+          {String(item).replace(/^#/, "")}
         </Badge>
       ))}
     </div>
@@ -675,16 +700,40 @@ export function TantouChapterReviewDashboard({
 
   const coverPreviewUrl = resolveMediaUrl(draft.series_cover_image_url);
   const requiresEbSubmit = isTeSeriesLevelSubmission(submission);
+  const resolvedChapterApiStatus =
+    viewingSubmissionWithPages.apiChapterStatus
+    ?? seriesChapters.find(
+      (ch) =>
+        String(ch._id ?? ch.id)
+        === String(viewingSubmissionWithPages.chapterId ?? viewingSubmissionWithPages.id),
+    )?.status
+    ?? "";
   const publishOnlyMode =
-    !requiresEbSubmit
-    && isChapterAwaitingTePublish(
-      viewingSubmissionWithPages.apiChapterStatus
-      ?? seriesChapters.find(
-        (ch) =>
-          String(ch._id ?? ch.id)
-          === String(viewingSubmissionWithPages.chapterId ?? viewingSubmissionWithPages.id),
-      )?.status,
+    !requiresEbSubmit && isChapterAwaitingTePublish(resolvedChapterApiStatus);
+  const assignedTeCanPublish =
+    viewingSubmissionWithPages.canReview !== false
+    && viewingSubmissionWithPages.teAssignmentStatus !== "other";
+  const publishEnabled =
+    publishOnlyMode && assignedTeCanPublish;
+  const publishDisabledReason = publishOnlyMode
+    ? (!assignedTeCanPublish
+      ? (viewingSubmissionWithPages.teAssignmentLabel
+        || "Chỉ TE đã phê duyệt chapter mới được phát hành.")
+      : undefined)
+    : "Phê duyệt trước — Publish chỉ khi chapter ở approved_by_EB.";
+
+  // Đồng bộ status local sau approve (giữ nút Publish hiện ngay)
+  useEffect(() => {
+    if (!isChapterAwaitingTePublish(submission.apiChapterStatus)) return;
+    const chId = String(submission.chapterId ?? submission.id);
+    setSeriesChapters((prev) =>
+      prev.map((ch) =>
+        String(ch._id ?? ch.id) === chId
+          ? { ...ch, status: TE_CHAPTER_APPROVED_STATUS }
+          : ch,
+      ),
     );
+  }, [submission.apiChapterStatus, submission.chapterId, submission.id]);
 
   useEffect(() => {
     const seriesId = resolvedSeriesId;
@@ -741,42 +790,51 @@ export function TantouChapterReviewDashboard({
     };
   }, [resolvedSeriesId, submission.tabType, submission.phase, submission.pipeline]);
 
+  const seriesTitle = draft.series_name || submission.seriesTitle;
+  const authorName =
+    draft.series_author_name
+    || submission.seriesMeta?.authorName
+    || submission.mangakaName
+    || "—";
+
   return (
-    <div className="space-y-6 dark:text-zinc-100">
+    <div className="space-y-5 dark:text-zinc-100">
       <header className="flex flex-wrap items-center gap-3 border-b border-border/60 pb-4">
         <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
           <ArrowLeft className="size-4" />
-          Cancel
+          Quay lại
         </Button>
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium uppercase tracking-widest text-sky-500">
-            Tantou · Chapter Review
-          </p>
-          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-            {draft.series_name || submission.seriesTitle}
+          <h1 className="truncate text-xl font-bold tracking-tight sm:text-2xl">
+            {seriesTitle}
           </h1>
-          <p className="text-sm text-muted-foreground">
-            Ch. {viewingSubmissionWithPages.chapterNum} ·{" "}
-            {viewingSubmissionWithPages.pageLabel} · {submission.mangakaName}
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            Tập {viewingSubmissionWithPages.chapterNum || "?"} ·{" "}
+            {viewingSubmissionWithPages.pageLabel || "Trang 1"} · Tác giả:{" "}
+            {authorName}
           </p>
         </div>
         <Badge
-          variant={requiresEbSubmit ? "destructive" : "secondary"}
+          className={cn(
+            "rounded-full px-3 py-1 text-xs font-medium",
+            requiresEbSubmit
+              ? "border border-amber-200 bg-amber-500/10 text-amber-900 hover:bg-amber-500/10 dark:border-amber-500/30 dark:text-amber-200"
+              : "border border-sky-200 bg-sky-500/10 text-sky-900 hover:bg-sky-500/10 dark:border-sky-500/30 dark:text-sky-200",
+          )}
         >
           {tePhaseLabel(submissionTeTabType(submission))}
         </Badge>
       </header>
 
-      <div className="space-y-6">
-        <div className="flex flex-col gap-5">
-          <Card className="border-border/70 dark:bg-zinc-950/60">
-            <CardHeader className="pb-3">
+      <div className="space-y-5">
+        <div className="flex flex-col gap-4">
+          <Card className="border-border/70 shadow-sm dark:bg-zinc-950/60">
+            <CardHeader className="pb-2 pt-4">
               <CardTitle className="text-base">Thông tin truyện</CardTitle>
             </CardHeader>
-            <CardContent className="flex flex-col gap-6 md:flex-row md:items-start md:gap-8">
-              <div className="mx-auto w-full max-w-[200px] shrink-0 space-y-2 md:mx-0 md:w-[220px] lg:w-[240px]">
-                <Label className="text-sm font-medium">Ảnh bìa</Label>
-                <div className="aspect-[3/4] w-full overflow-hidden rounded-xl border border-border/70 bg-muted/30 shadow-sm">
+            <CardContent className="flex flex-col gap-5 pb-5 md:flex-row md:items-start md:gap-6">
+              <div className="mx-auto w-full max-w-[140px] shrink-0 md:mx-0 md:w-[148px]">
+                <div className="aspect-[3/4] w-full overflow-hidden rounded-lg border border-border/70 bg-muted/30 shadow-sm">
                   {coverPreviewUrl ? (
                     <img
                       src={coverPreviewUrl}
@@ -784,55 +842,33 @@ export function TantouChapterReviewDashboard({
                       className="size-full object-cover"
                     />
                   ) : (
-                    <div className="flex size-full flex-col items-center justify-center gap-3 p-4 text-center text-muted-foreground">
-                      <ImageIcon className="size-10 opacity-35" />
-                      <span className="text-sm leading-snug">Chưa có ảnh bìa</span>
+                    <div className="flex size-full flex-col items-center justify-center gap-2 p-3 text-center text-muted-foreground">
+                      <ImageIcon className="size-8 opacity-35" />
+                      <span className="text-xs leading-snug">Chưa có ảnh bìa</span>
                     </div>
                   )}
                 </div>
               </div>
 
-              <div className="grid min-w-0 flex-1 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="tantou-series-name">Series</Label>
-                  <Input
-                    id="tantou-series-name"
-                    value={draft.series_name}
-                    readOnly
-                    className="bg-muted/40"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="tantou-author-name">Tên tác giả</Label>
-                  <Input
-                    id="tantou-author-name"
-                    value={draft.series_author_name}
-                    readOnly
-                    placeholder="—"
-                    className="bg-muted/40"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Tag</Label>
-                  <SelectedPills items={draft.series_tags} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Thể loại</Label>
-                  <SelectedPills items={draft.series_genre} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="tantou-series-synopsis">Mô tả</Label>
-                  <Textarea
-                    id="tantou-series-synopsis"
-                    value={draft.series_synopsis}
-                    onChange={(e) =>
-                      setDraft((c) => ({
-                        ...c,
-                        series_synopsis: e.target.value,
-                      }))
-                    }
-                    className="min-h-28 resize-y dark:bg-zinc-900/80"
-                  />
+              <div className="grid min-w-0 flex-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+                <MetaField label="Series">
+                  <p className="font-semibold leading-snug">{seriesTitle || "—"}</p>
+                </MetaField>
+                <MetaField label="Tác giả">
+                  <p className="font-medium leading-snug">{authorName}</p>
+                </MetaField>
+                <MetaField label="Thể loại">
+                  <ChipList items={draft.series_genre} emptyLabel="Chưa có" />
+                </MetaField>
+                <MetaField label="Tag">
+                  <ChipList items={draft.series_tags} emptyLabel="Chưa có" />
+                </MetaField>
+                <div className="sm:col-span-2">
+                  <MetaField label="Mô tả">
+                    <p className="max-h-24 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+                      {draft.series_synopsis?.trim() || "Chưa có mô tả."}
+                    </p>
+                  </MetaField>
                 </div>
               </div>
             </CardContent>
@@ -847,8 +883,8 @@ export function TantouChapterReviewDashboard({
           />
         </div>
 
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(340px,420px)] xl:items-stretch xl:gap-8">
-          <div className="flex min-h-0 flex-col">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(300px,360px)] xl:items-stretch xl:gap-5">
+          <div className="flex min-h-[560px] min-w-0 flex-col xl:min-h-[640px]">
             {viewingSubmissionWithPages ? (
               <TantouPageAnnotator
                 ref={readerRef}
@@ -877,11 +913,13 @@ export function TantouChapterReviewDashboard({
             )}
           </div>
 
-          <div className="flex min-h-0 flex-col">
+          <div className="flex flex-col xl:sticky xl:top-4 xl:self-start">
             <ReviewRatingPanel
               draft={draft}
               requiresEbSubmit={requiresEbSubmit}
               publishOnlyMode={publishOnlyMode}
+              publishEnabled={publishEnabled}
+              publishDisabledReason={publishDisabledReason}
               saving={saving}
               onReviewTextChange={(text) =>
                 setDraft((c) => ({ ...c, reviewText: text }))
@@ -905,6 +943,9 @@ export function TantouChapterReviewDashboard({
               }
               onSendToEb={() =>
                 onSaveReview(buildPayload(), { submitAction: "publish" })
+              }
+              onPublish={() =>
+                onSaveReview(buildPayload(), { submitAction: "release" })
               }
             />
           </div>

@@ -39,6 +39,7 @@ function mapMangaListItem(s, index = 0) {
     : Array.isArray(s.genre)
       ? s.genre
       : []
+  const deletedAt = s.deleted_at ?? s.deletedAt ?? null
   return {
     id: s.id ?? s._id,
     title,
@@ -53,6 +54,8 @@ function mapMangaListItem(s, index = 0) {
     bg: `hsl(${((title.charCodeAt(0) || index) * 37) % 360} 55% 42%)`,
     thumbnail: s.thumbnail ?? '',
     category: s.category ?? '',
+    deletedAt,
+    isDeleted: Boolean(deletedAt),
   }
 }
 
@@ -201,7 +204,15 @@ export const realService = {
       .get('/admin/dashboard', { params: { activityPage: page, activityLimit: limit } })
       .then((res) => mapRecentActivitiesResponse(res?.data ?? res)),
 
-  getMangaList: () => instance.get('/admin/manga').then(unwrap).then(mapMangaList),
+  getMangaList: (params = {}) =>
+    instance
+      .get('/admin/manga', {
+        params: {
+          ...(params.includeDeleted ? { include_deleted: true } : {}),
+        },
+      })
+      .then(unwrap)
+      .then(mapMangaList),
 
   getMangaById: (id) => instance.get(`/admin/manga/${id}`).then(unwrap),
 
@@ -209,6 +220,7 @@ export const realService = {
 
   updateManga: (id, data) => instance.put(`/admin/manga/${id}`, data).then(unwrap),
 
+  /** Soft delete — BE set deleted_at (chỉ draft / rejected / cancelled). */
   deleteManga: (id) => instance.delete(`/admin/manga/${id}`).then(unwrap),
 
   getChaptersByManga: (mangaId) =>

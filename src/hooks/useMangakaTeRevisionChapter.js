@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { chaptersService } from '@/api/chapters.service.js'
 import { getApiErrorMessage } from '@/api/http.js'
 import { mapChapterRevisionAnnotationsToNotesByPage } from '@/components/Tantou/reviewUtils'
-import { apiPageToUi } from '@/utils/apiMappers.js'
+import { apiPageToUi, getAnnotatorPageDisplayUrl } from '@/utils/apiMappers.js'
 
 function extractPagesList(chapter, pagesRes) {
   if (Array.isArray(chapter?.pages) && chapter.pages.length) {
@@ -52,7 +52,14 @@ export function useMangakaTeRevisionChapter(chapterId, { enabled = true } = {}) 
           return
         }
 
-        const uiPages = rawPages.map((page, index) => apiPageToUi(page, index))
+        const apiStatus = chapter?.status ?? null
+        const uiPages = rawPages.map((page, index) => {
+          const ui = apiPageToUi(page, index)
+          return {
+            ...ui,
+            url: getAnnotatorPageDisplayUrl(ui, apiStatus) ?? ui.url,
+          }
+        })
         const pagesMeta = rawPages.map((page, index) => ({
           _id: page._id ?? page.id ?? uiPages[index]?.id,
           id: page.id ?? page._id ?? uiPages[index]?.id,

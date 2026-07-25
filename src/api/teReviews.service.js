@@ -314,10 +314,20 @@ export const teReviewsService = {
       .then(unwrap)
   },
 
-  /** @deprecated Dùng reviewChapter */
+  /**
+   * POST /te-reviews/chapter/:chapterId/te-action
+   * Giai đoạn 2 (series đã EB-approved): approve/reject chapter.
+   * approve → chapter.status = approved_by_EB (KHÔNG auto-publish).
+   * Auto-claim: te_id null → gán TE hiện tại; te_id = TE khác → 403.
+   * Response có thể kèm data.next_step = {
+   *   action: 'publish',
+   *   endpoint: 'POST /te-reviews/chapter/:chapterId/publish'
+   * }
+   * Bước publish tách riêng: POST /te-reviews/chapter/:chapterId/publish
+   */
   teAction(chapterId, { action, notes } = {}) {
     const mappedAction =
-      action === 'approve' || action === 'forward_eb' || action === 'publish'
+      action === 'approve' || action === 'forward_eb'
         ? 'approve'
         : action === 'reject' || action === 'request_revision'
           ? 'reject'
@@ -331,7 +341,9 @@ export const teReviewsService = {
 
   /**
    * POST /te-reviews/chapter/:chapterId/publish
-   * Giai đoạn 2 — chapter approved_by_EB, TE publish thủ công.
+   * Bước 2 sau approve — chỉ TE đã approve; chapter phải ở approved_by_EB.
+   * 403 — TE hiện tại không phải TE đã approve chapter.
+   * 400 — chapter không ở approved_by_EB.
    */
   publishChapter(chapterId) {
     return http.post(`/te-reviews/chapter/${chapterId}/publish`, {}).then(unwrap)

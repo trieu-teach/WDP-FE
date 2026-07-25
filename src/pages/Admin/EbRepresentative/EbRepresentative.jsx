@@ -6,6 +6,14 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
   Table,
   TableBody,
   TableCell,
@@ -18,6 +26,7 @@ export default function EbRepresentative() {
   const [candidates, setCandidates] = useState([])
   const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState(null)
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
 
   useEffect(() => {
     loadCandidates()
@@ -54,6 +63,7 @@ export default function EbRepresentative() {
     try {
       await api.clearEbRepresentative()
       toast.success('Đã bỏ chỉ định đại diện EB.')
+      setClearConfirmOpen(false)
       await loadCandidates()
     } catch (err) {
       toast.error(err?.response?.data?.message || 'Không thể bỏ chỉ định.')
@@ -82,26 +92,31 @@ export default function EbRepresentative() {
             Chỉ định một tài khoản EB duy nhất được lưu điểm hội đồng
           </p>
         </div>
-        <Button
-          variant="outline"
-          onClick={handleClear}
-          disabled={!current || updating === 'clear'}
-        >
-          {updating === 'clear' ? <Loader2 className="size-4 animate-spin" /> : <UserX className="size-4" />}
-          Bỏ chỉ định
-        </Button>
       </div>
 
       {current ? (
         <Card className="border-primary/30 bg-primary/5">
           <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Crown className="size-4 text-amber-500" />
-              Đại diện hiện tại
-            </CardTitle>
-            <CardDescription>
-              {current.name} ({current.email})
-            </CardDescription>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Crown className="size-4 text-amber-500" />
+                  Đại diện hiện tại
+                </CardTitle>
+                <CardDescription>
+                  {current.name} ({current.email})
+                </CardDescription>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setClearConfirmOpen(true)}
+                disabled={updating === 'clear'}
+              >
+                <UserX className="size-3.5" />
+                Bỏ chỉ định
+              </Button>
+            </div>
           </CardHeader>
         </Card>
       ) : (
@@ -152,18 +167,30 @@ export default function EbRepresentative() {
                       )}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        size="sm"
-                        disabled={user.is_eb_representative || user.status === 'banned' || updating === user.id}
-                        onClick={() => handleSetRepresentative(user.id)}
-                      >
-                        {updating === user.id ? (
-                          <Loader2 className="size-3.5 animate-spin" />
-                        ) : (
-                          <UserCheck className="size-3.5" />
-                        )}
-                        Chỉ định
-                      </Button>
+                      {user.is_eb_representative ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={updating === 'clear'}
+                          onClick={() => setClearConfirmOpen(true)}
+                        >
+                          <UserX className="size-3.5" />
+                          Bỏ chỉ định
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          disabled={user.status === 'banned' || updating === user.id}
+                          onClick={() => handleSetRepresentative(user.id)}
+                        >
+                          {updating === user.id ? (
+                            <Loader2 className="size-3.5 animate-spin" />
+                          ) : (
+                            <UserCheck className="size-3.5" />
+                          )}
+                          Chỉ định
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))
@@ -172,6 +199,59 @@ export default function EbRepresentative() {
           </Table>
         </CardContent>
       </Card>
+
+      <Dialog
+        open={clearConfirmOpen}
+        onOpenChange={(open) => {
+          if (!open && updating !== 'clear') setClearConfirmOpen(false)
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <span className="flex size-9 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+                <UserX className="size-4" />
+              </span>
+              Bỏ chỉ định?
+            </DialogTitle>
+            <DialogDescription className="text-left leading-relaxed">
+              {current?.name || current?.email ? (
+                <>
+                  Bạn có chắc muốn bỏ chỉ định đại diện EB{' '}
+                  <strong className="text-foreground">{current.name || current.email}</strong>?
+                  {' '}Tài khoản này sẽ không còn là đại diện lưu điểm hội đồng.
+                </>
+              ) : (
+                'Bạn có chắc muốn bỏ chỉ định đại diện EB hiện tại?'
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={updating === 'clear'}
+              onClick={() => setClearConfirmOpen(false)}
+            >
+              Huỷ
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={updating === 'clear'}
+              className="gap-1.5"
+              onClick={() => void handleClear()}
+            >
+              {updating === 'clear' ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <UserX className="size-4" />
+              )}
+              {updating === 'clear' ? 'Đang bỏ…' : 'Bỏ chỉ định'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

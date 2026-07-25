@@ -78,6 +78,15 @@ export const chaptersService = {
     return http.patch(`/chapters/${id}`, payload).then(unwrap)
   },
 
+  /**
+   * DELETE /chapters/:id
+   * Cho xóa khi status ∈ { draft, pending_assistant } VÀ chưa có page.
+   * Ownership: submitted_by === user hiện tại.
+   */
+  delete(id) {
+    return http.delete(`/chapters/${id}`).then(unwrap)
+  },
+
   getPages(chapterId) {
     return http.get(`/chapters/${chapterId}/pages`).then(unwrap)
   },
@@ -191,5 +200,31 @@ export const chaptersService = {
     return http
       .post(`/chapters/${chapterId}/publish`, { action: 'publish' })
       .then(unwrap)
+  },
+
+  /**
+   * PATCH /chapters/:id/cover — upload ảnh bìa (multipart field "cover").
+   * @returns {Promise<{ _id?, cover_image_url? }>}
+   */
+  uploadCover(chapterId, file) {
+    const fd = new FormData()
+    fd.append('cover', file)
+    return http.patch(`/chapters/${chapterId}/cover`, fd).then((body) => {
+      const data = body?.data ?? body
+      return data && typeof data === 'object' ? data : { cover_image_url: null }
+    })
+  },
+
+  /**
+   * PATCH /chapters/:id/cover — xóa ảnh bìa (field "remove"=true).
+   * Chapter published → BE trả 400.
+   */
+  removeCover(chapterId) {
+    const fd = new FormData()
+    fd.append('remove', 'true')
+    return http.patch(`/chapters/${chapterId}/cover`, fd).then((body) => {
+      const data = body?.data ?? body
+      return data && typeof data === 'object' ? data : { cover_image_url: '' }
+    })
   },
 }

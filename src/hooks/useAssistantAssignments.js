@@ -193,8 +193,24 @@ function pickPrimaryTaskForChapter(tasks, chapterId) {
 }
 
 function resolveChapterCoverUrl(c) {
-  const fromField = resolveMediaUrl(c?.cover_url ?? c?.coverUrl)
+  const fromField = resolveMediaUrl(
+    c?.cover_image_url ?? c?.cover_url ?? c?.coverUrl ?? c?.coverImageUrl,
+  )
   if (fromField) return fromField
+
+  const pages = Array.isArray(c?.pages) ? c.pages : []
+  const page1 =
+    pages.find((p) => Number(p?.page_number ?? p?.pageNumber) === 1)
+    ?? pages[0]
+    ?? null
+  const page1Original = resolveMediaUrl(
+    page1?.original_image_url
+    ?? page1?.originalImageUrl
+    ?? page1?.original_url
+    ?? page1?.image_url
+    ?? page1?.url,
+  )
+  if (page1Original) return page1Original
 
   const series = c?.series_id ?? c?.series
   if (series && typeof series === 'object') {

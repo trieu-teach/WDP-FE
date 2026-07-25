@@ -87,9 +87,9 @@ export function useMangakaTasks(chapterRows) {
       })
       setPendingReviews(reviews)
 
-      const teReady = subList
-        .filter((s) => canMangakaSendToTe(s.status))
-        .map((submission) => {
+      const teReadySubs = subList.filter((s) => canMangakaSendToTe(s.status))
+      const teReady = await Promise.all(
+        teReadySubs.map(async (submission) => {
           const row = rowMap.get(String(submission.id)) ?? {
             id: submission.id,
             seriesId: submission.seriesId,
@@ -98,11 +98,25 @@ export function useMangakaTasks(chapterRows) {
             title: submission.title ?? '',
             apiStatus: submission.status,
           }
+          let tasks = []
+          let allTasks = []
+          try {
+            const raw = await tasksService.getByChapter(submission.id)
+            allTasks = (Array.isArray(raw) ? raw : []).map(apiTaskToUi)
+            tasks = dedupeTasksForMangakaReview(allTasks)
+          } catch {
+            tasks = []
+            allTasks = []
+          }
           return {
             chapter: { ...row, apiStatus: submission.status },
             submission,
+            tasks,
+            allTasks,
+            awaitingTe: true,
           }
-        })
+        }),
+      )
       setTeReadyChapters(teReady)
     } finally {
       setLoading(false)

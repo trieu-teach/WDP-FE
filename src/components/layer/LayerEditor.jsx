@@ -24,9 +24,16 @@ import { chaptersService } from '@/api/chapters.service.js'
 import { tasksService } from '@/api/tasks.service.js'
 import { getApiErrorMessage, resolveMediaUrl } from '@/api/http.js'
 import { normalizeResultImageUrl, dedupeTasksByPage, sortTasksByPage, listTasksMissingResultImage, formatSubmitAllAssistantError } from '@/utils/chapterTaskFlow.js'
+import {
+  filterOutDoneMangakaNotes,
+  mangakaNoteDoneKeysFor,
+  readDoneMangakaNoteKeys,
+  writeDoneMangakaNoteKeys,
+} from '@/utils/assistantMangakaNotesDone.js'
 import { cn } from '@/lib/utils'
 import LayerCanvas from './LayerCanvas.jsx'
 import MangakaNoteOverlay from './MangakaNoteOverlay.jsx'
+import MangakaNotesPanel from './MangakaNotesPanel.jsx'
 import LayerStackPanel from './LayerStackPanel.jsx'
 import { ImageLightbox } from './ImageLightbox.jsx'
 
@@ -57,6 +64,7 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
   const [showOriginal, setShowOriginal] = useState(true)
   const [showRegionOverlay, setShowRegionOverlay] = useState(true)
   const [showNoteOverlay, setShowNoteOverlay] = useState(true)
+  const [doneNoteKeys, setDoneNoteKeys] = useState(() => new Set())
   const [lightboxImage, setLightboxImage] = useState(null)
   const [lightboxTitle, setLightboxTitle] = useState('')
   const [downloadingImage, setDownloadingImage] = useState(null) // 'original' | 'merged' | null
@@ -284,7 +292,7 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
     chapter?.revision_notes_parsed,
   ])
 
-  // Gộp notes — ưu tiên GET /pages/:id/notes (source: api) khi trùng id
+  // 3 nguồn giữ nguyên; merge theo vùng để cùng 1 ô Mangaka không nhân bản khi khác id
   const allNotes = useMemo(() => {
     const taskList = taskNotes.map(n => ({
       ...n,
@@ -295,13 +303,44 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
       ...n,
       source: n.source ?? 'chapterAnnotations',
     }))
-    return keepLatestRevisionNotes(mergeMangakaNoteLists(pageNotes, taskList, chapterList))
+    return keepLatestRevisionNotes(
+      mergeMangakaNoteLists(pageNotes, taskList, chapterList),
+    )
   }, [taskNotes, chapterPageAnnotations, pageNotes])
 
   const overlayNotes = useMemo(
     () => filterSpatialMangakaNotes(allNotes),
     [allNotes],
   )
+
+  // Ẩn note đã đánh dấu hoàn thành (list + overlay) — không đổi 3 nguồn load
+  const visibleOverlayNotes = useMemo(
+    () => filterOutDoneMangakaNotes(overlayNotes, doneNoteKeys),
+    [overlayNotes, doneNoteKeys],
+  )
+
+  useEffect(() => {
+    setDoneNoteKeys(readDoneMangakaNoteKeys(chapterId, activePageId))
+  }, [chapterId, activePageId])
+
+  function markMangakaNoteDone(note) {
+    const keys = mangakaNoteDoneKeysFor(note)
+    if (!keys.length) return
+    setDoneNoteKeys((prev) => {
+      const next = new Set(prev)
+      for (const k of keys) next.add(k)
+      writeDoneMangakaNoteKeys(chapterId, activePageId, next)
+      return next
+    })
+  }
+
+  function restoreDoneMangakaNotes() {
+    setDoneNoteKeys(() => {
+      const next = new Set()
+      writeDoneMangakaNoteKeys(chapterId, activePageId, next)
+      return next
+    })
+  }
 
   // DEBUG: theo dõi note đến từ đâu, có toạ độ không
   useEffect(() => {
@@ -815,7 +854,7 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
                 showRegion={showRegionOverlay}
                 showNotes={false}
                 overlay={
-                  <MangakaNoteOverlay notes={overlayNotes} visible={showNoteOverlay} />
+                  <MangakaNoteOverlay notes={visibleOverlayNotes} visible={showNoteOverlay} />
                 }
               />
             </div>
@@ -884,6 +923,15 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
         {/* Sidebar */}
         <div className="flex w-96 shrink-0 flex-col border-l border-white/5 bg-[#0f0f1a]">
           <div className="scrollbar-hide flex min-h-0 flex-1 flex-col overflow-y-auto">
+            {/* Ghi chú Mangaka — chỉ UI đọc, dùng cùng overlayNotes (không đổi 3 nguồn load) */}
+            <MangakaNotesPanel
+              notes={visibleOverlayNotes}
+              loading={notesLoading}
+              doneCount={doneNoteKeys.size}
+              onMarkDone={markMangakaNoteDone}
+              onRestoreDone={restoreDoneMangakaNotes}
+            />
+
             {/* Final image preview — dùng URL cache theo pageId, fallback sang finalImage */}
             {(finalImagesByPage[activePageId] || finalImage) && (
               <div className="border-b border-white/5 p-3">

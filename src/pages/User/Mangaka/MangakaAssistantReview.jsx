@@ -57,6 +57,7 @@ function ChapterReviewItem({ review, annotatorChapters }) {
   const tasks = dedupeTasksForMangakaReview(review.allTasks ?? review.tasks ?? []);
   const approvedTasks = tasks.filter((t) => t.status === "approved").length;
   const unapproved = countUnapprovedTasks(tasks);
+  const awaitingTe = Boolean(review?.awaitingTe);
 
   return (
     <Link
@@ -87,8 +88,16 @@ function ChapterReviewItem({ review, annotatorChapters }) {
               </span>
             ) : null}
           </p>
-          <Badge className={cn("shrink-0", REVIEW_BADGE_CLASS)} variant="secondary">
-            Chờ duyệt
+          <Badge
+            className={cn(
+              "shrink-0",
+              awaitingTe
+                ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400"
+                : REVIEW_BADGE_CLASS,
+            )}
+            variant="secondary"
+          >
+            {awaitingTe ? "Chờ gửi TE" : "Chờ duyệt"}
           </Badge>
         </div>
         <p className="truncate text-xs text-muted-foreground">
@@ -97,7 +106,11 @@ function ChapterReviewItem({ review, annotatorChapters }) {
             : "Đã nộp từ Assistant"}
           {tasks.length > 0 ? ` · ${approvedTasks}/${tasks.length} task` : ""}
         </p>
-        {unapproved > 0 ? (
+        {awaitingTe ? (
+          <p className="text-[11px] font-medium text-emerald-600">
+            Đã duyệt — chọn TE và gửi
+          </p>
+        ) : unapproved > 0 ? (
           <p className="text-[11px] font-medium text-amber-600">
             Còn {unapproved} task cần nhận/duyệt
           </p>
@@ -125,11 +138,26 @@ export default function MangakaAssistantReview() {
     loadChapterPages,
   } = useMangakaWorkspace(user);
 
-  const { pendingReviews, loading: tasksLoading } = useMangakaTasks(chapterRows);
+  const { pendingReviews, teReadyChapters, loading: tasksLoading } = useMangakaTasks(chapterRows);
+
+  /** Chapter chờ duyệt task + chapter đã duyệt xong chờ gửi TE */
+  const reviewQueue = useMemo(() => {
+    const map = new Map();
+    for (const r of pendingReviews ?? []) {
+      const id = String(r?.chapter?.id ?? r?.submission?.id ?? "");
+      if (id) map.set(id, r);
+    }
+    for (const r of teReadyChapters ?? []) {
+      const id = String(r?.chapter?.id ?? r?.submission?.id ?? "");
+      if (!id || map.has(id)) continue;
+      map.set(id, r);
+    }
+    return [...map.values()];
+  }, [pendingReviews, teReadyChapters]);
 
   const pendingReviewChapterIds = useMemo(
-    () => (pendingReviews ?? []).map((r) => r?.chapter?.id).filter(Boolean).join("|"),
-    [pendingReviews],
+    () => reviewQueue.map((r) => r?.chapter?.id).filter(Boolean).join("|"),
+    [reviewQueue],
   );
 
   useEffect(() => {
@@ -150,7 +178,7 @@ export default function MangakaAssistantReview() {
 
   const reviewsBySeries = useMemo(() => {
     const map = new Map();
-    for (const review of pendingReviews ?? []) {
+    for (const review of reviewQueue) {
       const series =
         review?.chapter?.series ??
         review?.submission?.seriesName ??
@@ -160,6 +188,7 @@ export default function MangakaAssistantReview() {
     }
 
     function reviewUrgency(review) {
+      if (review?.awaitingTe) return 2;
       const tasks = dedupeTasksForMangakaReview(
         review.allTasks ?? review.tasks ?? [],
       );
@@ -185,7 +214,7 @@ export default function MangakaAssistantReview() {
         }
         return a.series.localeCompare(b.series, "vi");
       });
-  }, [pendingReviews, seriesList]);
+  }, [reviewQueue, seriesList]);
 
   const selectedGroup = useMemo(
     () => reviewsBySeries.find((g) => g.series === selectedSeries) ?? null,
@@ -229,33 +258,29 @@ export default function MangakaAssistantReview() {
             <h1 className="flex flex-wrap items-center gap-2 text-xl font-semibold tracking-tight sm:text-2xl">
               <ClipboardCheck className="size-5 shrink-0 text-amber-600" />
               {selectedGroup ? selectedGroup.series : "Series chờ duyệt"}
-              {pendingReviews.length > 0 ? (
+              {reviewQueue.length > 0 ? (
                 <Badge variant="secondary" className="text-sm font-normal">
                   {selectedGroup
                     ? `${selectedGroup.reviews.length} chapter`
-                    : `${reviewsBySeries.length} series · ${pendingReviews.length} chapter`}
+                    : `${reviewsBySeries.length} series · ${reviewQueue.length} chapter`}
                 </Badge>
               ) : null}
             </h1>
           </div>
         </header>
 
-        {tasksLoading && pendingReviews.length === 0 ? (
+        {tasksLoading && reviewQueue.length === 0 ? (
           <Card>
             <CardContent className="py-12 text-center text-sm text-muted-foreground">
               Đang tải danh sách series chờ duyệt...
             </CardContent>
           </Card>
-        ) : pendingReviews.length === 0 ? (
+        ) : reviewQueue.length === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
               <ClipboardCheck className="size-10 text-muted-foreground/40" />
               <div className="space-y-1">
                 <p className="font-medium">Chưa có bản nào chờ duyệt</p>
-                <p className="text-sm text-muted-foreground">
-                  Sau khi gửi chapter cho Assistant và họ nộp ảnh kết quả, series
-                  sẽ hiện tại đây.
-                </p>
               </div>
               <Button variant="outline" asChild>
                 <Link to="/mangaka" state={{ tab: "annotate" }}>

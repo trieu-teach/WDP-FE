@@ -134,9 +134,11 @@ export function AssistantReviewChapterCard({
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           <Badge className={REVIEW_BADGE_CLASS} variant="secondary">
-            {chapterSubmitted && hasImages
-              ? "Assistant đã nộp — chờ duyệt"
-              : "Chờ duyệt từ Assistant"}
+            {review?.awaitingTe
+              ? "Đã duyệt — chờ gửi TE"
+              : chapterSubmitted && hasImages
+                ? "Assistant đã nộp — chờ duyệt"
+                : "Chờ duyệt từ Assistant"}
           </Badge>
           {pageCompare.pageCount > 0 ? (
             <span className="text-[11px] text-muted-foreground">
