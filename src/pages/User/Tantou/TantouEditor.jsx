@@ -162,8 +162,6 @@ function assignmentBadgeClass(status) {
 function SubmissionCard({
   sub,
   onReview,
-  onQuickApprove,
-  showQuickApprove,
   hideMangakaMeta = false,
 }) {
   const canReview = sub.canReview !== false;
@@ -250,16 +248,6 @@ function SubmissionCard({
             <MessageSquareText className="size-3.5" />
             Mở & nhận xét
           </Button>
-          {showQuickApprove && sub.status === "pending" && canReview ? (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8"
-              onClick={() => onQuickApprove(sub.id)}
-            >
-              Duyệt nhanh
-            </Button>
-          ) : null}
         </div>
       </CardContent>
     </Card>
@@ -713,64 +701,6 @@ export default function TantouEditor() {
   function closeReview() {
     setReviewOpen(false);
     refresh();
-  }
-
-  async function handleQuickApprove(chapterId) {
-    const sub = submissions.find((s) => s.id === chapterId);
-    if (!sub || !isTeChapterLevelSubmission(sub)) return;
-    if (sub.canReview === false) {
-      toast.error(
-        sub.teAssignmentLabel ?? "Chapter này đã được gán cho TE khác.",
-      );
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const chId = String(sub.chapterId ?? sub.id ?? chapterId);
-      // Giai đoạn 2: te-action (BE auto-claim nếu te_id null) — không review-chapter
-      const res = await teReviewsService.teAction(chId, {
-        action: "approve",
-        notes: ["OK"],
-      });
-
-      setSubmissions((prev) =>
-        prev.map((s) => {
-          const id = String(s.chapterId ?? s.id);
-          if (id !== chId && s.id !== sub.id) return s;
-          return {
-            ...s,
-            apiChapterStatus: TE_CHAPTER_APPROVED_STATUS,
-            status: TE_UI_AWAITING_PUBLISH,
-            teId: currentTeId ?? s.teId,
-            teAssignmentStatus: "mine",
-            canReview: true,
-            teAssignmentLabel: "Đang review chapter của bạn",
-          };
-        }),
-      );
-
-      const nextStep = parseTeActionNextStep(res);
-      const publishHint =
-        !nextStep || nextStep.action === "publish"
-          ? " Bấm Phát hành để lên lịch xuất bản."
-          : "";
-      toast.success(
-        res?.message
-          ?? `Đã phê duyệt "${sub.seriesTitle}" · Ch.${sub.chapterNum || "?"}.${publishHint}`,
-      );
-      setSelectedId(sub.id);
-      setReviewOpen(true);
-    } catch (err) {
-      const fallback =
-        err?.response?.status === 403
-          ? (err?.response?.data?.message
-            || "Chapter này đã được gán cho TE khác.")
-          : "Duyệt nhanh thất bại.";
-      toast.error(getApiErrorMessage(err, fallback));
-    } finally {
-      setSaving(false);
-    }
   }
 
 function parseSeriesGenres(series) {
@@ -1456,8 +1386,6 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
                       key={sub.id}
                       sub={sub}
                       onReview={openReview}
-                      onQuickApprove={(id) => void handleQuickApprove(id)}
-                      showQuickApprove
                     />
                   ))
                 )}

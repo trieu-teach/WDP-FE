@@ -73,6 +73,110 @@ function mapMangaList(raw) {
  * GET /admin/manga/:id — tách reader_rating (reader vote) và eb_evaluation (HĐ EB).
  * Breaking: không còn total_votes / average_score flat ở root.
  */
+function mapEbCouncilMemberScores(members) {
+  if (!Array.isArray(members)) return []
+  return members.map((m) => {
+    const scores = m.scores && typeof m.scores === 'object' ? m.scores : {}
+    const scoreValues = [
+      'story_dialogue',
+      'art_design',
+      'panel_camera',
+      'pacing_climax',
+      'color',
+    ]
+      .map((key) => Number(scores[key]))
+      .filter((n) => Number.isFinite(n))
+    const computedAvg = scoreValues.length
+      ? scoreValues.reduce((sum, n) => sum + n, 0) / scoreValues.length
+      : null
+    const rawAvg = m.average != null ? Number(m.average) : null
+    const average =
+      rawAvg != null && Number.isFinite(rawAvg) && rawAvg > 0
+        ? rawAvg
+        : computedAvg
+
+    // Chỉ nhận string — tránh Boolean/number từ bug short-circuit BE (String(true) → "true")
+    const rawCandidate = m.member_name ?? m.memberName ?? m.name ?? ''
+    const rawName =
+      typeof rawCandidate === 'string' ? rawCandidate.trim() : ''
+    const looksLikeLocalId = /^member-\d+-[a-z0-9]+$/i.test(rawName)
+    const populatedFromId =
+      m.member_id && typeof m.member_id === 'object'
+        ? String(
+            m.member_id.full_name
+              ?? m.member_id.fullName
+              ?? m.member_id.username
+              ?? '',
+          ).trim()
+        : ''
+    const populatedName = [
+      populatedFromId,
+      typeof m.full_name === 'string' ? m.full_name.trim() : '',
+      typeof m.fullName === 'string' ? m.fullName.trim() : '',
+      typeof m.username === 'string' ? m.username.trim() : '',
+    ].find(Boolean) || ''
+
+    const memberName =
+      rawName && !looksLikeLocalId
+        ? rawName
+        : (populatedName || 'Thành viên HĐ')
+
+    return {
+      memberName,
+      scores,
+      average,
+      totalScore:
+        m.total_score != null
+          ? Number(m.total_score)
+          : (m.totalScore != null ? Number(m.totalScore) : null),
+      overallComment: m.overall_comment ?? m.overallComment ?? '',
+      savedAt: m.saved_at ?? m.savedAt ?? null,
+    }
+  })
+}
+
+/** Chuẩn hóa EBEvaluation / council summary từ BE (eb_evaluation & chapter_evaluation). */
+function mapEbCouncilSummary(ebRaw) {
+  if (!ebRaw || typeof ebRaw !== 'object') return null
+
+  const members = Array.isArray(ebRaw.member_scores)
+    ? ebRaw.member_scores
+    : (Array.isArray(ebRaw.memberScores) ? ebRaw.memberScores : [])
+
+  const chapterRaw = ebRaw.chapter
+  const chapter = chapterRaw && typeof chapterRaw === 'object'
+    ? {
+        id: chapterRaw.id ?? chapterRaw._id ?? null,
+        chapterNumber:
+          chapterRaw.chapter_number != null
+            ? Number(chapterRaw.chapter_number)
+            : (chapterRaw.chapterNumber != null
+              ? Number(chapterRaw.chapterNumber)
+              : null),
+        title: chapterRaw.title ?? '',
+      }
+    : null
+
+  return {
+    ...(chapter ? { chapter } : {}),
+    totalMembers: Number(ebRaw.total_members ?? ebRaw.totalMembers ?? 0) || 0,
+    councilAverage:
+      ebRaw.council_average != null
+        ? Number(ebRaw.council_average)
+        : (ebRaw.councilAverage != null ? Number(ebRaw.councilAverage) : null),
+    result: ebRaw.result ?? null,
+    status: ebRaw.status ?? null,
+    firstReview: Boolean(ebRaw.first_review ?? ebRaw.firstReview),
+    scheduledPublishAt:
+      ebRaw.scheduled_publish_at ?? ebRaw.scheduledPublishAt ?? null,
+    evaluatedAt: ebRaw.evaluated_at ?? ebRaw.evaluatedAt ?? null,
+    evaluatedBy: ebRaw.evaluated_by ?? ebRaw.evaluatedBy ?? null,
+    lastSavedBy: ebRaw.last_saved_by ?? ebRaw.lastSavedBy ?? null,
+    lastSavedAt: ebRaw.last_saved_at ?? ebRaw.lastSavedAt ?? null,
+    memberScores: mapEbCouncilMemberScores(members),
+  }
+}
+
 function mapAdminMangaDetail(raw) {
   if (!raw || typeof raw !== 'object') return raw
 
@@ -96,36 +200,12 @@ function mapAdminMangaDetail(raw) {
     ?? readerRaw?.averageScoreFormatted
     ?? `${averageScore.toFixed(1)} / 5`
 
-  const ebRaw = raw.eb_evaluation ?? raw.ebEvaluation ?? null
-  let ebEvaluation = null
-  if (ebRaw && typeof ebRaw === 'object') {
-    const members = Array.isArray(ebRaw.member_scores)
-      ? ebRaw.member_scores
-      : (Array.isArray(ebRaw.memberScores) ? ebRaw.memberScores : [])
-    ebEvaluation = {
-      totalMembers: Number(ebRaw.total_members ?? ebRaw.totalMembers ?? 0) || 0,
-      councilAverage:
-        ebRaw.council_average != null
-          ? Number(ebRaw.council_average)
-          : (ebRaw.councilAverage != null ? Number(ebRaw.councilAverage) : null),
-      result: ebRaw.result ?? null,
-      status: ebRaw.status ?? null,
-      firstReview: Boolean(ebRaw.first_review ?? ebRaw.firstReview),
-      scheduledPublishAt:
-        ebRaw.scheduled_publish_at ?? ebRaw.scheduledPublishAt ?? null,
-      evaluatedAt: ebRaw.evaluated_at ?? ebRaw.evaluatedAt ?? null,
-      evaluatedBy: ebRaw.evaluated_by ?? ebRaw.evaluatedBy ?? null,
-      lastSavedBy: ebRaw.last_saved_by ?? ebRaw.lastSavedBy ?? null,
-      lastSavedAt: ebRaw.last_saved_at ?? ebRaw.lastSavedAt ?? null,
-      memberScores: members.map((m) => ({
-        memberName: m.member_name ?? m.memberName ?? '—',
-        scores: m.scores && typeof m.scores === 'object' ? m.scores : {},
-        average: m.average != null ? Number(m.average) : null,
-        overallComment: m.overall_comment ?? m.overallComment ?? '',
-        savedAt: m.saved_at ?? m.savedAt ?? null,
-      })),
-    }
-  }
+  const ebEvaluation = mapEbCouncilSummary(
+    raw.eb_evaluation ?? raw.ebEvaluation ?? null,
+  )
+  const chapterEvaluation = mapEbCouncilSummary(
+    raw.chapter_evaluation ?? raw.chapterEvaluation ?? null,
+  )
 
   const title = raw.title ?? raw.name ?? '—'
   const tags = Array.isArray(raw.tags)
@@ -156,6 +236,7 @@ function mapAdminMangaDetail(raw) {
       averageScoreFormatted: formatted,
     },
     ebEvaluation,
+    chapterEvaluation,
     // aliases dùng UI cũ / fallback
     averageRating: averageScore,
     votesCount: totalVotes,

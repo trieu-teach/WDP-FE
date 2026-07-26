@@ -27,6 +27,7 @@ import { toast } from 'sonner'
 import { api } from '@/api/index.js'
 import { realService } from '@/api/real.service.js'
 import { getSession } from '@/lib/auth.js'
+import MangaEditDialog from '@/components/Admin/MangaEditDialog.jsx'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -168,22 +169,27 @@ function ebStatusLabel(status) {
   return map[key] ?? (status || '—')
 }
 
-function SeriesDetailCard({ series, chapters, comments, onDeleteComment, onBack, isAdmin }) {
+function SeriesDetailCard({
+  series,
+  chapters,
+  comments,
+  onDeleteComment,
+  onBack,
+  isAdmin,
+  onSeriesUpdated,
+}) {
   const statusConfig = SERIES_STATUS_CONFIG[series.status] ?? { label: series.status ?? '—', class: '' }
   const seriesCover = series.thumbnail || series.cover_image_url || series.coverImage
   const readerRating = series.readerRating ?? null
-  const avgRating = readerRating?.averageScore != null
-    ? Number(readerRating.averageScore).toFixed(1)
-    : (series.averageRating ? Number(series.averageRating).toFixed(1) : '0.0')
   const totalVotes = readerRating?.totalVotes
     ?? series.votesCount
     ?? series.votes_count
     ?? 0
-  const ratingFormatted = readerRating?.averageScoreFormatted
-    ?? `${avgRating} / 5`
   const eb = series.ebEvaluation ?? null
+  const chapterEb = series.chapterEvaluation ?? null
   const [chapterQuery, setChapterQuery] = useState('')
   const [chapterSort, setChapterSort] = useState('newest')
+  const [editOpen, setEditOpen] = useState(false)
 
   const chapterCount = Array.isArray(chapters)
     ? chapters.length
@@ -235,7 +241,7 @@ function SeriesDetailCard({ series, chapters, comments, onDeleteComment, onBack,
           </div>
 
           <Card className="border-border/70 shadow-none">
-            <CardContent className="grid grid-cols-2 gap-x-2 gap-y-3 p-3 sm:grid-cols-3">
+            <CardContent className="grid grid-cols-2 gap-x-2 gap-y-3 p-3">
               <div className="text-center">
                 <div className="flex items-center justify-center gap-1 text-sm font-bold text-blue-600">
                   <Eye className="size-3.5" />
@@ -251,13 +257,6 @@ function SeriesDetailCard({ series, chapters, comments, onDeleteComment, onBack,
                 <p className="mt-0.5 text-[11px] text-muted-foreground">Số chương</p>
               </div>
               <div className="text-center">
-                <div className="flex items-center justify-center gap-1 text-sm font-bold text-amber-600">
-                  <Star className="size-3.5 fill-amber-500 text-amber-500" />
-                  {avgRating}
-                </div>
-                <p className="mt-0.5 text-[11px] text-muted-foreground">Đánh giá</p>
-              </div>
-              <div className="text-center">
                 <div className="flex items-center justify-center gap-1 text-sm font-bold text-rose-600">
                   <Heart className="size-3.5" />
                   {formatNumber(totalVotes)}
@@ -271,27 +270,6 @@ function SeriesDetailCard({ series, chapters, comments, onDeleteComment, onBack,
                 </div>
                 <p className="mt-0.5 text-[11px] text-muted-foreground">Bình luận</p>
               </div>
-              <div className="flex flex-col items-center justify-center text-center">
-                <StarDisplay rating={Number(avgRating) || 0} />
-                <p className="mt-0.5 text-[11px] text-muted-foreground">Sao</p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-amber-200/70 bg-amber-50/40 shadow-none dark:border-amber-500/30 dark:bg-amber-500/10">
-            <CardHeader className="pb-2 pt-3">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <Star className="size-4 fill-amber-500 text-amber-500" />
-                Đánh giá Reader
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-1 pb-3 pt-0 text-sm">
-              <p className="font-semibold text-amber-800 dark:text-amber-200">
-                ⭐ {ratingFormatted}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {formatNumber(totalVotes)} votes
-              </p>
             </CardContent>
           </Card>
 
@@ -300,7 +278,7 @@ function SeriesDetailCard({ series, chapters, comments, onDeleteComment, onBack,
               <CardHeader className="pb-2 pt-3">
                 <CardTitle className="flex items-center gap-2 text-sm">
                   <Sparkles className="size-4 text-violet-600" />
-                  Hội đồng EB
+                  Hội đồng EB (series)
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 pb-3 pt-0 text-xs">
@@ -342,6 +320,61 @@ function SeriesDetailCard({ series, chapters, comments, onDeleteComment, onBack,
               </CardContent>
             </Card>
           )}
+
+          {chapterEb ? (
+            <Card className="border-sky-200/70 bg-sky-50/40 shadow-none dark:border-sky-500/30 dark:bg-sky-500/10">
+              <CardHeader className="pb-2 pt-3">
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <FileText className="size-4 text-sky-600" />
+                  Điểm EB · Chapter {chapterEb.chapter?.chapterNumber ?? 1}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 pb-3 pt-0 text-xs">
+                {chapterEb.chapter?.title ? (
+                  <p className="font-medium text-foreground">
+                    {chapterEb.chapter.title}
+                  </p>
+                ) : null}
+                <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+                  <span className="text-muted-foreground">Members</span>
+                  <span className="font-medium">{chapterEb.totalMembers}</span>
+                  <span className="text-muted-foreground">Average</span>
+                  <span className="font-medium">
+                    {chapterEb.councilAverage != null
+                      ? `${Number(chapterEb.councilAverage).toFixed(2)} / 5`
+                      : '—'}
+                  </span>
+                  <span className="text-muted-foreground">Result</span>
+                  <span className="font-medium">
+                    {ebResultLabel(chapterEb.result)}
+                    {chapterEb.status ? ` (${ebStatusLabel(chapterEb.status)})` : ''}
+                  </span>
+                </div>
+                {chapterEb.evaluatedBy?.name ? (
+                  <p className="text-muted-foreground">
+                    Evaluated by:{' '}
+                    <span className="font-medium text-foreground">
+                      {chapterEb.evaluatedBy.name}
+                    </span>
+                  </p>
+                ) : null}
+                {chapterEb.lastSavedAt || chapterEb.lastSavedBy?.name ? (
+                  <p className="text-muted-foreground">
+                    Last saved: {formatDateTime(chapterEb.lastSavedAt)}
+                    {chapterEb.lastSavedBy?.name
+                      ? ` by ${chapterEb.lastSavedBy.name}`
+                      : ''}
+                  </p>
+                ) : null}
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="border-border/70 shadow-none">
+              <CardContent className="py-3 text-center text-xs text-muted-foreground">
+                Chưa có điểm chấm chapter 1
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         {/* Right Column - Info & Chapters */}
@@ -368,17 +401,15 @@ function SeriesDetailCard({ series, chapters, comments, onDeleteComment, onBack,
             ) : null}
 
             <div className="flex flex-wrap gap-2 pt-0.5">
-              <Button type="button" size="sm" className="gap-1.5">
-                <BookOpen className="size-4" />
-                Đọc từ đầu
-              </Button>
-              <Button type="button" variant="outline" size="sm" className="gap-1.5">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => setEditOpen(true)}
+              >
                 <Edit3 className="size-4" />
                 Sửa thông tin
-              </Button>
-              <Button type="button" variant="outline" size="sm" className="gap-1.5">
-                <Heart className="size-4" />
-                Theo dõi
               </Button>
             </div>
 
@@ -391,20 +422,25 @@ function SeriesDetailCard({ series, chapters, comments, onDeleteComment, onBack,
             ) : null}
           </div>
 
-          {eb?.memberScores?.length > 0 ? (
+          {chapterEb?.memberScores?.length > 0 ? (
             <Card className="border-border/70 shadow-none">
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm">Chi tiết điểm thành viên EB</CardTitle>
+                <CardTitle className="text-sm">
+                  Chi tiết điểm EB · Chapter {chapterEb.chapter?.chapterNumber ?? 1}
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {eb.memberScores.map((member, idx) => (
+                {chapterEb.memberScores.map((member, idx) => (
                   <div
                     key={`${member.memberName}-${idx}`}
                     className="rounded-lg border border-border/60 bg-muted/10 p-3"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="text-sm font-medium">
-                        Member {idx + 1}: {member.memberName}
+                        Member {idx + 1}:{' '}
+                        {typeof member.memberName === 'string' && member.memberName.trim()
+                          ? member.memberName
+                          : 'Thành viên HĐ'}
                       </p>
                       <Badge variant="secondary" className="text-xs">
                         avg {member.average != null ? Number(member.average).toFixed(1) : '—'}
@@ -579,6 +615,16 @@ function SeriesDetailCard({ series, chapters, comments, onDeleteComment, onBack,
           )}
         </CardContent>
       </Card>
+
+      <MangaEditDialog
+        manga={series}
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        onSave={(updated) => {
+          setEditOpen(false)
+          onSeriesUpdated?.(updated)
+        }}
+      />
     </div>
   )
 }
@@ -1069,6 +1115,19 @@ export default function Chapters() {
           }}
           onBack={() => navigate('/admin/manga')}
           isAdmin={isAdmin}
+          onSeriesUpdated={(updated) => {
+            setSeriesDetail((prev) => {
+              if (!prev) return prev
+              return {
+                ...prev,
+                title: updated?.title ?? prev.title,
+                author: updated?.author ?? prev.author,
+                status: updated?.status ?? prev.status,
+                genre: updated?.genre ?? updated?.tags ?? prev.genre,
+                tags: updated?.tags ?? updated?.genre ?? prev.tags,
+              }
+            })
+          }}
         />
       )}
 

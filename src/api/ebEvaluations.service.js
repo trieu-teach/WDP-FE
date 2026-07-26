@@ -107,7 +107,11 @@ export const ebEvaluationsService = {
 
   /**
    * POST /eb-evaluations/chapter/:chapterId/evaluate
-   * Body: { member_scores: [{ member_id, scores }], notes? }
+   * Body: {
+   *   member_scores: [{ member_id, member_name, scores }],
+   *   notes?
+   * }
+   * BE yêu cầu member_name (required) — tên hiển thị từ roster FE.
    */
   evaluateChapter(chapterId, payload) {
     return http

@@ -287,12 +287,12 @@ export function TantouPublicationCalendar() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[minmax(240px,0.9fr)_minmax(0,1.3fr)]">
+        <div className="grid gap-4 lg:grid-cols-[minmax(240px,0.9fr)_minmax(0,1.3fr)] lg:items-start">
           <Card className="border-border/80 shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Theo ngày</CardTitle>
             </CardHeader>
-            <CardContent className="flex flex-col gap-2 sm:flex-row sm:flex-wrap lg:flex-col">
+            <CardContent className="scrollbar-hide flex max-h-[min(560px,calc(100vh-280px))] flex-col gap-2 overflow-y-auto sm:flex-row sm:flex-wrap lg:flex-col">
               {visibleDays.map((day) => {
                 const active = day.date === selectedDate;
                 return (
@@ -387,7 +387,7 @@ export function TantouPublicationCalendar() {
                 </div>
               ) : null}
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="scrollbar-hide max-h-[min(560px,calc(100vh-280px))] space-y-4 overflow-y-auto">
               {!selectedDay || selectedDay.eventCount === 0 ? (
                 <p className="py-8 text-center text-sm text-muted-foreground">
                   Không có sự kiện trong ngày này.

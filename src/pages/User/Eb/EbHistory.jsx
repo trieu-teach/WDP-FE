@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -92,7 +92,7 @@ function HistoryCard({ item }) {
                 ) : null}
               </div>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                Author: {item.series?.author?.name ?? "—"}
+                Tác giả: {item.series?.author?.name ?? "—"}
                 {!isSeries && item.chapter?.chapterNumber != null
                   ? ` · Ch. ${item.chapter.chapterNumber}`
                   : ""}
@@ -118,33 +118,35 @@ function HistoryCard({ item }) {
                 {item.classificationText}
               </Badge>
             ) : null}
-            <Badge
-              variant="outline"
-              className={cn(
-                "text-[10px]",
-                item.result === "approved" &&
-                  "border-green-200 bg-green-50 text-green-700",
-                item.result === "rejected" &&
-                  "border-red-200 bg-red-50 text-red-700",
-                item.result === "revision" &&
-                  "border-amber-200 bg-amber-50 text-amber-700",
-              )}
-            >
-              {ebHistoryResultLabel(item.result)}
-            </Badge>
+            {item.result ? (
+              <Badge
+                variant="outline"
+                className={cn(
+                  "text-[10px]",
+                  item.result === "approved" &&
+                    "border-green-200 bg-green-50 text-green-700",
+                  item.result === "rejected" &&
+                    "border-red-200 bg-red-50 text-red-700",
+                  item.result === "revision" &&
+                    "border-amber-200 bg-amber-50 text-amber-700",
+                )}
+              >
+                {ebHistoryResultLabel(item.result)}
+              </Badge>
+            ) : null}
             <Badge variant="secondary" className="text-[10px]">
               {ebHistoryStatusLabel(item.status)}
             </Badge>
             <span className="text-xs text-muted-foreground">
-              Members: {item.memberCount}
+              Thành viên: {item.memberCount}
             </span>
           </div>
 
           <p className="text-xs text-muted-foreground">
-            {item.firstReview ? "First review · " : ""}
-            Evaluated {formatDate(item.createdAt)}
+            {item.firstReview ? "Lần chấm đầu · " : ""}
+            Chấm ngày {formatDate(item.createdAt)}
             {item.lastSavedBy?.name
-              ? ` · Last saved ${formatDate(item.lastSavedAt)} by ${item.lastSavedBy.name}`
+              ? ` · Lưu gần nhất ${formatDate(item.lastSavedAt)} bởi ${item.lastSavedBy.name}`
               : ""}
           </p>
         </div>
@@ -156,14 +158,17 @@ function HistoryCard({ item }) {
 export default function EbHistory() {
   const navigate = useNavigate();
   const user = getSession();
-  const [scope, setScope] = useState("series");
+  const [scope] = useState("chapter");
   const [result, setResult] = useState("all");
   const [status, setStatus] = useState("all");
   const [query, setQuery] = useState("");
   const [searchInput, setSearchInput] = useState("");
+  const [suggestOpen, setSuggestOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState([]);
+  const knownNamesRef = useRef(new Set());
+  const [knownNames, setKnownNames] = useState([]);
   const [stats, setStats] = useState({
     totalSeriesReviewed: 0,
     totalChapterReviewed: 0,
@@ -196,6 +201,19 @@ export default function EbHistory() {
         total: mapped.total,
         hasMore: mapped.hasMore,
       });
+      let changed = false;
+      for (const item of mapped.items) {
+        const name = String(item.series?.name ?? "").trim();
+        if (name && !knownNamesRef.current.has(name)) {
+          knownNamesRef.current.add(name);
+          changed = true;
+        }
+      }
+      if (changed) {
+        setKnownNames([...knownNamesRef.current].sort((a, b) =>
+          a.localeCompare(b, "vi"),
+        ));
+      }
     } catch (err) {
       toast.error(getApiErrorMessage(err, "Không tải được lịch sử chấm điểm."));
       setItems([]);
@@ -207,6 +225,34 @@ export default function EbHistory() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Tìm kiếm tức thì khi gõ (debounce)
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const next = searchInput.trim();
+      setQuery((prev) => {
+        if (prev === next) return prev;
+        setPage(1);
+        return next;
+      });
+    }, 280);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+
+  const suggestions = useMemo(() => {
+    const q = searchInput.trim().toLowerCase();
+    if (!q) return [];
+    return knownNames
+      .filter((name) => name.toLowerCase().includes(q))
+      .slice(0, 8);
+  }, [knownNames, searchInput]);
+
+  function pickSuggestion(name) {
+    setSearchInput(name);
+    setQuery(name);
+    setPage(1);
+    setSuggestOpen(false);
+  }
 
   function handleLogout() {
     logout();
@@ -259,26 +305,10 @@ export default function EbHistory() {
           <CardHeader className="pb-3">
             <CardTitle className="text-sm">Bộ lọc</CardTitle>
             <CardDescription>
-              Mặc định xem series review (chapter_id = null)
+              Chỉ xem đánh giá chapter
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-2.5 lg:flex-row lg:items-center">
-            <Select
-              value={scope}
-              onValueChange={(v) => {
-                setScope(v);
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="h-9 w-full lg:w-44">
-                <SelectValue placeholder="Scope" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="series">Series review</SelectItem>
-                <SelectItem value="chapter">Chapter review</SelectItem>
-                <SelectItem value="all">All</SelectItem>
-              </SelectContent>
-            </Select>
             <Select
               value={result}
               onValueChange={(v) => {
@@ -286,14 +316,14 @@ export default function EbHistory() {
                 setPage(1);
               }}
             >
-              <SelectTrigger className="h-9 w-full lg:w-40">
-                <SelectValue placeholder="Result" />
+              <SelectTrigger className="h-9 w-full lg:w-44">
+                <SelectValue placeholder="Kết quả" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All results</SelectItem>
-                <SelectItem value="approved">Approved</SelectItem>
-                <SelectItem value="revision">Revision</SelectItem>
-                <SelectItem value="rejected">Rejected</SelectItem>
+                <SelectItem value="all">Tất cả kết quả</SelectItem>
+                <SelectItem value="approved">Đã duyệt</SelectItem>
+                <SelectItem value="revision">Yêu cầu chỉnh</SelectItem>
+                <SelectItem value="rejected">Từ chối</SelectItem>
               </SelectContent>
             </Select>
             <Select
@@ -303,61 +333,72 @@ export default function EbHistory() {
                 setPage(1);
               }}
             >
-              <SelectTrigger className="h-9 w-full lg:w-40">
-                <SelectValue placeholder="Status" />
+              <SelectTrigger className="h-9 w-full lg:w-44">
+                <SelectValue placeholder="Trạng thái" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All status</SelectItem>
-                <SelectItem value="scoring">Scoring</SelectItem>
-                <SelectItem value="saved">Saved</SelectItem>
-                <SelectItem value="locked">Locked</SelectItem>
+                <SelectItem value="all">Tất cả trạng thái</SelectItem>
+                <SelectItem value="scoring">Đang chấm</SelectItem>
+                <SelectItem value="saved">Đã lưu</SelectItem>
+                <SelectItem value="locked">Đã khóa</SelectItem>
               </SelectContent>
             </Select>
             <div className="relative min-w-0 flex-1">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Search className="pointer-events-none absolute left-3 top-1/2 z-10 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 className="h-9 pl-9"
                 placeholder="Tìm series..."
                 value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    setQuery(searchInput);
-                    setPage(1);
-                  }
+                onChange={(e) => {
+                  setSearchInput(e.target.value);
+                  setSuggestOpen(true);
                 }}
+                onFocus={() => setSuggestOpen(true)}
+                onBlur={() => {
+                  window.setTimeout(() => setSuggestOpen(false), 150);
+                }}
+                aria-autocomplete="list"
+                aria-expanded={suggestOpen && suggestions.length > 0}
               />
+              {suggestOpen && suggestions.length > 0 ? (
+                <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-20 overflow-hidden rounded-lg border border-border bg-popover shadow-md">
+                  <ul className="max-h-56 overflow-y-auto py-1">
+                    {suggestions.map((name) => (
+                      <li key={name}>
+                        <button
+                          type="button"
+                          className="flex w-full items-center px-3 py-2 text-left text-sm hover:bg-muted"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => pickSuggestion(name)}
+                        >
+                          <BookOpen className="mr-2 size-3.5 shrink-0 text-muted-foreground" />
+                          <span className="truncate">{name}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </div>
-            <Button
-              type="button"
-              size="sm"
-              className="h-9"
-              onClick={() => {
-                setQuery(searchInput);
-                setPage(1);
-              }}
-            >
-              Tìm
-            </Button>
           </CardContent>
         </Card>
 
         <div className="grid gap-3 sm:grid-cols-3">
           <Card className="border-border/70 shadow-none">
             <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">Series reviewed</p>
+              <p className="text-xs text-muted-foreground">Series đã chấm</p>
               <p className="text-2xl font-bold">{stats.totalSeriesReviewed}</p>
             </CardContent>
           </Card>
           <Card className="border-border/70 shadow-none">
             <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">Chapters reviewed</p>
+              <p className="text-xs text-muted-foreground">Chapter đã chấm</p>
               <p className="text-2xl font-bold">{stats.totalChapterReviewed}</p>
             </CardContent>
           </Card>
           <Card className="border-border/70 shadow-none">
             <CardContent className="p-4">
-              <p className="text-xs text-muted-foreground">Council average</p>
+              <p className="text-xs text-muted-foreground">Điểm TB hội đồng</p>
               <p className="text-2xl font-bold">
                 {stats.totalCouncilAverage != null
                   ? `${Number(stats.totalCouncilAverage).toFixed(2)} / 5`

@@ -453,8 +453,12 @@ function memberEntryToApiRow(member, entry) {
     return null
   }
 
+  const memberName = String(member?.name ?? member?.member_name ?? '').trim()
+  if (!memberName) return null
+
   return {
     member_id: member.id,
+    member_name: memberName,
     scores,
   }
 }
@@ -506,7 +510,13 @@ export function validateMemberScoresPayload(memberScores, requiredCount = EB_COU
   }
 
   for (const row of memberScores) {
-    const name = row.member_name || row.member_id || 'Thành viên'
+    const name = String(row.member_name ?? '').trim()
+    if (!name) {
+      return 'Mỗi thành viên cần có member_name (tên hiển thị).'
+    }
+    if (/^member-\d+-[a-z0-9]+$/i.test(name)) {
+      return `${name}: member_name không hợp lệ (đang trùng member_id).`
+    }
     const scores = row.scores ?? {}
     for (const key of EB_SCORE_KEYS) {
       const err = validateEbScore(scores[key])
@@ -900,23 +910,53 @@ export function mapEbHistoryDetailResponse(body) {
       ?? (raw.classification ? EB_CLASSIFICATION_LABELS[raw.classification] : null)
       ?? null,
     memberCount: Number(raw.member_count ?? raw.memberCount ?? members.length) || 0,
-    memberScores: members.map((m) => ({
-      memberId: resolveEntityId(m.member_id ?? m.memberId),
-      memberName: m.member_name ?? m.memberName ?? '—',
-      memberAvatarUrl: resolveMediaUrl(
-        m.member_avatar_url ?? m.memberAvatarUrl ?? null,
-      ),
-      isEbRepresentative: Boolean(
-        m.is_eb_representative ?? m.isEbRepresentative,
-      ),
-      scores: m.scores && typeof m.scores === 'object' ? m.scores : {},
-      average: m.average != null ? Number(m.average) : null,
-      totalScore: m.total_score != null ? Number(m.total_score) : null,
-      comments: m.comments && typeof m.comments === 'object' ? m.comments : {},
-      overallComment: m.overall_comment ?? m.overallComment ?? '',
-      notes: m.notes ?? '',
-      savedAt: m.saved_at ?? m.savedAt ?? null,
-    })),
+    memberScores: members.map((m) => {
+      const scores = m.scores && typeof m.scores === 'object' ? m.scores : {}
+      const scoreValues = EB_SCORE_KEYS
+        .map((key) => Number(scores[key]))
+        .filter((n) => Number.isFinite(n))
+      const computedAvg = scoreValues.length
+        ? scoreValues.reduce((sum, n) => sum + n, 0) / scoreValues.length
+        : null
+      const rawAvg = m.average != null ? Number(m.average) : null
+      const average =
+        rawAvg != null && Number.isFinite(rawAvg) && rawAvg > 0
+          ? rawAvg
+          : computedAvg
+
+      const rawCandidate = m.member_name ?? m.memberName ?? m.name ?? ''
+      const rawName =
+        typeof rawCandidate === 'string' ? rawCandidate.trim() : ''
+      const looksLikeLocalId = /^member-\d+-[a-z0-9]+$/i.test(rawName)
+      const populatedName = [
+        typeof m.full_name === 'string' ? m.full_name.trim() : '',
+        typeof m.fullName === 'string' ? m.fullName.trim() : '',
+        typeof m.username === 'string' ? m.username.trim() : '',
+      ].find(Boolean) || ''
+      const memberName = looksLikeLocalId || !rawName
+        ? (populatedName || 'Thành viên HĐ')
+        : rawName
+
+      return {
+        memberId: resolveEntityId(m.member_id ?? m.memberId),
+        externalMemberId:
+          m.external_member_id ?? m.externalMemberId ?? null,
+        memberName,
+        memberAvatarUrl: resolveMediaUrl(
+          m.member_avatar_url ?? m.memberAvatarUrl ?? null,
+        ),
+        isEbRepresentative: Boolean(
+          m.is_eb_representative ?? m.isEbRepresentative,
+        ),
+        scores,
+        average,
+        totalScore: m.total_score != null ? Number(m.total_score) : null,
+        comments: m.comments && typeof m.comments === 'object' ? m.comments : {},
+        overallComment: m.overall_comment ?? m.overallComment ?? '',
+        notes: m.notes ?? '',
+        savedAt: m.saved_at ?? m.savedAt ?? null,
+      }
+    }),
     scheduledPublishAt:
       raw.scheduled_publish_at ?? raw.scheduledPublishAt ?? null,
     evaluatedBy: mapEbPerson(raw.evaluated_by ?? raw.evaluatedBy),
@@ -941,9 +981,9 @@ export function mapEbHistoryDetailResponse(body) {
 
 export function ebHistoryResultLabel(result) {
   const map = {
-    approved: 'Approved',
-    revision: 'Revision',
-    rejected: 'Rejected',
+    approved: 'Đã duyệt',
+    revision: 'Yêu cầu chỉnh',
+    rejected: 'Từ chối',
   }
   const key = String(result ?? '').toLowerCase()
   return map[key] ?? (result || '—')
@@ -951,9 +991,9 @@ export function ebHistoryResultLabel(result) {
 
 export function ebHistoryStatusLabel(status) {
   const map = {
-    scoring: 'Scoring',
-    saved: 'Saved',
-    locked: 'Locked',
+    scoring: 'Đang chấm',
+    saved: 'Đã lưu',
+    locked: 'Đã khóa',
   }
   const key = String(status ?? '').toLowerCase()
   return map[key] ?? (status || '—')

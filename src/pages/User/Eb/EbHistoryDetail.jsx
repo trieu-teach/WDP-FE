@@ -130,7 +130,7 @@ export default function EbHistoryDetail() {
               Chi tiết lượt chấm
             </h1>
             <p className="text-sm text-muted-foreground">
-              {LABEL_EDITOR_BOARD} evaluation detail
+              Chi tiết một lượt đánh giá {LABEL_EDITOR_BOARD}
             </p>
           </div>
         </div>
@@ -171,7 +171,7 @@ export default function EbHistoryDetail() {
                       {series?.name ?? "Series"}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Author: {series?.author?.name ?? "—"}
+                      Tác giả: {series?.author?.name ?? "—"}
                     </p>
                   </div>
                   {series?.tags?.length ? (
@@ -185,11 +185,11 @@ export default function EbHistoryDetail() {
                   ) : null}
                   <div className="space-y-1 text-xs text-muted-foreground">
                     <p>
-                      Status: {series?.status ?? "—"}
-                      {series?.isPublic ? ", Public" : ""}
+                      Trạng thái: {series?.status ?? "—"}
+                      {series?.isPublic ? ", Công khai" : ""}
                     </p>
                     <p>
-                      Avg reader:{" "}
+                      Điểm reader:{" "}
                       {series?.averageScore != null
                         ? `${Number(series.averageScore).toFixed(1)} / 5`
                         : "—"}
@@ -224,7 +224,7 @@ export default function EbHistoryDetail() {
                       </Badge>
                       {detail.firstReview ? (
                         <Badge className="bg-sky-600 text-[10px] text-white hover:bg-sky-600">
-                          First review
+                          Lần chấm đầu
                         </Badge>
                       ) : null}
                     </div>
@@ -241,7 +241,7 @@ export default function EbHistoryDetail() {
                           {detail.classificationText ?? "—"}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          / 5 · {detail.memberCount} members
+                          / 5 · {detail.memberCount} thành viên
                         </p>
                       </div>
                     </div>
@@ -255,15 +255,15 @@ export default function EbHistoryDetail() {
                       ))}
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Evaluated {formatDate(detail.createdAt)}
+                      Chấm ngày {formatDate(detail.createdAt)}
                       {detail.evaluatedBy?.name
-                        ? ` by ${detail.evaluatedBy.name}`
+                        ? ` bởi ${detail.evaluatedBy.name}`
                         : ""}
                       {detail.lastSavedAt
-                        ? ` · Last saved ${formatDate(detail.lastSavedAt)}`
+                        ? ` · Lưu gần nhất ${formatDate(detail.lastSavedAt)}`
                         : ""}
                       {detail.lastSavedBy?.name
-                        ? ` by ${detail.lastSavedBy.name}`
+                        ? ` bởi ${detail.lastSavedBy.name}`
                         : ""}
                     </p>
                   </CardContent>
@@ -303,11 +303,11 @@ export default function EbHistoryDetail() {
                                 </p>
                                 {member.isEbRepresentative ? (
                                   <Badge className="bg-rose-600 text-[10px] text-white hover:bg-rose-600">
-                                    Rep
+                                    Đại diện
                                   </Badge>
                                 ) : null}
                                 <Badge variant="secondary" className="text-[10px]">
-                                  Avg{" "}
+                                  TB{" "}
                                   {member.average != null
                                     ? Number(member.average).toFixed(1)
                                     : "—"}
@@ -360,8 +360,8 @@ export default function EbHistoryDetail() {
                       <div className="min-w-0">
                         <p className="font-medium">
                           {rel.evaluationType === "chapter"
-                            ? "Chapter review"
-                            : "Series review"}
+                            ? "Đánh giá chapter"
+                            : "Đánh giá series"}
                           {" · "}
                           {ebHistoryResultLabel(rel.result)}
                         </p>

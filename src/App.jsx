@@ -6,7 +6,6 @@ import AdminManga from '@/pages/Admin/Manga/Manga.jsx'
 import Chapters from '@/pages/Admin/Chapters/Chapters.jsx'
 import Users from '@/pages/Admin/Users/Users.jsx'
 import Profile from '@/pages/Admin/Profile/Profile.jsx'
-import EbRepresentative from '@/pages/Admin/EbRepresentative/EbRepresentative.jsx'
 import Rankings from '@/pages/Admin/Rankings/Rankings.jsx'
 import PublicationCalendar from '@/pages/Admin/PublicationCalendar/PublicationCalendar.jsx'
 import Home from '@/pages/User/Home/Home.jsx'
@@ -80,7 +79,6 @@ export default function App() {
           <Route path="manga" element={<AdminManga />} />
           <Route path="chapters" element={<Chapters />} />
           <Route path="users" element={<Users />} />
-          <Route path="eb-representative" element={<EbRepresentative />} />
           <Route path="profile" element={<Profile />} />
           <Route path="*" element={<Navigate to="dashboard" replace />} />
         </Route>
