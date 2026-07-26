@@ -360,47 +360,94 @@ function SeriesCard({
   const initials = (
     series.title.length >= 2 ? series.title : `${series.title}●`
   ).slice(0, 2);
+  const isAdminHidden = Boolean(series.deletedAt);
 
   return (
-    <Card className="group relative gap-0 overflow-hidden p-0 transition-all hover:-translate-y-0.5 hover:shadow-lg">
+    <Card
+      className={cn(
+        "group relative gap-0 overflow-hidden p-0 transition-all hover:-translate-y-0.5 hover:shadow-lg",
+        isAdminHidden && "opacity-90",
+      )}
+      title={
+        isAdminHidden ? "Liên hệ Admin để biết thêm chi tiết" : undefined
+      }
+    >
       <div
         className="absolute inset-x-0 top-0 z-10 h-1"
         style={{ background: series.color }}
       />
 
-      <Link to={toSeries} className="relative block overflow-hidden">
-        <div
-          className="aspect-[3/4] flex items-center justify-center bg-muted text-3xl font-extrabold tracking-tight text-white transition-transform duration-300 group-hover:scale-[1.02]"
-          style={{
-            background: series.coverImage
-              ? `url(${resolveMediaUrl(series.coverImage)}) center / cover no-repeat`
-              : `linear-gradient(145deg, ${series.color}, ${series.color}99)`,
-          }}
-        >
-          {!series.coverImage ? (
-            <span className="drop-shadow-lg">{initials}</span>
-          ) : null}
-        </div>
-        {series.needsFullDebutPipeline ? (
-          <Badge className="absolute left-3 top-3 bg-amber-500 text-white shadow-sm hover:bg-amber-500">
-            <Sparkles className="size-3" />
-            Lần đầu
+      {isAdminHidden ? (
+        <div className="relative block overflow-hidden">
+          <div
+            className="aspect-[3/4] flex items-center justify-center bg-muted text-3xl font-extrabold tracking-tight text-white grayscale opacity-50"
+            style={{
+              background: series.coverImage
+                ? `url(${resolveMediaUrl(series.coverImage)}) center / cover no-repeat`
+                : `linear-gradient(145deg, ${series.color}, ${series.color}99)`,
+            }}
+          >
+            {!series.coverImage ? (
+              <span className="drop-shadow-lg">{initials}</span>
+            ) : null}
+          </div>
+          <Badge className="absolute left-3 top-3 border-0 bg-red-600 text-white shadow-sm hover:bg-red-600">
+            Đã bị Admin ẩn
           </Badge>
-        ) : null}
-      </Link>
+        </div>
+      ) : (
+        <Link to={toSeries} className="relative block overflow-hidden">
+          <div
+            className="aspect-[3/4] flex items-center justify-center bg-muted text-3xl font-extrabold tracking-tight text-white transition-transform duration-300 group-hover:scale-[1.02]"
+            style={{
+              background: series.coverImage
+                ? `url(${resolveMediaUrl(series.coverImage)}) center / cover no-repeat`
+                : `linear-gradient(145deg, ${series.color}, ${series.color}99)`,
+            }}
+          >
+            {!series.coverImage ? (
+              <span className="drop-shadow-lg">{initials}</span>
+            ) : null}
+          </div>
+          {series.needsFullDebutPipeline ? (
+            <Badge className="absolute left-3 top-3 bg-amber-500 text-white shadow-sm hover:bg-amber-500">
+              <Sparkles className="size-3" />
+              Lần đầu
+            </Badge>
+          ) : null}
+        </Link>
+      )}
 
       <CardContent className="space-y-2.5 p-4">
         <div className="flex items-start justify-between gap-2">
-          <Link
-            to={toSeries}
-            className="line-clamp-2 font-semibold leading-snug hover:underline"
-            title={series.title}
-          >
-            {series.title}
-          </Link>
-          <Badge className={cn("shrink-0", statusBadge.className)} variant="secondary">
-            {series.statusLabel ?? statusBadge.label}
-          </Badge>
+          {isAdminHidden ? (
+            <span
+              className="line-clamp-2 font-semibold leading-snug text-muted-foreground"
+              title={series.title}
+            >
+              {series.title}
+            </span>
+          ) : (
+            <Link
+              to={toSeries}
+              className="line-clamp-2 font-semibold leading-snug hover:underline"
+              title={series.title}
+            >
+              {series.title}
+            </Link>
+          )}
+          {isAdminHidden ? (
+            <Badge
+              className="shrink-0 border-red-200 bg-red-50 text-red-700"
+              variant="outline"
+            >
+              Đã bị Admin ẩn
+            </Badge>
+          ) : (
+            <Badge className={cn("shrink-0", statusBadge.className)} variant="secondary">
+              {series.statusLabel ?? statusBadge.label}
+            </Badge>
+          )}
         </div>
 
         <p className="line-clamp-1 text-xs text-muted-foreground">
@@ -416,7 +463,7 @@ function SeriesCard({
           </p>
         ) : null}
 
-        {!series.metadataComplete ? (
+        {!series.metadataComplete && !isAdminHidden ? (
           <p className="flex items-center gap-1 text-xs text-amber-600">
             <AlertTriangle className="size-3 shrink-0" />
             Thiếu mô tả hồ sơ
@@ -433,44 +480,52 @@ function SeriesCard({
       </CardContent>
 
       <CardFooter className="flex items-center gap-2 border-t bg-muted/20 p-3">
-        <Button asChild size="sm" className="min-w-0 flex-1">
-          <Link to={toSeries}>Vào series</Link>
-        </Button>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button size="sm" variant="outline" className="size-8 shrink-0 p-0">
-              <MoreHorizontal className="size-4" />
-              <span className="sr-only">Tùy chọn series</span>
+        {isAdminHidden ? (
+          <p className="w-full text-center text-xs text-muted-foreground">
+            Series đã bị Admin ẩn — không thể chỉnh sửa / đăng chapter.
+          </p>
+        ) : (
+          <>
+            <Button asChild size="sm" className="min-w-0 flex-1">
+              <Link to={toSeries}>Vào series</Link>
             </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuItem onClick={onOpenEdit}>Chỉnh sửa hồ sơ</DropdownMenuItem>
-            {series.status === "draft" ? (
-              <DropdownMenuItem onClick={onOpenAnnotate}>Đánh dấu vùng</DropdownMenuItem>
-            ) : null}
-            {series.needsFullDebutPipeline && !ebApproved ? (
-              <DropdownMenuItem asChild>
-                <Link to={PATH_EDITOR_BOARD}>
-                  Chờ {LABEL_EDITOR_BOARD} duyệt
-                </Link>
-              </DropdownMenuItem>
-            ) : null}
-            {series.needsFullDebutPipeline && ebApproved ? (
-              <DropdownMenuItem onClick={onCompleteDebut}>
-                Hoàn tất vòng đầu
-              </DropdownMenuItem>
-            ) : null}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="text-destructive focus:text-destructive"
-              onClick={onDelete}
-            >
-              <Trash2 className="size-3.5" />
-              Xóa series
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" variant="outline" className="size-8 shrink-0 p-0">
+                  <MoreHorizontal className="size-4" />
+                  <span className="sr-only">Tùy chọn series</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuItem onClick={onOpenEdit}>Chỉnh sửa hồ sơ</DropdownMenuItem>
+                {series.status === "draft" ? (
+                  <DropdownMenuItem onClick={onOpenAnnotate}>Đánh dấu vùng</DropdownMenuItem>
+                ) : null}
+                {series.needsFullDebutPipeline && !ebApproved ? (
+                  <DropdownMenuItem asChild>
+                    <Link to={PATH_EDITOR_BOARD}>
+                      Chờ {LABEL_EDITOR_BOARD} duyệt
+                    </Link>
+                  </DropdownMenuItem>
+                ) : null}
+                {series.needsFullDebutPipeline && ebApproved ? (
+                  <DropdownMenuItem onClick={onCompleteDebut}>
+                    Hoàn tất vòng đầu
+                  </DropdownMenuItem>
+                ) : null}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="text-destructive focus:text-destructive"
+                  onClick={onDelete}
+                >
+                  <Trash2 className="size-3.5" />
+                  Xóa series
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
+        )}
       </CardFooter>
     </Card>
   );

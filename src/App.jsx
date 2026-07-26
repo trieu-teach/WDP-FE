@@ -8,6 +8,7 @@ import Users from '@/pages/Admin/Users/Users.jsx'
 import Profile from '@/pages/Admin/Profile/Profile.jsx'
 import EbRepresentative from '@/pages/Admin/EbRepresentative/EbRepresentative.jsx'
 import Rankings from '@/pages/Admin/Rankings/Rankings.jsx'
+import PublicationCalendar from '@/pages/Admin/PublicationCalendar/PublicationCalendar.jsx'
 import Home from '@/pages/User/Home/Home.jsx'
 import Login from '@/pages/User/Login/Login.jsx'
 import Register from '@/pages/User/Register/Register.jsx'
@@ -20,6 +21,8 @@ import Eb from '@/pages/User/Eb/Eb.jsx'
 import EbSeriesDetail from '@/pages/User/Eb/EbSeriesDetail.jsx'
 import EbPublish from '@/pages/User/Eb/EbPublish.jsx'
 import EbPublicationSchedule from '@/pages/User/Eb/EbPublicationSchedule.jsx'
+import EbHistory from '@/pages/User/Eb/EbHistory.jsx'
+import EbHistoryDetail from '@/pages/User/Eb/EbHistoryDetail.jsx'
 import MangakaTeRevision from '@/pages/User/Mangaka/MangakaTeRevision.jsx'
 import MangakaAssistantReview from '@/pages/User/Mangaka/MangakaAssistantReview.jsx'
 import MangakaAssistantReviewDetail from '@/pages/User/Mangaka/MangakaAssistantReviewDetail.jsx'
@@ -62,6 +65,8 @@ export default function App() {
         <Route path="/eb/chapter/:chapterId" element={<Eb />} />
         <Route path="/eb/chapter/:chapterId/publish" element={<EbPublish />} />
         <Route path="/eb/schedule" element={<EbPublicationSchedule />} />
+        <Route path="/eb/history" element={<EbHistory />} />
+        <Route path="/eb/history/:evaluationId" element={<EbHistoryDetail />} />
         <Route path="/mangaka/chapter/:chapterId/te-revision" element={<MangakaTeRevision />} />
         <Route path="/tantou" element={<TantouHub />} />
         <Route path="/tantou/:section" element={<TantouEditor />} />
@@ -71,6 +76,7 @@ export default function App() {
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="rankings" element={<Rankings />} />
+          <Route path="publication-calendar" element={<PublicationCalendar />} />
           <Route path="manga" element={<AdminManga />} />
           <Route path="chapters" element={<Chapters />} />
           <Route path="users" element={<Users />} />

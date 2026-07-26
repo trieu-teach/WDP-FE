@@ -294,6 +294,8 @@ export type SeriesProfileChapter = {
   chapter_number?: number;
   title?: string;
   status?: string;
+  is_scheduled?: boolean;
+  scheduled_publish_at?: string;
   updatedAt?: string;
   createdAt?: string;
   sentAt?: string;
@@ -316,6 +318,11 @@ export function normalizeTeSeriesChapters(raw: unknown[]): SeriesProfileChapter[
         ) || undefined,
         title: ch.title != null ? String(ch.title) : undefined,
         status: ch.status != null ? String(ch.status) : undefined,
+        is_scheduled: Boolean(ch.is_scheduled ?? ch.isScheduled ?? false),
+        scheduled_publish_at:
+          ch.scheduled_publish_at != null
+            ? String(ch.scheduled_publish_at)
+            : (ch.scheduledPublishAt != null ? String(ch.scheduledPublishAt) : undefined),
         updatedAt:
           (ch.updatedAt ?? ch.updated_at ?? ch.submitted_at) as string | undefined,
         createdAt: (ch.createdAt ?? ch.created_at) as string | undefined,
@@ -325,11 +332,22 @@ export function normalizeTeSeriesChapters(raw: unknown[]): SeriesProfileChapter[
     .filter((ch): ch is SeriesProfileChapter => ch != null);
 }
 
-export function mapTeProfileChapterStatus(status?: string): string {
-  const value = String(status ?? "").toLowerCase();
+export function mapTeProfileChapterStatus(
+  status?: string,
+  { isScheduled = false, scheduledPublishAt = null }: {
+    isScheduled?: boolean;
+    scheduledPublishAt?: string | null;
+  } = {},
+): string {
+  const value = String(status ?? "").toLowerCase().replace(/\s+/g, "_");
+  if (value === "published" || value === "approved_publish") return "approved_publish";
+  if (value === "approved_by_eb") {
+    if (isScheduled || scheduledPublishAt) return "scheduled";
+    return "awaiting_publish";
+  }
   if (value === "pending_eb") return "forwarded_eb";
+  if (value.includes("revision") || value === "rejected") return "revision";
   if (value.includes("publish") || value === "approved") return "approved_publish";
-  if (value.includes("revision")) return "revision";
   return "pending";
 }
 
@@ -354,6 +372,11 @@ export function buildChapterRowsFromSeriesProfile(
     .map((ch, index) => {
       const chapterId = String(ch._id ?? ch.id ?? "");
       const sub = subsByChapterId.get(chapterId);
+      const isScheduled = Boolean(
+        sub?.isScheduled ?? ch.is_scheduled ?? false,
+      );
+      const scheduledPublishAt =
+        sub?.scheduledPublishAt ?? ch.scheduled_publish_at ?? null;
       return {
         id: chapterId,
         index: index + 1,
@@ -361,7 +384,12 @@ export function buildChapterRowsFromSeriesProfile(
         releaseDate: formatReleaseDate(
           sub?.sentAt ?? ch.sentAt ?? ch.updatedAt ?? ch.createdAt,
         ),
-        status: sub?.status ?? mapTeProfileChapterStatus(ch.status),
+        status:
+          sub?.status
+          ?? mapTeProfileChapterStatus(ch.status, {
+            isScheduled,
+            scheduledPublishAt,
+          }),
       };
     });
 }
@@ -386,6 +414,8 @@ export function resolveViewingSubmission(
   );
   if (fromProfile) {
     const chapterId = String(fromProfile._id ?? fromProfile.id);
+    const isScheduled = Boolean(fromProfile.is_scheduled);
+    const scheduledPublishAt = fromProfile.scheduled_publish_at ?? null;
     return {
       ...anchor,
       id: chapterId,
@@ -395,7 +425,12 @@ export function resolveViewingSubmission(
       pageIndex: 0,
       pageLabel: "Trang 1",
       apiChapterStatus: fromProfile.status,
-      status: mapTeProfileChapterStatus(fromProfile.status),
+      isScheduled,
+      scheduledPublishAt,
+      status: mapTeProfileChapterStatus(fromProfile.status, {
+        isScheduled,
+        scheduledPublishAt,
+      }),
       pagesMeta: [],
       mangakaImageUrl: undefined,
     };

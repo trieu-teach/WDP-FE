@@ -10,8 +10,11 @@ import {
   teReviewsService,
 } from "@/api/teReviews.service.js";
 import {
+  formatTeScheduledPublishDisplay,
   isChapterAwaitingTePublish,
+  requiresTeManualScheduledPublish,
   TE_CHAPTER_APPROVED_STATUS,
+  TE_PUBLISH_BUFFER_HINT,
   tePhaseLabel,
 } from "@/utils/teReviewPhase.js";
 import {
@@ -30,6 +33,7 @@ import { cn } from "@/lib/utils";
 import { ChapterListTable } from "./ChapterListTable";
 import { TantouPageAnnotator } from "./TantouPageAnnotator";
 import { ReviewRatingPanel } from "./ReviewRatingPanel";
+import { TePublishScheduleDialog } from "./TePublishScheduleDialog";
 import type {
   ChapterRow,
   PageNote,
@@ -156,7 +160,11 @@ type TantouChapterReviewDashboardProps = {
   onCancel: () => void;
   onSaveReview: (
     payload: ReviewSavePayload,
-    options?: { submitAction?: "reject" | "publish" | "release"; saveDraftOnly?: boolean },
+    options?: {
+      submitAction?: "reject" | "publish" | "release";
+      saveDraftOnly?: boolean;
+      scheduled_publish_at?: string;
+    },
   ) => void;
   onSelectChapter: (submissionId: string) => void;
   saving?: boolean;
@@ -249,6 +257,7 @@ export function TantouChapterReviewDashboard({
     [],
   );
   const [seriesChaptersLoading, setSeriesChaptersLoading] = useState(false);
+  const [publishScheduleOpen, setPublishScheduleOpen] = useState(false);
   const readerRef = useRef<HTMLDivElement>(null);
 
   const resolvedSeriesId =
@@ -722,6 +731,32 @@ export function TantouChapterReviewDashboard({
       : undefined)
     : "Phê duyệt trước — Publish chỉ khi chapter ở approved_by_EB.";
 
+  const scheduledPublishLabel = formatTeScheduledPublishDisplay(
+    viewingSubmissionWithPages.scheduledPublishAt
+      ?? seriesChapters.find(
+        (ch) =>
+          String(ch._id ?? ch.id)
+          === String(
+            viewingSubmissionWithPages.chapterId ?? viewingSubmissionWithPages.id,
+          ),
+      )?.scheduled_publish_at
+      ?? null,
+  );
+
+  const needsManualSchedule = requiresTeManualScheduledPublish([
+    ...seriesChapters,
+    ...relatedSubmissions.map((s) => ({
+      status: s.apiChapterStatus ?? s.status,
+      publishedAt: s.publishedAt,
+    })),
+    {
+      status:
+        viewingSubmissionWithPages.apiChapterStatus
+        ?? viewingSubmissionWithPages.status,
+      publishedAt: viewingSubmissionWithPages.publishedAt,
+    },
+  ]);
+
   // Đồng bộ status local sau approve (giữ nút Publish hiện ngay)
   useEffect(() => {
     if (!isChapterAwaitingTePublish(submission.apiChapterStatus)) return;
@@ -920,6 +955,18 @@ export function TantouChapterReviewDashboard({
               publishOnlyMode={publishOnlyMode}
               publishEnabled={publishEnabled}
               publishDisabledReason={publishDisabledReason}
+              publishHint={
+                publishOnlyMode
+                  ? (needsManualSchedule
+                    ? TE_PUBLISH_BUFFER_HINT
+                    : "Chapter tiếp theo sẽ lên lịch theo chu kỳ series (publication_schedule). Job tự publish khi đủ buffer.")
+                  : undefined
+              }
+              scheduledPublishAt={
+                publishOnlyMode && scheduledPublishLabel
+                  ? scheduledPublishLabel
+                  : null
+              }
               saving={saving}
               onReviewTextChange={(text) =>
                 setDraft((c) => ({ ...c, reviewText: text }))
@@ -944,13 +991,38 @@ export function TantouChapterReviewDashboard({
               onSendToEb={() =>
                 onSaveReview(buildPayload(), { submitAction: "publish" })
               }
-              onPublish={() =>
-                onSaveReview(buildPayload(), { submitAction: "release" })
-              }
+              onPublish={() => {
+                if (!publishEnabled) return;
+                if (needsManualSchedule) {
+                  setPublishScheduleOpen(true);
+                  return;
+                }
+                onSaveReview(buildPayload(), { submitAction: "release" });
+              }}
             />
           </div>
         </div>
       </div>
+
+      <TePublishScheduleDialog
+        open={publishScheduleOpen}
+        onOpenChange={setPublishScheduleOpen}
+        confirming={saving}
+        initialScheduledAt={viewingSubmissionWithPages.scheduledPublishAt ?? null}
+        onConfirm={(scheduledPublishAtIso) => {
+          setPublishScheduleOpen(false);
+          onSaveReview(
+            {
+              ...buildPayload(),
+              scheduled_publish_at: scheduledPublishAtIso,
+            },
+            {
+              submitAction: "release",
+              scheduled_publish_at: scheduledPublishAtIso,
+            },
+          );
+        }}
+      />
     </div>
   );
 }

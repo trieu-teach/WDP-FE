@@ -176,6 +176,7 @@ export function normalizeSeries(raw, index = 0) {
     ebAssessment: s.ebAssessment && typeof s.ebAssessment === 'object'
       ? JSON.parse(JSON.stringify(s.ebAssessment))
       : null,
+    deletedAt: s.deletedAt ?? s.deleted_at ?? null,
   }
   normalized.statusLabel = s.statusLabel ?? buildWorkflowStatusLabel(normalized)
   return normalized

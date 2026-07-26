@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
-import { ArrowLeft, FileText, MessageSquareText, Sparkles } from "lucide-react";
+import { ArrowLeft, FileText, MessageSquareText, Search, Sparkles } from "lucide-react";
 import Header from "@/components/User/Header/Header.jsx";
 import Footer from "@/components/User/Footer/Footer.jsx";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,6 @@ import {
   Card,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -23,6 +22,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -43,6 +43,7 @@ import { apiSeriesToUi } from "@/utils/apiMappers.js";
 import {
   getAllowedTePublicationStatuses,
   getPublicationStatusLabel,
+  SERIES_PUBLICATION_STATUSES,
 } from "@/utils/seriesModel.js";
 import {
   LABEL_EDITOR_BOARD,
@@ -53,13 +54,19 @@ import {
   getTantouSection,
   TANTOU_SECTION_IDS,
 } from "@/constants/tantouSections.js";
-import { readEbDebutApproved } from "@/utils/ebDebutStorage.js";
 import {
   formatTeChapterPublishError,
+  formatTePublishBufferWarning,
+  formatTePublishSuccessMessage,
+  formatTeScheduledPublishDisplay,
   parseTeActionNextStep,
+  parseTePublishBuffer,
+  parseTePublishChapterResult,
   phaseToPipeline,
   resolveTePhase,
+  resolveTeUiChapterStatus,
   TE_CHAPTER_APPROVED_STATUS,
+  TE_UI_AWAITING_PUBLISH,
 } from "@/utils/teReviewPhase.js";
 import {
   enrichTeSubmissionAssignment,
@@ -72,14 +79,12 @@ import {
   sortTePendingSubmissionsNewestFirst,
 } from "@/utils/teReviewPending.js";
 import {
-  applyScheduleForEbApprovedSeries,
-  isSeriesEbApproved,
-  listPublishSchedules,
-  listTantouReviewHistory,
   pushTantouReviewHistory,
-  suggestPublishCadence,
+  isSeriesEbApproved,
 } from "@/utils/tantouWorkspaceStorage.js";
 import TantouPageReview from "./TantouPageReview.jsx";
+import { TantouPublicationCalendar } from "@/components/Tantou/TantouPublicationCalendar.jsx";
+import { TantouReviewHistory } from "@/components/Tantou/TantouReviewHistory.jsx";
 import "./TantouEditor.css";
 
 const NAV_LINKS = [
@@ -98,35 +103,41 @@ function statusLabel(status) {
     pending: "Chờ duyệt",
     revision: "Đã gửi chỉnh",
     forwarded_eb: `Đã chuyển ${LABEL_EDITOR_BOARD}`,
-    approved_publish: "Đã duyệt phát hành",
+    awaiting_publish: "Chờ phát hành",
+    scheduled: "Đã lên lịch",
+    approved_publish: "Đã phát hành",
   };
   return map[status] ?? status;
 }
 
-function reviewStatusLabel(status) {
-  const map = {
-    draft: "Nháp",
-    reject: "Yêu cầu chỉnh",
-    publish: "Đã duyệt",
-  };
-  return map[status] ?? status;
-}
-
-function formatReviewedAt(value) {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("vi-VN", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
+function publicationStatusBadgeClass(status) {
+  switch (String(status ?? "").toLowerCase()) {
+    case "ongoing":
+      return "border-green-200 bg-green-50 text-green-700";
+    case "hiatus":
+      return "border-amber-200 bg-amber-50 text-amber-700";
+    case "dropped":
+      return "border-red-200 bg-red-50 text-red-700";
+    case "completed":
+      return "border-blue-200 bg-blue-50 text-blue-700";
+    case "upcoming":
+      return "border-slate-200 bg-slate-50 text-slate-700";
+    default:
+      return "border-border bg-muted text-muted-foreground";
+  }
 }
 
 function statusBadgeClass(status) {
   if (status === "pending") {
     return "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200";
   }
-  if (status === "forwarded_eb") {
+  if (status === "awaiting_publish") {
+    return "border-violet-200 bg-violet-50 text-violet-900 dark:border-violet-500/30 dark:bg-violet-500/15 dark:text-violet-200";
+  }
+  if (status === "scheduled") {
+    return "border-sky-200 bg-sky-50 text-sky-900 dark:border-sky-500/30 dark:bg-sky-500/15 dark:text-sky-200";
+  }
+  if (status === "forwarded_eb" || status === "approved_publish") {
     return "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200";
   }
   if (status === "revision") {
@@ -218,6 +229,11 @@ function SubmissionCard({
             <p className="text-xs text-muted-foreground/90 sm:text-[13px]">
               {metaLine}
             </p>
+            {sub.scheduledPublishAt ? (
+              <p className="text-[11px] text-sky-700 dark:text-sky-300">
+                Lịch publish: {formatTeScheduledPublishDisplay(sub.scheduledPublishAt)}
+              </p>
+            ) : null}
             {sub.teAssignmentLabel ? (
               <p className="text-[11px] text-muted-foreground">{sub.teAssignmentLabel}</p>
             ) : null}
@@ -387,6 +403,8 @@ export default function TantouEditor() {
   const [publicationLoading, setPublicationLoading] = useState(false);
   const [publicationSavingId, setPublicationSavingId] = useState(null);
   const [publicationConfirm, setPublicationConfirm] = useState(null);
+  const [publicationSearch, setPublicationSearch] = useState("");
+  const [publicationStatusFilter, setPublicationStatusFilter] = useState("all");
   const [heroSlide, setHeroSlide] = useState(0);
   const [selectedMangakaKey, setSelectedMangakaKey] = useState(null);
 
@@ -400,8 +418,7 @@ export default function TantouEditor() {
 
   const needsQueue =
     sectionId === "series-pending"
-    || sectionId === "series-approved"
-    || sectionId === "schedule";
+    || sectionId === "series-approved";
   const needsPublication = sectionId === "publication-status";
 
   const refresh = useCallback(() => setTick((n) => n + 1), []);
@@ -587,14 +604,24 @@ export default function TantouEditor() {
     });
   }
 
-  const schedules = useMemo(() => listPublishSchedules(), [tick]);
-  const ebApproved = useMemo(() => readEbDebutApproved(), [tick]);
-  const reviewHistory = useMemo(() => listTantouReviewHistory(), [tick]);
-
   const selected = useMemo(
     () => submissions.find((s) => s.id === selectedId) ?? null,
     [submissions, selectedId],
   );
+
+  const filteredPublicationSeries = useMemo(() => {
+    const query = publicationSearch.trim().toLowerCase();
+    return publicationSeries.filter((row) => {
+      if (
+        publicationStatusFilter !== "all"
+        && row.publicationStatus !== publicationStatusFilter
+      ) {
+        return false;
+      }
+      if (!query) return true;
+      return String(row.title ?? "").toLowerCase().includes(query);
+    });
+  }, [publicationSeries, publicationSearch, publicationStatusFilter]);
 
   const debutQueue = useMemo(
     () =>
@@ -667,29 +694,6 @@ export default function TantouEditor() {
     [submissions],
   );
 
-  const scheduleSeries = useMemo(() => {
-    const titles = new Set([
-      ...Object.keys(ebApproved).filter((t) => ebApproved[t]),
-      ...submissions
-        .filter((s) => s.status === "forwarded_eb")
-        .map((s) => s.seriesTitle),
-    ]);
-    return [...titles].map((title) => {
-      const sub = submissions.find((s) => s.seriesTitle === title);
-      const sched = schedules[title];
-      const q = sub?.qualityScore ?? 70;
-      const p = sub?.popularityScore ?? 65;
-      return {
-        title,
-        qualityScore: q,
-        popularityScore: p,
-        suggested: suggestPublishCadence(q, p),
-        cadence: sched?.cadence ?? sub?.publishCadence,
-        label: sched?.label,
-      };
-    });
-  }, [ebApproved, submissions, schedules]);
-
   function handleLogout() {
     logout();
     navigate("/login");
@@ -737,6 +741,7 @@ export default function TantouEditor() {
           return {
             ...s,
             apiChapterStatus: TE_CHAPTER_APPROVED_STATUS,
+            status: TE_UI_AWAITING_PUBLISH,
             teId: currentTeId ?? s.teId,
             teAssignmentStatus: "mine",
             canReview: true,
@@ -748,7 +753,7 @@ export default function TantouEditor() {
       const nextStep = parseTeActionNextStep(res);
       const publishHint =
         !nextStep || nextStep.action === "publish"
-          ? " Bấm Phát hành để xuất bản."
+          ? " Bấm Phát hành để lên lịch xuất bản."
           : "";
       toast.success(
         res?.message
@@ -970,6 +975,9 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
         selected.mangakaName ??
         "",
     ).trim();
+    const scheduledPublishAt = String(
+      options.scheduled_publish_at ?? reviewData.scheduled_publish_at ?? "",
+    ).trim();
     const editorialNotesByPage = reviewData.editorialNotesByPage ?? {};
     const pagesMeta =
       reviewData.pagesMeta ??
@@ -1018,15 +1026,37 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
       );
 
       // Phát hành riêng (POST .../publish) — chỉ khi approved_by_EB
+      // Chapter đầu: kèm scheduled_publish_at. Chapter 2+: body rỗng — BE/job cadence.
       if (nextStatus === "release" || reviewData.publishOnly) {
         try {
-          const res = await teReviewsService.publishChapter(nextChapterId);
-          toast.success(
-            res?.message
-              ?? `Đã phát hành "${nextSeriesName}"${
-                nextChapterNumber ? ` · Ch.${nextChapterNumber}` : ""
-              }.`,
+          const res = await teReviewsService.publishChapter(
+            nextChapterId,
+            scheduledPublishAt
+              ? { scheduled_publish_at: scheduledPublishAt }
+              : {},
           );
+          const buffer = parseTePublishBuffer(res);
+          toast.success(
+            formatTePublishSuccessMessage(res, {
+              seriesName: nextSeriesName,
+              chapterNumber: nextChapterNumber,
+              buffer,
+            }),
+          );
+
+          const bufferWarning = formatTePublishBufferWarning(buffer);
+          if (bufferWarning) {
+            toast.warning(bufferWarning, { duration: 8000 });
+          }
+
+          const chapterResult = parseTePublishChapterResult(res);
+          const nextApiStatus =
+            chapterResult.apiChapterStatus || TE_CHAPTER_APPROVED_STATUS;
+          const nextUiStatus = resolveTeUiChapterStatus({
+            apiStatus: nextApiStatus,
+            isScheduled: chapterResult.isScheduled,
+            scheduledPublishAt: chapterResult.scheduledPublishAt,
+          });
 
           pushTantouReviewHistory({
             id: `${nextChapterId}-${Date.now()}`,
@@ -1046,8 +1076,11 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
               if (id !== nextChapterId && s.id !== selected.id) return s;
               return {
                 ...s,
-                apiChapterStatus: "published",
-                status: "approved_publish",
+                apiChapterStatus: nextApiStatus,
+                status: nextUiStatus,
+                isScheduled: chapterResult.isScheduled,
+                scheduledPublishAt: chapterResult.scheduledPublishAt,
+                publishedAt: chapterResult.publishedAt,
               };
             }),
           );
@@ -1085,6 +1118,7 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
                 return {
                   ...s,
                   apiChapterStatus: TE_CHAPTER_APPROVED_STATUS,
+                  status: TE_UI_AWAITING_PUBLISH,
                   teId: currentTeId ?? s.teId,
                   teAssignmentStatus: "mine",
                   canReview: true,
@@ -1096,7 +1130,7 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
             const nextStep = parseTeActionNextStep(res);
             const publishHint =
               !nextStep || nextStep.action === "publish"
-                ? " Bấm Phát hành để xuất bản."
+                ? " Bấm Phát hành để lên lịch xuất bản."
                 : "";
             toast.success(
               res?.message
@@ -1207,12 +1241,6 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
     } finally {
       setSaving(false);
     }
-  }
-
-  function handleSetSchedule(title, q, p, cadence) {
-    applyScheduleForEbApprovedSeries(title, q, p, cadence);
-    toast.success(`Đã đặt lịch ${title}.`);
-    refresh();
   }
 
   if (!sectionMeta || !TANTOU_SECTION_IDS.includes(sectionId)) {
@@ -1495,14 +1523,44 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
               </DialogContent>
             </Dialog>
 
-            <section className="space-y-4">
+            <section className="space-y-3">
               <div>
                 <h2 className="text-xl font-semibold">Trạng thái phát hành</h2>
                 <p className="text-sm text-muted-foreground">
-                  TE cập nhật sau khi series đã phát hành: đang phát hành ↔ tạm ngưng / hoàn thành / bị drop.
-                  upcoming do job tự chuyển, completed chỉ đọc.
+                  Cập nhật trạng thái series sau khi đã phát hành: đang phát hành, tạm ngưng, hoàn thành hoặc bị drop.
                 </p>
               </div>
+
+              <div className="flex flex-col gap-2.5 rounded-xl border border-border/70 bg-card/60 p-3 sm:flex-row sm:items-center">
+                <div className="relative min-w-0 flex-1">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    type="search"
+                    placeholder="Tìm series..."
+                    className="h-9 pl-9"
+                    value={publicationSearch}
+                    onChange={(e) => setPublicationSearch(e.target.value)}
+                    aria-label="Tìm kiếm series"
+                  />
+                </div>
+                <Select
+                  value={publicationStatusFilter}
+                  onValueChange={setPublicationStatusFilter}
+                >
+                  <SelectTrigger className="h-9 w-full border-gray-300 text-sm sm:w-52">
+                    <SelectValue placeholder="Tất cả trạng thái" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Tất cả trạng thái</SelectItem>
+                    {SERIES_PUBLICATION_STATUSES.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
               {publicationLoading && publicationSeries.length === 0 ? (
                 <Card>
                   <CardContent className="py-12 text-center text-muted-foreground">
@@ -1515,187 +1573,98 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
                     Chưa có series có publication_status.
                   </CardContent>
                 </Card>
+              ) : filteredPublicationSeries.length === 0 ? (
+                <Card>
+                  <CardContent className="py-12 text-center text-muted-foreground">
+                    Không có series khớp bộ lọc.
+                  </CardContent>
+                </Card>
               ) : (
-                publicationSeries.map((row) => {
-                  const allowed = getAllowedTePublicationStatuses(row.publicationStatus);
-                  const busy = publicationSavingId === row.id;
-                  return (
-                    <Card key={row.id}>
-                      <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
-                        <div className="flex size-14 shrink-0 overflow-hidden rounded-lg bg-muted">
-                          {row.coverImage ? (
-                            <img
-                              src={row.coverImage}
-                              alt=""
-                              className="size-full object-cover"
-                            />
-                          ) : (
-                            <div className="flex size-full items-center justify-center text-xl">
-                              📚
-                            </div>
-                          )}
-                        </div>
-                        <div className="min-w-0 flex-1 space-y-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h3 className="font-semibold">{row.title}</h3>
-                            <Badge variant="secondary">
-                              {getPublicationStatusLabel(row.publicationStatus)}
-                            </Badge>
-                          </div>
-                          {allowed.length === 0 ? (
-                            <p className="text-xs text-muted-foreground">
-                              {row.publicationStatus === "upcoming"
-                                ? "Chuẩn bị phát hành — chờ job tự chuyển sang đang phát hành."
-                                : row.publicationStatus === "completed"
-                                  ? "Đã hoàn thành — không đổi được."
-                                  : "Không có chuyển trạng thái khả dụng."}
-                            </p>
-                          ) : null}
-                        </div>
-                        {allowed.length > 0 ? (
-                          <Select
-                            key={`${row.id}-${row.publicationStatus}-${
-                              publicationConfirm?.seriesId === row.id ? "confirming" : "idle"
-                            }`}
-                            disabled={busy}
-                            onValueChange={(v) => {
-                              if (v) requestPublicationStatusChange(row, v);
-                            }}
+                <div className="space-y-2">
+                  {filteredPublicationSeries.map((row) => {
+                    const allowed = getAllowedTePublicationStatuses(row.publicationStatus);
+                    const busy = publicationSavingId === row.id;
+                    return (
+                      <Card key={row.id} className="border-border/70 shadow-none">
+                        <CardContent className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center">
+                          <div
+                            className="h-14 w-10 shrink-0 overflow-hidden bg-muted"
+                            style={{ aspectRatio: "3 / 4", borderRadius: 4 }}
                           >
-                            <SelectTrigger className="w-[200px]">
-                              <SelectValue
-                                placeholder={busy ? "Đang cập nhật..." : "Đổi trạng thái"}
+                            {row.coverImage ? (
+                              <img
+                                src={row.coverImage}
+                                alt=""
+                                className="size-full object-cover"
                               />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {allowed.map((status) => (
-                                <SelectItem key={status} value={status}>
-                                  {getPublicationStatusLabel(status)}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        ) : null}
-                      </CardContent>
-                    </Card>
-                  );
-                })
+                            ) : (
+                              <div className="flex size-full items-center justify-center text-sm text-muted-foreground">
+                                📚
+                              </div>
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1 space-y-0.5">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="truncate text-[15px] font-semibold leading-snug">
+                                {row.title}
+                              </h3>
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "rounded-full px-2.5 py-0.5 text-[11px] font-medium",
+                                  publicationStatusBadgeClass(row.publicationStatus),
+                                )}
+                              >
+                                {getPublicationStatusLabel(row.publicationStatus)}
+                              </Badge>
+                            </div>
+                            {allowed.length === 0 ? (
+                              <p className="text-xs text-muted-foreground">
+                                {row.publicationStatus === "upcoming"
+                                  ? "Chuẩn bị phát hành — chờ job tự chuyển sang đang phát hành."
+                                  : row.publicationStatus === "completed"
+                                    ? "Đã hoàn thành — không đổi được."
+                                    : "Không có chuyển trạng thái khả dụng."}
+                              </p>
+                            ) : null}
+                          </div>
+                          {allowed.length > 0 ? (
+                            <Select
+                              key={`${row.id}-${row.publicationStatus}-${
+                                publicationConfirm?.seriesId === row.id ? "confirming" : "idle"
+                              }`}
+                              disabled={busy}
+                              onValueChange={(v) => {
+                                if (v) requestPublicationStatusChange(row, v);
+                              }}
+                            >
+                              <SelectTrigger className="h-9 w-full border-gray-300 text-sm hover:bg-muted/60 sm:w-[200px]">
+                                <SelectValue
+                                  placeholder={busy ? "Đang cập nhật..." : "Đổi trạng thái"}
+                                />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {allowed.map((status) => (
+                                  <SelectItem key={status} value={status}>
+                                    {getPublicationStatusLabel(status)}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : null}
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
               )}
             </section>
           </>
         ) : null}
 
-        {sectionId === "history" ? (
-          <section className="space-y-4">
-            <div>
-              <h2 className="text-xl font-semibold">Lịch sử duyệt</h2>
-              <p className="text-sm text-muted-foreground">
-                Các lần bạn lưu hoặc gửi nhận xét gần đây.
-              </p>
-            </div>
-            {reviewHistory.length === 0 ? (
-              <Card>
-                <CardContent className="py-12 text-center text-muted-foreground">
-                  Chưa có lịch sử duyệt.
-                </CardContent>
-              </Card>
-            ) : (
-              reviewHistory.map((item) => (
-                <Card key={item.id} className="border-border/70">
-                  <CardContent className="space-y-2 p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="font-medium">{item.seriesName}</p>
-                      <Badge variant="secondary">
-                        {reviewStatusLabel(item.status)}
-                      </Badge>
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      Ch. {item.chapterNumber}
-                      {item.authorName ? ` · ${item.authorName}` : ""}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {formatReviewedAt(item.reviewedAt)}
-                      {item.averageScore != null
-                        ? ` · Điểm TB ${Number(item.averageScore).toFixed(1)}`
-                        : ""}
-                    </p>
-                    {item.feedback ? (
-                      <p className="line-clamp-3 text-sm">{item.feedback}</p>
-                    ) : null}
-                  </CardContent>
-                </Card>
-              ))
-            )}
-          </section>
-        ) : null}
+        {sectionId === "history" ? <TantouReviewHistory /> : null}
 
-        {sectionId === "schedule" ? (
-          <section className="space-y-4">
-            <div>
-              <h2 className="text-xl font-semibold">Lịch phát hành</h2>
-              <p className="text-sm text-muted-foreground">
-                Series đã được {LABEL_EDITOR_BOARD} chấp nhận.
-              </p>
-            </div>
-            {scheduleSeries.length === 0 ? (
-              <Card>
-                <CardContent className="py-12 text-center text-muted-foreground">
-                  {loading
-                    ? "Đang tải..."
-                    : `Chưa có series qua ${LABEL_EDITOR_BOARD}.`}
-                </CardContent>
-              </Card>
-            ) : (
-              scheduleSeries.map((row) => (
-                <Card key={row.title}>
-                  <CardHeader>
-                    <CardTitle>{row.title}</CardTitle>
-                    <CardDescription>
-                      Chất lượng {row.qualityScore}% · Độ nổi{" "}
-                      {row.popularityScore}%{" · Gợi ý: "}
-                      {row.suggested === "weekly"
-                        ? "Theo tuần"
-                        : row.suggested === "biweekly"
-                          ? "2 tuần/lần"
-                          : "Theo tháng"}
-                      {row.label ? ` · Đang: ${row.label}` : ""}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardFooter className="gap-2">
-                    <Button
-                      variant={row.cadence === "weekly" ? "default" : "outline"}
-                      size="sm"
-                      onClick={() =>
-                        handleSetSchedule(
-                          row.title,
-                          row.qualityScore,
-                          row.popularityScore,
-                          "weekly",
-                        )
-                      }
-                    >
-                      Theo tuần
-                    </Button>
-                    <Button
-                      variant={row.cadence === "monthly" ? "default" : "outline"}
-                      size="sm"
-                      onClick={() =>
-                        handleSetSchedule(
-                          row.title,
-                          row.qualityScore,
-                          row.popularityScore,
-                          "monthly",
-                        )
-                      }
-                    >
-                      Theo tháng
-                    </Button>
-                  </CardFooter>
-                </Card>
-              ))
-            )}
-          </section>
-        ) : null}
+        {sectionId === "schedule" ? <TantouPublicationCalendar /> : null}
       </main>
 
       <Footer />

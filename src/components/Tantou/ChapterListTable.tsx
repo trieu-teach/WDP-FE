@@ -13,6 +13,26 @@ type ChapterListTableProps = {
 };
 
 function ChapterStatusBadge({ status }: { status: string }) {
+  if (status === "scheduled") {
+    return (
+      <Badge
+        variant="outline"
+        className="border-sky-200 bg-sky-500/10 font-medium text-sky-800 dark:border-sky-500/30 dark:text-sky-200"
+      >
+        Đã lên lịch
+      </Badge>
+    );
+  }
+  if (status === "awaiting_publish") {
+    return (
+      <Badge
+        variant="outline"
+        className="border-violet-200 bg-violet-500/10 font-medium text-violet-800 dark:border-violet-500/30 dark:text-violet-200"
+      >
+        Chờ phát hành
+      </Badge>
+    );
+  }
   const approved = status === "approved_publish" || status === "forwarded_eb";
   return (
     <Badge

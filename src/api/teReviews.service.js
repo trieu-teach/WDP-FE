@@ -217,6 +217,22 @@ export const teReviewsService = {
     return http.get('/te-reviews/pending').then(unwrap)
   },
 
+  /**
+   * GET /te-reviews/history
+   * Query: decision, from_date, to_date, series_id, page, limit
+   * Response: { items: [...], pagination: { page, limit, total, total_pages } }
+   */
+  getHistory(params = {}) {
+    const query = {}
+    if (params.decision) query.decision = params.decision
+    if (params.from_date) query.from_date = params.from_date
+    if (params.to_date) query.to_date = params.to_date
+    if (params.series_id) query.series_id = params.series_id
+    if (params.page != null) query.page = params.page
+    if (params.limit != null) query.limit = params.limit
+    return http.get('/te-reviews/history', { params: query }).then(unwrap)
+  },
+
   /** GET /te-reviews/series/:seriesId/profile — TE xem profile series (giai đoạn 1) */
   getSeriesProfile(seriesId) {
     return http.get(`/te-reviews/series/${seriesId}/profile`).then(unwrap)
@@ -342,11 +358,30 @@ export const teReviewsService = {
   /**
    * POST /te-reviews/chapter/:chapterId/publish
    * Bước 2 sau approve — chỉ TE đã approve; chapter phải ở approved_by_EB.
+   * Body optional: { scheduled_publish_at } — bắt buộc với chapter đầu series (BE).
    * 403 — TE hiện tại không phải TE đã approve chapter.
-   * 400 — chapter không ở approved_by_EB.
+   * 400 — chapter không ở approved_by_EB / thiếu scheduled_publish_at (chapter 1).
+   * Response có thể kèm buffer soft-warning. Buffer OK khi:
+   *   - is_first_chapter_of_series, HOẶC
+   *   - approved_unpublished_count >= 2, HOẶC
+   *   - series completed + final chapter
+   * Shape: { success, message, data: chapter, buffer: { ok, warning, is_first_chapter_of_series, ... } }
    */
-  publishChapter(chapterId) {
-    return http.post(`/te-reviews/chapter/${chapterId}/publish`, {}).then(unwrap)
+  publishChapter(chapterId, { scheduled_publish_at } = {}) {
+    const body = {}
+    if (scheduled_publish_at) {
+      body.scheduled_publish_at = String(scheduled_publish_at).trim()
+    }
+    return http.post(`/te-reviews/chapter/${chapterId}/publish`, body).then((res) => {
+      if (res && typeof res === 'object' && res.success !== undefined && res.data !== undefined) {
+        return {
+          ...unwrap(res.data),
+          message: res.message,
+          buffer: res.buffer ?? null,
+        }
+      }
+      return unwrap(res)
+    })
   },
 
   /**
@@ -359,6 +394,24 @@ export const teReviewsService = {
     if (quick_notes) body.quick_notes = String(quick_notes).trim()
     if (revision_feedback) body.revision_feedback = String(revision_feedback).trim()
     return http.post(`/te-reviews/series-review/${seriesId}/submit`, body).then(unwrap)
+  },
+
+  /**
+   * GET /te-reviews/calendar
+   * Lịch chapter/series sắp (và đã) publish — gom theo ngày.
+   * Query: from_date, to_date, series_id, include_published, scope=mine|all
+   * TE mặc định scope=mine; Admin mặc định all. TE + scope=all → 403.
+   */
+  getCalendar(params = {}) {
+    const query = {}
+    if (params.from_date) query.from_date = params.from_date
+    if (params.to_date) query.to_date = params.to_date
+    if (params.series_id) query.series_id = params.series_id
+    if (params.include_published != null) {
+      query.include_published = params.include_published ? 'true' : 'false'
+    }
+    if (params.scope) query.scope = params.scope
+    return http.get('/te-reviews/calendar', { params: query }).then(unwrap)
   },
 
   /**

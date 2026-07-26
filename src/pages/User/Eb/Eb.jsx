@@ -10,6 +10,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Gavel,
+  History,
   Maximize2,
   Plus,
   Star,
@@ -1743,12 +1744,20 @@ export default function Eb() {
                 </Link>
               </p>
             </div>
-            <Button variant="outline" size="sm" asChild>
-              <Link to="/eb/schedule">
-                <Calendar className="size-4" />
-                Lịch publish
-              </Link>
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" size="sm" asChild>
+                <Link to="/eb/history">
+                  <History className="size-4" />
+                  Lịch sử chấm
+                </Link>
+              </Button>
+              <Button variant="outline" size="sm" asChild>
+                <Link to="/eb/schedule">
+                  <Calendar className="size-4" />
+                  Lịch publish
+                </Link>
+              </Button>
+            </div>
           </div>
 
           {apiLoading ? (

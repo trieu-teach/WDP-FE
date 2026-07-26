@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   BookOpen,
+  Calendar,
   ChevronLeft,
   ChevronRight,
   Crown,
@@ -21,6 +22,7 @@ const NAV_ITEMS = [
     links: [
       { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
       { id: 'rankings', label: 'Bảng xếp hạng', icon: Trophy },
+      { id: 'publication-calendar', label: 'Lịch phát hành', icon: Calendar },
       { id: 'manga', label: 'Quản lý truyện', icon: BookOpen },
     ],
   },

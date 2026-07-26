@@ -766,3 +766,195 @@ export function formatEbClassification(evaluation) {
   if (code) return String(code)
   return null
 }
+
+function mapEbPerson(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  return {
+    id: resolveEntityId(raw.id ?? raw._id),
+    name: raw.name ?? raw.full_name ?? raw.username ?? '—',
+    avatarUrl: resolveMediaUrl(raw.avatar_url ?? raw.avatarUrl ?? null),
+  }
+}
+
+function mapEbHistorySeries(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  return {
+    id: resolveEntityId(raw.id ?? raw._id),
+    name: raw.name ?? raw.title ?? 'Series',
+    coverImageUrl: resolveMediaUrl(raw.cover_image_url ?? raw.coverImageUrl ?? null),
+    status: raw.status ?? null,
+    isPublic: Boolean(raw.is_public ?? raw.isPublic),
+    publicationSchedule:
+      raw.publication_schedule ?? raw.publicationSchedule ?? null,
+    description: raw.description ?? raw.synopsis ?? '',
+    tags: Array.isArray(raw.tags) ? raw.tags : [],
+    category: raw.category ?? '',
+    averageScore: raw.average_score ?? raw.averageScore ?? null,
+    totalVotes: raw.total_votes ?? raw.totalVotes ?? null,
+    viewsCount: raw.views_count ?? raw.viewsCount ?? raw.views ?? null,
+    author: mapEbPerson(raw.author),
+  }
+}
+
+function mapEbHistoryChapter(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  return {
+    id: resolveEntityId(raw.id ?? raw._id),
+    chapterNumber: raw.chapter_number ?? raw.chapterNumber ?? null,
+    title: raw.title ?? '',
+  }
+}
+
+/** Item từ GET /eb-evaluations/history */
+export function mapEbHistoryListItem(raw = {}) {
+  const series = mapEbHistorySeries(raw.series)
+  return {
+    evaluationId: resolveEntityId(raw.evaluation_id ?? raw.evaluationId ?? raw._id ?? raw.id),
+    evaluationType: raw.evaluation_type ?? raw.evaluationType ?? 'series',
+    result: raw.result ?? null,
+    quickDecision: raw.quick_decision ?? raw.quickDecision ?? null,
+    status: raw.status ?? null,
+    firstReview: Boolean(raw.first_review ?? raw.firstReview),
+    storyType: raw.story_type ?? raw.storyType ?? '',
+    series,
+    chapter: mapEbHistoryChapter(raw.chapter),
+    councilAverage:
+      raw.council_average != null ? Number(raw.council_average) : null,
+    classification: raw.classification ?? null,
+    classificationText:
+      raw.classification_text
+      ?? raw.classificationText
+      ?? (raw.classification ? EB_CLASSIFICATION_LABELS[raw.classification] : null)
+      ?? null,
+    memberCount: Number(raw.member_count ?? raw.memberCount ?? 0) || 0,
+    scheduledPublishAt:
+      raw.scheduled_publish_at ?? raw.scheduledPublishAt ?? null,
+    evaluatedBy: mapEbPerson(raw.evaluated_by ?? raw.evaluatedBy),
+    lastSavedBy: mapEbPerson(raw.last_saved_by ?? raw.lastSavedBy),
+    lastSavedAt: raw.last_saved_at ?? raw.lastSavedAt ?? null,
+    createdAt: raw.created_at ?? raw.createdAt ?? null,
+    updatedAt: raw.updated_at ?? raw.updatedAt ?? null,
+    raw,
+  }
+}
+
+/** Response GET /eb-evaluations/history */
+export function mapEbHistoryListResponse(body) {
+  const data = body?.data ?? body ?? {}
+  const itemsRaw = Array.isArray(data.items) ? data.items : []
+  const stats = data.stats ?? {}
+  return {
+    items: itemsRaw.map(mapEbHistoryListItem),
+    page: Number(data.page ?? 1) || 1,
+    limit: Number(data.limit ?? 20) || 20,
+    total: Number(data.total ?? itemsRaw.length) || 0,
+    hasMore: Boolean(data.has_more ?? data.hasMore),
+    stats: {
+      totalSeriesReviewed:
+        Number(stats.total_series_reviewed ?? stats.totalSeriesReviewed ?? 0) || 0,
+      totalChapterReviewed:
+        Number(stats.total_chapter_reviewed ?? stats.totalChapterReviewed ?? 0) || 0,
+      totalCouncilAverage:
+        stats.total_council_average != null
+          ? Number(stats.total_council_average)
+          : (stats.totalCouncilAverage != null
+            ? Number(stats.totalCouncilAverage)
+            : null),
+    },
+  }
+}
+
+/** Response GET /eb-evaluations/:id/history-detail */
+export function mapEbHistoryDetailResponse(body) {
+  const raw = body?.data ?? body ?? {}
+  const members = Array.isArray(raw.member_scores)
+    ? raw.member_scores
+    : (Array.isArray(raw.memberScores) ? raw.memberScores : [])
+  const related = Array.isArray(raw.related_evaluations)
+    ? raw.related_evaluations
+    : (Array.isArray(raw.relatedEvaluations) ? raw.relatedEvaluations : [])
+  const breakdown = raw.council_breakdown ?? raw.councilBreakdown ?? {}
+
+  return {
+    evaluationId: resolveEntityId(raw.evaluation_id ?? raw.evaluationId ?? raw._id ?? raw.id),
+    evaluationType: raw.evaluation_type ?? raw.evaluationType ?? 'series',
+    result: raw.result ?? null,
+    status: raw.status ?? null,
+    firstReview: Boolean(raw.first_review ?? raw.firstReview),
+    storyType: raw.story_type ?? raw.storyType ?? '',
+    series: mapEbHistorySeries(raw.series),
+    chapter: mapEbHistoryChapter(raw.chapter),
+    councilAverage:
+      raw.council_average != null ? Number(raw.council_average) : null,
+    councilBreakdown: {
+      story_dialogue: breakdown.story_dialogue ?? breakdown.storyDialogue ?? null,
+      art_design: breakdown.art_design ?? breakdown.artDesign ?? null,
+      panel_camera: breakdown.panel_camera ?? breakdown.panelCamera ?? null,
+      pacing_climax: breakdown.pacing_climax ?? breakdown.pacingClimax ?? null,
+      color: breakdown.color ?? null,
+    },
+    classification: raw.classification ?? null,
+    classificationText:
+      raw.classification_text
+      ?? raw.classificationText
+      ?? (raw.classification ? EB_CLASSIFICATION_LABELS[raw.classification] : null)
+      ?? null,
+    memberCount: Number(raw.member_count ?? raw.memberCount ?? members.length) || 0,
+    memberScores: members.map((m) => ({
+      memberId: resolveEntityId(m.member_id ?? m.memberId),
+      memberName: m.member_name ?? m.memberName ?? '—',
+      memberAvatarUrl: resolveMediaUrl(
+        m.member_avatar_url ?? m.memberAvatarUrl ?? null,
+      ),
+      isEbRepresentative: Boolean(
+        m.is_eb_representative ?? m.isEbRepresentative,
+      ),
+      scores: m.scores && typeof m.scores === 'object' ? m.scores : {},
+      average: m.average != null ? Number(m.average) : null,
+      totalScore: m.total_score != null ? Number(m.total_score) : null,
+      comments: m.comments && typeof m.comments === 'object' ? m.comments : {},
+      overallComment: m.overall_comment ?? m.overallComment ?? '',
+      notes: m.notes ?? '',
+      savedAt: m.saved_at ?? m.savedAt ?? null,
+    })),
+    scheduledPublishAt:
+      raw.scheduled_publish_at ?? raw.scheduledPublishAt ?? null,
+    evaluatedBy: mapEbPerson(raw.evaluated_by ?? raw.evaluatedBy),
+    lastSavedBy: mapEbPerson(raw.last_saved_by ?? raw.lastSavedBy),
+    lastSavedAt: raw.last_saved_at ?? raw.lastSavedAt ?? null,
+    notes: raw.notes ?? '',
+    quickNotes: raw.quick_notes ?? raw.quickNotes ?? '',
+    createdAt: raw.created_at ?? raw.createdAt ?? null,
+    updatedAt: raw.updated_at ?? raw.updatedAt ?? null,
+    relatedEvaluations: related.map((r) => ({
+      evaluationId: resolveEntityId(r.evaluation_id ?? r.evaluationId ?? r._id ?? r.id),
+      evaluationType: r.evaluation_type ?? r.evaluationType ?? 'chapter',
+      result: r.result ?? null,
+      status: r.status ?? null,
+      firstReview: Boolean(r.first_review ?? r.firstReview),
+      createdAt: r.created_at ?? r.createdAt ?? null,
+      lastSavedAt: r.last_saved_at ?? r.lastSavedAt ?? null,
+    })),
+    raw,
+  }
+}
+
+export function ebHistoryResultLabel(result) {
+  const map = {
+    approved: 'Approved',
+    revision: 'Revision',
+    rejected: 'Rejected',
+  }
+  const key = String(result ?? '').toLowerCase()
+  return map[key] ?? (result || '—')
+}
+
+export function ebHistoryStatusLabel(status) {
+  const map = {
+    scoring: 'Scoring',
+    saved: 'Saved',
+    locked: 'Locked',
+  }
+  const key = String(status ?? '').toLowerCase()
+  return map[key] ?? (status || '—')
+}

@@ -34,7 +34,7 @@ export const TANTOU_SECTIONS = [
     id: 'schedule',
     path: `${PATH_TANTOU_EDITOR}/schedule`,
     title: 'Lịch phát hành',
-    description: 'Theo dõi và đặt lịch phát hành theo tuần hoặc theo tháng.',
+    description: 'Theo dõi chapter và series sắp publish theo lịch/chu kỳ đã lên.',
     icon: 'calendar',
   },
 ]

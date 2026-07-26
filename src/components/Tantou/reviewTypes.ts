@@ -47,6 +47,12 @@ export type TantouSubmission = {
   status?: string;
   /** Status gốc từ BE (pending_TE, approved_by_EB, …) */
   apiChapterStatus?: string;
+  /** Chapter đã lên lịch publish (job) */
+  isScheduled?: boolean;
+  /** ISO scheduled_publish_at từ BE */
+  scheduledPublishAt?: string | null;
+  /** ISO published_at từ BE */
+  publishedAt?: string | null;
   /** TE được gán review chapter (null = chưa ai nhận) */
   teId?: string | null;
   teAssignedAt?: string | null;
@@ -90,6 +96,8 @@ export type TantouSubmission = {
     seriesApiStatus?: string | null;
     /** BE Series.publication_status */
     publicationStatus?: string | null;
+    /** Cadence / lịch từ series */
+    publicationSchedule?: string | null;
     ebApproved?: boolean;
   };
 };
@@ -121,6 +129,8 @@ export type ReviewSavePayload = ReviewDraft & {
   pagesMeta?: TantouSubmission["pagesMeta"];
   chapterApiStatus?: string;
   publishOnly?: boolean;
+  /** ISO scheduled_publish_at gửi kèm POST .../publish */
+  scheduled_publish_at?: string;
 };
 
 export type StoryPage = {
