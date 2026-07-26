@@ -107,7 +107,11 @@ export const ebEvaluationsService = {
 
   /**
    * POST /eb-evaluations/chapter/:chapterId/evaluate
-   * Body: { member_scores: [{ member_id, scores }], notes? }
+   * Body: {
+   *   member_scores: [{ member_id, member_name, scores }],
+   *   notes?
+   * }
+   * BE yêu cầu member_name (required) — tên hiển thị từ roster FE.
    */
   evaluateChapter(chapterId, payload) {
     return http
@@ -143,5 +147,34 @@ export const ebEvaluationsService = {
     return http
       .get('/eb-evaluations/publication-schedule', { params })
       .then(unwrap)
+  },
+
+  /**
+   * GET /eb-evaluations/history
+   * Query: scope (series|chapter|all), result, status, series_id, q, page, limit
+   */
+  getHistory(params = {}) {
+    const query = {}
+    if (params.scope) query.scope = params.scope
+    if (params.result) query.result = params.result
+    if (params.status) query.status = params.status
+    if (params.series_id) query.series_id = params.series_id
+    if (params.q) query.q = params.q
+    if (params.page != null) query.page = params.page
+    if (params.limit != null) query.limit = params.limit
+    return http
+      .get('/eb-evaluations/history', { params: query })
+      .then(unwrapData)
+  },
+
+  /**
+   * GET /eb-evaluations/:evaluationId/history-detail
+   */
+  getHistoryDetail(evaluationId) {
+    const id = String(evaluationId ?? '').trim()
+    if (!id) return Promise.reject(new Error('evaluationId required'))
+    return http
+      .get(`/eb-evaluations/${id}/history-detail`)
+      .then(unwrapData)
   },
 }

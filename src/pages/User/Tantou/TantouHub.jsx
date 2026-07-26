@@ -34,7 +34,7 @@ import {
   mapTePendingChapterToSubmission,
   parseTePendingResponse,
 } from '@/utils/teReviewPending.js'
-import { listTantouReviewHistory } from '@/utils/tantouWorkspaceStorage.js'
+import { mapTeReviewHistoryResponse } from '@/utils/teReviewHistoryMappers.js'
 import './TantouEditor.css'
 
 const NAV_LINKS = [
@@ -63,7 +63,7 @@ export default function TantouHub() {
   const [counts, setCounts] = useState({
     'series-pending': null,
     'series-approved': null,
-    history: listTantouReviewHistory().length,
+    history: null,
   })
 
   useEffect(() => {
@@ -77,37 +77,40 @@ export default function TantouHub() {
   useEffect(() => {
     let cancelled = false
     ;(async () => {
-      try {
-        const raw = await teReviewsService.getPending()
-        if (cancelled) return
-        const parsed = parseTePendingResponse(raw)
+      const [pendingResult, historyResult] = await Promise.allSettled([
+        teReviewsService.getPending(),
+        teReviewsService.getHistory({ page: 1, limit: 1 }),
+      ])
+      if (cancelled) return
+
+      let seriesPending = 0
+      let seriesApproved = 0
+      if (pendingResult.status === 'fulfilled') {
+        const parsed = parseTePendingResponse(pendingResult.value)
         const flat = flattenTePendingSections(parsed)
         const mapped = flat.map(({ chapter, series, tabType }) =>
           mapTePendingChapterToSubmission(chapter, series, tabType, null),
         )
-        const pending = mapped.filter((s) => isTeSeriesLevelSubmission(s)).length
-        const approved = mapped.filter(
+        seriesPending = mapped.filter((s) => isTeSeriesLevelSubmission(s)).length
+          || parsed?.seriesLevel?.count
+          || 0
+        seriesApproved = mapped.filter(
           (s) =>
             isTeChapterLevelSubmission(s)
             && (s.status === 'pending' || s.status === 'revision'),
-        ).length
-        setCounts((prev) => ({
-          ...prev,
-          'series-pending':
-            pending || parsed?.seriesLevel?.count || 0,
-          'series-approved':
-            approved || parsed?.chapterLevel?.count || 0,
-          history: listTantouReviewHistory().length,
-        }))
-      } catch {
-        if (!cancelled) {
-          setCounts((prev) => ({
-            ...prev,
-            'series-pending': 0,
-            'series-approved': 0,
-          }))
-        }
+        ).length || parsed?.chapterLevel?.count || 0
       }
+
+      let historyTotal = 0
+      if (historyResult.status === 'fulfilled') {
+        historyTotal = mapTeReviewHistoryResponse(historyResult.value).pagination.total
+      }
+
+      setCounts({
+        'series-pending': seriesPending,
+        'series-approved': seriesApproved,
+        history: historyTotal,
+      })
     })()
     return () => {
       cancelled = true

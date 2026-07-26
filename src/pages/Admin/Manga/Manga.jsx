@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  AlignLeft,
   BookOpen,
   ChevronLeft,
   ChevronRight,
@@ -23,6 +22,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/api/index.js'
+import { getApiErrorMessage } from '@/api/http.js'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -43,8 +43,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
+import MangaEditDialog from '@/components/Admin/MangaEditDialog.jsx'
+import {
+  getPublicationStatusLabel,
+  SERIES_PUBLICATION_STATUSES,
+} from '@/utils/seriesModel.js'
 
+/** Workflow duyệt nội bộ (Series.status) — khác publication_status. */
 const STATUS_CONFIG = {
   draft: { label: 'Nháp', class: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400' },
   submitted: { label: 'Đã gửi', class: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400' },
@@ -52,16 +59,33 @@ const STATUS_CONFIG = {
   rejected: { label: 'Từ chối', class: 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400' },
   published: { label: 'Đã xuất bản', class: 'bg-primary/20 text-primary border border-primary/30 font-bold shadow-sm dark:bg-primary/30 dark:text-primary-foreground' },
   cancelled: { label: 'Đã huỷ', class: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' },
-  ongoing: { label: 'Đang phát hành', class: 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400' },
-  completed: { label: 'Hoàn thành', class: 'bg-purple-100 text-purple-700 dark:bg-purple-500/15 dark:text-purple-400' },
-  hiatus: { label: 'Tạm ngưng', class: 'bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-400' },
-  dropped: { label: 'Bị drop', class: 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400' },
+}
+
+/** Trạng thái hiển thị cho reader (Series.publication_status). */
+const PUBLICATION_STATUS_CONFIG = {
+  upcoming: { label: 'Sắp ra', class: 'border-slate-200 bg-slate-50 text-slate-700' },
+  ongoing: { label: 'Đang phát hành', class: 'border-green-200 bg-green-50 text-green-700' },
+  hiatus: { label: 'Tạm ngưng', class: 'border-amber-200 bg-amber-50 text-amber-700' },
+  completed: { label: 'Hoàn thành', class: 'border-blue-200 bg-blue-50 text-blue-700' },
+  dropped: { label: 'Đã hủy', class: 'border-red-200 bg-red-50 text-red-700' },
 }
 
 const SERIES_STATUS_VALUES = ['draft', 'submitted', 'approved', 'rejected', 'published', 'cancelled']
+const PUB_STATUS_NONE = '__none__'
 
-/** Soft delete chỉ cho các status này (khớp BE). */
-const SOFT_DELETABLE_STATUSES = new Set(['draft', 'rejected', 'cancelled'])
+const PUBLICATION_QUICK_ACTIONS = [
+  { value: 'upcoming', label: 'Sắp ra' },
+  { value: 'ongoing', label: 'Đang phát hành' },
+  { value: 'hiatus', label: 'Tạm ngưng' },
+  { value: 'completed', label: 'Hoàn thành' },
+  { value: 'dropped', label: 'Đã hủy' },
+  { value: PUB_STATUS_NONE, label: 'Đặt lại' },
+]
+
+/** Soft delete / force-delete: mọi status (khớp BE DELETE /admin/manga/:id). */
+function canForceDeleteManga(manga) {
+  return Boolean(manga && !manga.isDeleted)
+}
 
 function formatNumber(n) {
   const num = Number(n) || 0
@@ -89,6 +113,10 @@ function normalizeManga(raw, index = 0) {
     author: raw.author ?? '',
     genre: tags,
     status: raw.status ?? 'draft',
+    publicationStatus:
+      raw.publicationStatus !== undefined
+        ? raw.publicationStatus
+        : (raw.publication_status ?? null),
     chapters: raw.chapters ?? raw.chapterCount ?? 0,
     views: raw.views ?? raw.reads ?? 0,
     description: raw.description ?? '',
@@ -103,12 +131,20 @@ function normalizeManga(raw, index = 0) {
   }
 }
 
-function canSoftDeleteManga(manga) {
-  if (!manga || manga.isDeleted) return false
-  return SOFT_DELETABLE_STATUSES.has(String(manga.status ?? '').toLowerCase())
+function PublicationStatusBadge({ status }) {
+  if (status == null || status === '') return null
+  const config = PUBLICATION_STATUS_CONFIG[status] ?? {
+    label: getPublicationStatusLabel(status),
+    class: 'border-border bg-muted text-muted-foreground',
+  }
+  return (
+    <Badge variant="outline" className={cn('font-medium', config.class)}>
+      {config.label}
+    </Badge>
+  )
 }
 
-function MangaCard({ manga, onEdit, onDelete, onClick }) {
+function MangaCard({ manga, onEdit, onDelete, onPublicationStatus, onClick }) {
   const statusConfig = STATUS_CONFIG[manga.status] ?? { label: manga.status ?? '—', class: '', icon: '📌' }
 
   return (
@@ -148,6 +184,9 @@ function MangaCard({ manga, onEdit, onDelete, onClick }) {
             <Badge className="bg-white/95 text-foreground shadow-lg backdrop-blur-sm font-bold tracking-wide border-0">
               {statusConfig.label}
             </Badge>
+            {manga.publicationStatus ? (
+              <PublicationStatusBadge status={manga.publicationStatus} />
+            ) : null}
             {manga.isDeleted ? (
               <Badge className="border-0 bg-zinc-900/85 text-white shadow-lg">
                 Đã ẩn
@@ -176,7 +215,7 @@ function MangaCard({ manga, onEdit, onDelete, onClick }) {
           </div>
 
           {/* Action buttons */}
-          <div className="mt-3 flex gap-2">
+          <div className="mt-3 flex flex-wrap gap-2">
             <Button
               variant="outline"
               size="sm"
@@ -189,14 +228,22 @@ function MangaCard({ manga, onEdit, onDelete, onClick }) {
             <Button
               variant="outline"
               size="sm"
+              className="gap-1.5"
+              disabled={manga.isDeleted}
+              title="Đổi trạng thái phát hành (reader)"
+              onClick={(e) => { e.stopPropagation(); onPublicationStatus() }}
+            >
+              Phát hành
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
               className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
-              disabled={!canSoftDeleteManga(manga)}
+              disabled={!canForceDeleteManga(manga)}
               title={
                 manga.isDeleted
                   ? 'Truyện đã được ẩn'
-                  : canSoftDeleteManga(manga)
-                    ? 'Ẩn truyện (soft delete)'
-                    : 'Chỉ ẩn được truyện nháp / từ chối / đã huỷ'
+                  : 'Force delete — ẩn khỏi reader (mọi status)'
               }
               onClick={(e) => { e.stopPropagation(); onDelete() }}
             >
@@ -209,7 +256,7 @@ function MangaCard({ manga, onEdit, onDelete, onClick }) {
   )
 }
 
-function MangaRow({ manga, onEdit, onDelete, onClick }) {
+function MangaRow({ manga, onEdit, onDelete, onPublicationStatus, onClick }) {
   const statusConfig = STATUS_CONFIG[manga.status] ?? { label: manga.status ?? '—', class: '', icon: '📌' }
 
   return (
@@ -252,6 +299,7 @@ function MangaRow({ manga, onEdit, onDelete, onClick }) {
           <Badge className={cn('font-semibold tracking-wide', statusConfig.class)}>
             {statusConfig.label}
           </Badge>
+          <PublicationStatusBadge status={manga.publicationStatus} />
           {manga.isDeleted ? (
             <Badge variant="outline" className="text-[10px]">
               Đã ẩn
@@ -262,19 +310,26 @@ function MangaRow({ manga, onEdit, onDelete, onClick }) {
       <td className="px-4 py-3 text-xs text-muted-foreground">{manga.updatedAt}</td>
       <td className="px-4 py-3">
         <div className="flex justify-end gap-1">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            title="Đổi trạng thái phát hành"
+            disabled={manga.isDeleted}
+            onClick={(e) => { e.stopPropagation(); onPublicationStatus() }}
+          >
+            <Sparkles className="size-4" />
+          </Button>
           <Button variant="ghost" size="icon-sm" onClick={(e) => { e.stopPropagation(); onEdit() }}>
             <Edit3 className="size-4" />
           </Button>
           <Button
             variant="ghost"
             size="icon-sm"
-            disabled={!canSoftDeleteManga(manga)}
+            disabled={!canForceDeleteManga(manga)}
             title={
               manga.isDeleted
                 ? 'Truyện đã được ẩn'
-                : canSoftDeleteManga(manga)
-                  ? 'Ẩn truyện (soft delete)'
-                  : 'Chỉ ẩn được truyện nháp / từ chối / đã huỷ'
+                : 'Force delete — ẩn khỏi reader (mọi status)'
             }
             onClick={(e) => { e.stopPropagation(); onDelete() }}
             className="text-destructive hover:bg-destructive/10"
@@ -287,143 +342,138 @@ function MangaRow({ manga, onEdit, onDelete, onClick }) {
   )
 }
 
-function MangaDialog({ manga, open, onClose, onSave }) {
-  const isEdit = !!manga?.id
-  const [form, setForm] = useState({ title: '', author: '', genre: '', status: 'draft' })
+function PublicationStatusDialog({ manga, open, onClose, onSaved }) {
+  const [statusValue, setStatusValue] = useState(PUB_STATUS_NONE)
+  const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    if (open) {
-      setForm({
-        title: manga?.title ?? '',
-        author: manga?.author ?? '',
-        genre: manga?.genre?.join(', ') ?? '',
-        status: manga?.status ?? 'draft',
-      })
-    }
+    if (!open || !manga) return
+    setStatusValue(
+      manga.publicationStatus == null || manga.publicationStatus === ''
+        ? PUB_STATUS_NONE
+        : String(manga.publicationStatus),
+    )
+    setNote('')
   }, [open, manga])
 
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
-
   async function handleSave() {
-    if (!form.title.trim()) return
+    if (!manga?.id) return
     setSaving(true)
-    const tags = form.genre.split(',').map(s => s.trim()).filter(Boolean)
-    const payload = { title: form.title, author: form.author, tags, status: form.status }
     try {
-      await (isEdit ? api.updateManga(manga.id, payload) : api.createManga(payload))
-      toast.success(isEdit ? 'Đã cập nhật truyện' : 'Đã thêm truyện mới')
-      onSave()
+      const publication_status =
+        statusValue === PUB_STATUS_NONE ? null : statusValue
+      await api.updateSeriesPublicationStatus(manga.id, {
+        publication_status,
+        note,
+      })
+      toast.success(
+        publication_status == null
+          ? 'Đã bỏ trạng thái phát hành'
+          : `Đã đổi sang “${getPublicationStatusLabel(publication_status)}”`,
+      )
+      onSaved(publication_status)
     } catch (err) {
-      toast.error(err?.response?.data?.message || 'Có lỗi xảy ra')
+      toast.error(
+        getApiErrorMessage(err, 'Không đổi được trạng thái phát hành.'),
+      )
     } finally {
       setSaving(false)
     }
   }
 
+  function applyQuick(next) {
+    setStatusValue(next)
+  }
+
+  const current = manga?.publicationStatus
+
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader className="relative pb-2">
-          <div className="absolute -left-6 -top-4 flex size-12 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-rose-600 shadow-lg shadow-primary/30">
-            <BookOpen className="size-6 text-white" />
-          </div>
-          <DialogTitle className="pl-10 pt-2 text-xl">
-            {isEdit ? 'Chỉnh sửa truyện' : 'Thêm truyện mới'}
-          </DialogTitle>
-          <DialogDescription className="pl-10">
-            {isEdit ? 'Cập nhật thông tin bộ truyện' : 'Tạo bộ truyện mới trong hệ thống'}
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Trạng thái phát hành</DialogTitle>
+          <DialogDescription>
+            Hiển thị cho reader (tạm ngưng / hoàn thành / …). Không liên quan
+            workflow duyệt nội bộ. Series đang hiatus/dropped sẽ không publish
+            chapter theo lịch.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-5 py-4">
-          {/* Title */}
-          <div className="space-y-2">
-            <Label className="text-sm font-medium">
-              <span className="mr-1.5">📖</span> Tên truyện <span className="text-destructive">*</span>
-            </Label>
-            <div className="relative">
-              <Input
-                value={form.title}
-                onChange={e => set('title', e.target.value)}
-                placeholder="Nhập tên truyện..."
-                className="pl-10"
-              />
-              <BookOpen className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            </div>
+        <div className="space-y-4 py-2">
+          <div>
+            <p className="text-sm font-medium">{manga?.title}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Hiện tại:{' '}
+              {current == null
+                ? 'Chưa có'
+                : getPublicationStatusLabel(current)}
+            </p>
           </div>
 
-          {/* Author & Status */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">
-                <span className="mr-1.5">✍️</span> Tác giả
-              </Label>
-              <div className="relative">
-                <Input
-                  value={form.author}
-                  onChange={e => set('author', e.target.value)}
-                  placeholder="Tên tác giả"
-                  className="pl-10"
-                />
-                <Edit3 className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">
-                <span className="mr-1.5">🎯</span> Trạng thái
-              </Label>
-              <Select value={form.status} onValueChange={v => set('status', v)}>
-                <SelectTrigger className="pl-10">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {SERIES_STATUS_VALUES.map(s => (
-                    <SelectItem key={s} value={s}>
-                      <span className="flex items-center gap-2">
-                        <span>{STATUS_CONFIG[s]?.icon}</span>
-                        <span>{STATUS_CONFIG[s]?.label}</span>
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+          <div className="flex flex-wrap gap-2">
+            {PUBLICATION_QUICK_ACTIONS.map((action) => (
+              <Button
+                key={action.value}
+                type="button"
+                size="sm"
+                variant={statusValue === action.value ? 'default' : 'outline'}
+                className={
+                  action.value === 'dropped' && statusValue !== 'dropped'
+                    ? 'text-destructive'
+                    : undefined
+                }
+                onClick={() => applyQuick(action.value)}
+              >
+                {action.label}
+              </Button>
+            ))}
           </div>
 
-          {/* Genres */}
           <div className="space-y-2">
-            <Label className="text-sm font-medium">
-              <span className="mr-1.5">🏷️</span> Thể loại
-            </Label>
-            <div className="relative">
-              <Input
-                value={form.genre}
-                onChange={e => set('genre', e.target.value)}
-                placeholder="Hành động, Isekai, Romance..."
-                className="pl-10"
-              />
-              <AlignLeft className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            </div>
-            <p className="flex items-center gap-1 text-xs text-muted-foreground">
-              <span className="text-[10px]">💡</span>
-              Phân cách bằng dấu phẩy
+            <Label>Trạng thái</Label>
+            <Select value={statusValue} onValueChange={setStatusValue}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={PUB_STATUS_NONE}>Không hiển thị (null)</SelectItem>
+                {SERIES_PUBLICATION_STATUSES.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Ghi chú (tuỳ chọn)</Label>
+            <Textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="VD: Tác giả thông báo tạm dừng 2 tháng"
+              rows={3}
+            />
+            <p className="text-xs text-muted-foreground">
+              Gửi kèm notification cho author khi đổi trạng thái.
             </p>
           </div>
         </div>
 
         <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={onClose} className="gap-1.5">
-            <X className="size-4" />
-            Huỷ bỏ
+          <Button type="button" variant="outline" onClick={onClose}>
+            Huỷ
           </Button>
-          <Button onClick={handleSave} disabled={saving || !form.title.trim()} className="gap-1.5">
+          <Button type="button" disabled={saving} onClick={() => void handleSave()}>
             {saving ? (
-              <Loader2 className="size-4 animate-spin" />
+              <>
+                <Loader2 className="size-4 animate-spin" />
+                Đang lưu...
+              </>
             ) : (
-              <Sparkles className="size-4" />
+              'Lưu trạng thái'
             )}
-            {saving ? 'Đang lưu...' : isEdit ? 'Lưu thay đổi' : 'Thêm truyện'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -441,7 +491,10 @@ export default function Manga() {
   const [includeDeleted, setIncludeDeleted] = useState(false)
   const [view, setView] = useState('grid')
   const [modal, setModal] = useState(null)
+  const [publicationTarget, setPublicationTarget] = useState(null)
   const [deleteTarget, setDeleteTarget] = useState(null)
+  const [deleteStep, setDeleteStep] = useState(1)
+  const [deleteAck, setDeleteAck] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [page, setPage] = useState(1)
   const ITEMS_PER_PAGE = 10
@@ -473,41 +526,62 @@ export default function Manga() {
   }
 
   function handleDelete(manga) {
-    if (!canSoftDeleteManga(manga)) {
-      toast.error('Chỉ ẩn được truyện ở trạng thái nháp, từ chối hoặc đã huỷ.')
+    if (!canForceDeleteManga(manga)) {
+      toast.error('Truyện đã được ẩn trước đó.')
       return
     }
+    setDeleteStep(1)
+    setDeleteAck(false)
     setDeleteTarget(manga)
   }
 
-  async function confirmSoftDelete() {
+  async function confirmForceDelete() {
     const manga = deleteTarget
-    if (!manga?.id) return
+    if (!manga?.id || !deleteAck) return
     setDeleting(true)
     try {
-      await api.deleteManga(manga.id)
+      const res = await api.deleteManga(manga.id)
       if (includeDeleted) {
         setList((l) =>
           l.map((m) =>
             m.id === manga.id
-              ? { ...m, isDeleted: true, deletedAt: new Date().toISOString() }
+              ? {
+                  ...m,
+                  isDeleted: true,
+                  deletedAt: res?.deleted_at ?? new Date().toISOString(),
+                  publicationStatus: 'dropped',
+                }
               : m,
           ),
         )
       } else {
         setList((l) => l.filter((m) => m.id !== manga.id))
       }
-      toast.success('Đã ẩn truyện')
+      const chaptersN = res?.chapters_soft_deleted
+      const pagesN = res?.pages_hard_deleted
+      const parts = [
+        chaptersN != null ? `${chaptersN} chapters` : null,
+        pagesN != null ? `${pagesN} pages đã xóa` : null,
+      ].filter(Boolean)
+      toast.success(
+        parts.length
+          ? `Đã ẩn truyện ${manga.title} (${parts.join(', ')})`
+          : `Đã ẩn truyện ${manga.title}`,
+      )
       setDeleteTarget(null)
+      setDeleteStep(1)
+      setDeleteAck(false)
     } catch (err) {
       const status = err?.response?.status
       if (status === 410) {
-        toast.error(err?.response?.data?.message || 'Truyện đã được ẩn trước đó.')
+        toast.error(getApiErrorMessage(err, 'Truyện đã được ẩn trước đó.'))
         await loadList(includeDeleted)
         setDeleteTarget(null)
+        setDeleteStep(1)
+        setDeleteAck(false)
         return
       }
-      toast.error(err?.response?.data?.message || 'Không thể ẩn truyện')
+      toast.error(getApiErrorMessage(err, 'Không thể ẩn truyện'))
     } finally {
       setDeleting(false)
     }
@@ -531,7 +605,7 @@ export default function Manga() {
   const stats = {
     total: list.length,
     published: list.filter(m => m.status === 'published').length,
-    ongoing: list.filter(m => m.status === 'ongoing').length,
+    ongoing: list.filter(m => m.publicationStatus === 'ongoing').length,
   }
 
   return (
@@ -692,6 +766,7 @@ export default function Manga() {
                   manga={m}
                   onEdit={() => setModal(m)}
                   onDelete={() => handleDelete(m)}
+                  onPublicationStatus={() => setPublicationTarget(m)}
                   onClick={() => handleCardClick(m)}
                 />
               ))}
@@ -794,6 +869,7 @@ export default function Manga() {
                       manga={m}
                       onEdit={() => setModal(m)}
                       onDelete={() => handleDelete(m)}
+                      onPublicationStatus={() => setPublicationTarget(m)}
                       onClick={() => handleCardClick(m)}
                     />
                   ))}
@@ -887,12 +963,33 @@ export default function Manga() {
       )}
 
       {/* Dialog */}
-      <MangaDialog manga={modal?.id ? modal : null} open={modal !== null} onClose={() => setModal(null)} onSave={handleSave} />
+      <MangaEditDialog manga={modal?.id ? modal : null} open={modal !== null} onClose={() => setModal(null)} onSave={handleSave} />
+
+      <PublicationStatusDialog
+        manga={publicationTarget}
+        open={Boolean(publicationTarget)}
+        onClose={() => setPublicationTarget(null)}
+        onSaved={(nextStatus) => {
+          const id = publicationTarget?.id
+          if (id) {
+            setList((prev) =>
+              prev.map((m) =>
+                m.id === id ? { ...m, publicationStatus: nextStatus } : m,
+              ),
+            )
+          }
+          setPublicationTarget(null)
+        }}
+      />
 
       <Dialog
         open={Boolean(deleteTarget)}
         onOpenChange={(open) => {
-          if (!open && !deleting) setDeleteTarget(null)
+          if (!open && !deleting) {
+            setDeleteTarget(null)
+            setDeleteStep(1)
+            setDeleteAck(false)
+          }
         }}
       >
         <DialogContent className="sm:max-w-md">
@@ -901,42 +998,75 @@ export default function Manga() {
               <span className="flex size-9 items-center justify-center rounded-full bg-destructive/10 text-destructive">
                 <Trash2 className="size-4" />
               </span>
-              Ẩn truyện?
+              {deleteStep === 1 ? 'Force delete truyện?' : 'Xác nhận lần 2'}
             </DialogTitle>
             <DialogDescription className="text-left leading-relaxed">
               {deleteTarget?.title ? (
                 <>
-                  Bạn sắp ẩn truyện <strong className="text-foreground">{deleteTarget.title}</strong>.
-                  {' '}Truyện sẽ không còn hiện trong danh sách, nhưng dữ liệu vẫn được giữ lại.
+                  Hành động này sẽ ẩn truyện{' '}
+                  <strong className="text-foreground">{deleteTarget.title}</strong>{' '}
+                  khỏi mọi reader. Tất cả chapter sẽ bị ẩn; pages/tasks sẽ bị xóa
+                  vĩnh viễn.
                 </>
               ) : (
-                'Truyện sẽ không còn hiện trong danh sách, nhưng dữ liệu vẫn được giữ lại.'
+                'Hành động này sẽ ẩn truyện khỏi mọi reader. Tất cả chapter sẽ bị ẩn, pages/tasks sẽ bị xóa vĩnh viễn.'
               )}
             </DialogDescription>
           </DialogHeader>
+
+          {deleteStep === 2 ? (
+            <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={deleteAck}
+                onChange={(e) => setDeleteAck(e.target.checked)}
+                disabled={deleting}
+              />
+              <span>
+                Tôi hiểu pages/tasks sẽ bị xóa vĩnh viễn và không hoàn tác được.
+              </span>
+            </label>
+          ) : null}
+
           <DialogFooter className="gap-2 sm:justify-end">
             <Button
               type="button"
               variant="outline"
               disabled={deleting}
-              onClick={() => setDeleteTarget(null)}
+              onClick={() => {
+                setDeleteTarget(null)
+                setDeleteStep(1)
+                setDeleteAck(false)
+              }}
             >
               Huỷ
             </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              disabled={deleting}
-              className="gap-1.5"
-              onClick={() => void confirmSoftDelete()}
-            >
-              {deleting ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Trash2 className="size-4" />
-              )}
-              {deleting ? 'Đang ẩn…' : 'Ẩn truyện'}
-            </Button>
+            {deleteStep === 1 ? (
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={deleting}
+                onClick={() => setDeleteStep(2)}
+              >
+                Tiếp tục
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={deleting || !deleteAck}
+                className="gap-1.5"
+                onClick={() => void confirmForceDelete()}
+              >
+                {deleting ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Trash2 className="size-4" />
+                )}
+                {deleting ? 'Đang xóa…' : 'Force Delete'}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

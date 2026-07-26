@@ -2,10 +2,9 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   BookOpen,
+  Calendar,
   ChevronLeft,
   ChevronRight,
-  Crown,
-  FileText,
   LayoutDashboard,
   LogOut,
   Sparkles,
@@ -21,6 +20,7 @@ const NAV_ITEMS = [
     links: [
       { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
       { id: 'rankings', label: 'Bảng xếp hạng', icon: Trophy },
+      { id: 'publication-calendar', label: 'Lịch phát hành', icon: Calendar },
       { id: 'manga', label: 'Quản lý truyện', icon: BookOpen },
     ],
   },
@@ -28,7 +28,6 @@ const NAV_ITEMS = [
     section: 'Quản lý',
     links: [
       { id: 'users', label: 'Người dùng', icon: UsersIcon },
-      { id: 'eb-representative', label: 'Đại diện EB', icon: Crown },
       { id: 'profile', label: 'Hồ sơ', icon: UserCircle },
     ],
   },

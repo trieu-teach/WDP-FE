@@ -88,6 +88,7 @@ export function apiSeriesToUi(raw, index = 0) {
     category: String(s.category ?? '').trim(),
     tags: Array.isArray(s.tags) ? s.tags : [],
     age_rating: s.age_rating ?? s.ageRating ?? 'All ages',
+    deletedAt: s.deleted_at ?? s.deletedAt ?? null,
   })
 }
 

@@ -1,6 +1,6 @@
 import { resolveMediaUrl } from '@/api/http.js'
 import { resolveTePreviewPage, resolveTePageImageUrl } from '@/api/teReviews.service.js'
-import { phaseToPipeline } from '@/utils/teReviewPhase.js'
+import { phaseToPipeline, resolveTeUiChapterStatus } from '@/utils/teReviewPhase.js'
 
 const EMPTY_SECTION = {
   label: '',
@@ -127,6 +127,12 @@ function legacyFlatPendingToSections(items) {
       updatedAt: item.updatedAt ?? item.createdAt,
       submitted_by: item.submitted_by,
       te_review_id: item.te_review_id ?? null,
+      is_scheduled: item.is_scheduled ?? item.isScheduled ?? false,
+      scheduled_publish_at:
+        item.scheduled_publish_at
+        ?? item.scheduledPublishAt
+        ?? null,
+      published_at: item.published_at ?? item.publishedAt ?? null,
       cover_image_url:
         item.cover_image_url
         ?? item.cover_url
@@ -196,16 +202,12 @@ function parseSeriesGenres(series) {
   return []
 }
 
-function mapTeChapterStatus(status) {
-  const value = String(status ?? '').toLowerCase().replace(/\s+/g, '_')
-  if (value === 'pending_eb' || value === 'forwarded_eb') return 'forwarded_eb'
-  if (value === 'pending_te' || value === 'te_pending') return 'pending'
-  if (value.includes('revision') || value === 'rejected' || value === 'reject') {
-    return 'revision'
-  }
-  if (value === 'published' || value === 'approved_publish') return 'approved_publish'
-  if (value.includes('publish') && value !== 'pending_te') return 'approved_publish'
-  return 'pending'
+function mapTeChapterStatus(status, { isScheduled = false, scheduledPublishAt = null } = {}) {
+  return resolveTeUiChapterStatus({
+    apiStatus: status,
+    isScheduled,
+    scheduledPublishAt,
+  })
 }
 
 export function resolveTeEntityId(entity) {
@@ -343,6 +345,14 @@ export function mapTePendingChapterToSubmission(chapter, series, tabType, previe
     || resolveMediaUrl(series?.cover_image_url ?? null)
     || resolveTePageImageUrl(previewPage)
 
+  const isScheduled = Boolean(
+    chapter?.is_scheduled ?? chapter?.isScheduled ?? false,
+  )
+  const scheduledPublishAt =
+    chapter?.scheduled_publish_at
+    ?? chapter?.scheduledPublishAt
+    ?? null
+
   return {
     id: chapterId,
     chapterId,
@@ -368,7 +378,16 @@ export function mapTePendingChapterToSubmission(chapter, series, tabType, previe
     teId: resolveTeChapterTeId(chapter) || null,
     teAssignedAt: chapter?.te_assigned_at ?? null,
     apiChapterStatus: String(chapter?.status ?? ''),
-    status: mapTeChapterStatus(chapter?.status),
+    isScheduled,
+    scheduledPublishAt: scheduledPublishAt != null ? String(scheduledPublishAt) : null,
+    publishedAt:
+      chapter?.published_at != null
+        ? String(chapter.published_at)
+        : (chapter?.publishedAt != null ? String(chapter.publishedAt) : null),
+    status: mapTeChapterStatus(chapter?.status, {
+      isScheduled,
+      scheduledPublishAt,
+    }),
     sentAt: chapter?.updatedAt ?? chapter?.te_assigned_at ?? null,
     pagesMeta: Array.isArray(preview?.pages) ? preview.pages : [],
     seriesMeta: {
@@ -392,6 +411,7 @@ export function mapTePendingChapterToSubmission(chapter, series, tabType, previe
       seriesApiStatus: series?.status ?? null,
       ebApproved: tabType === 'chapter_level',
       publicationSchedule: series?.publication_schedule ?? null,
+      publicationStatus: series?.publication_status ?? series?.publicationStatus ?? null,
     },
   }
 }

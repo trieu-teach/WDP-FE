@@ -130,7 +130,7 @@ export default function EbRepresentative() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Tài khoản role EB</CardTitle>
-          <CardDescription>Danh sách từ GET /admin/eb-representative/candidates</CardDescription>
+          <CardDescription>Danh sách tài khoản EB có thể chỉ định làm đại diện</CardDescription>
         </CardHeader>
         <CardContent>
           <Table>

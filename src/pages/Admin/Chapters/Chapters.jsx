@@ -27,10 +27,10 @@ import { toast } from 'sonner'
 import { api } from '@/api/index.js'
 import { realService } from '@/api/real.service.js'
 import { getSession } from '@/lib/auth.js'
+import MangaEditDialog from '@/components/Admin/MangaEditDialog.jsx'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Separator } from '@/components/ui/separator'
 import {
   Dialog,
   DialogContent,
@@ -49,6 +49,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
+import { EB_SCORE_CRITERIA } from '@/utils/ebEvaluationMappers.js'
 
 const CHAPTER_STATUSES = [
   'draft',
@@ -133,10 +134,84 @@ function formatNumber(n) {
   return String(num)
 }
 
-function SeriesDetailCard({ series, chapters, comments, onDeleteComment, onBack, isAdmin }) {
+function formatDateTime(value) {
+  if (!value) return '—'
+  try {
+    return new Date(value).toLocaleString('vi-VN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  } catch {
+    return '—'
+  }
+}
+
+function ebResultLabel(result) {
+  const map = {
+    approved: 'Approved',
+    rejected: 'Rejected',
+    revision: 'Revision',
+  }
+  const key = String(result ?? '').toLowerCase()
+  return map[key] ?? (result || '—')
+}
+
+function ebStatusLabel(status) {
+  const map = {
+    scoring: 'Scoring',
+    saved: 'Saved',
+    locked: 'Locked',
+  }
+  const key = String(status ?? '').toLowerCase()
+  return map[key] ?? (status || '—')
+}
+
+function SeriesDetailCard({
+  series,
+  chapters,
+  comments,
+  onDeleteComment,
+  onBack,
+  isAdmin,
+  onSeriesUpdated,
+}) {
   const statusConfig = SERIES_STATUS_CONFIG[series.status] ?? { label: series.status ?? '—', class: '' }
   const seriesCover = series.thumbnail || series.cover_image_url || series.coverImage
-  const avgRating = series.averageRating ? Number(series.averageRating).toFixed(1) : '0.0'
+  const readerRating = series.readerRating ?? null
+  const totalVotes = readerRating?.totalVotes
+    ?? series.votesCount
+    ?? series.votes_count
+    ?? 0
+  const eb = series.ebEvaluation ?? null
+  const chapterEb = series.chapterEvaluation ?? null
+  const [chapterQuery, setChapterQuery] = useState('')
+  const [chapterSort, setChapterSort] = useState('newest')
+  const [editOpen, setEditOpen] = useState(false)
+
+  const chapterCount = Array.isArray(chapters)
+    ? chapters.length
+    : (typeof series.chapters === 'number' ? series.chapters : 0)
+
+  const visibleChapters = (() => {
+    const q = chapterQuery.trim().toLowerCase()
+    let list = Array.isArray(chapters) ? [...chapters] : []
+    if (q) {
+      list = list.filter((c) => {
+        const title = String(c.title ?? '').toLowerCase()
+        const num = String(c.number ?? '')
+        return title.includes(q) || num.includes(q) || `chapter ${num}`.includes(q)
+      })
+    }
+    list.sort((a, b) => {
+      const na = Number(a.number) || 0
+      const nb = Number(b.number) || 0
+      return chapterSort === 'oldest' ? na - nb : nb - na
+    })
+    return list
+  })()
 
   return (
     <div className="space-y-4">
@@ -149,8 +224,8 @@ function SeriesDetailCard({ series, chapters, comments, onDeleteComment, onBack,
       </div>
 
       {/* Main Content - 2 columns: Cover Left, Info Right */}
-      <div className="grid gap-4 lg:grid-cols-[220px_1fr]">
-        {/* Left Column - Cover */}
+      <div className="grid gap-5 lg:grid-cols-[240px_minmax(0,1fr)]">
+        {/* Left Column - Cover + Stats */}
         <div className="space-y-3">
           <div className="relative aspect-[3/4] overflow-hidden rounded-xl bg-muted shadow-lg">
             {seriesCover ? (
@@ -165,120 +240,322 @@ function SeriesDetailCard({ series, chapters, comments, onDeleteComment, onBack,
             )}
           </div>
 
-          {/* Quick Stats */}
-          <Card>
-            <CardContent className="grid grid-cols-2 gap-2 p-3">
+          <Card className="border-border/70 shadow-none">
+            <CardContent className="grid grid-cols-2 gap-x-2 gap-y-3 p-3">
               <div className="text-center">
-                <div className="flex items-center justify-center gap-1 text-sm font-bold text-blue-500">
+                <div className="flex items-center justify-center gap-1 text-sm font-bold text-blue-600">
                   <Eye className="size-3.5" />
                   {formatNumber(series.views || series.reads || 0)}
                 </div>
-                <p className="text-xs text-muted-foreground">Lượt xem</p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">Lượt xem</p>
               </div>
               <div className="text-center">
-                <div className="flex items-center justify-center gap-1 text-sm font-bold text-emerald-500">
+                <div className="flex items-center justify-center gap-1 text-sm font-bold text-emerald-600">
                   <BookOpen className="size-3.5" />
-                  {chapters.length || series.chapters || 0}
+                  {chapterCount}
                 </div>
-                <p className="text-xs text-muted-foreground">Chương</p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">Số chương</p>
+              </div>
+              <div className="text-center">
+                <div className="flex items-center justify-center gap-1 text-sm font-bold text-rose-600">
+                  <Heart className="size-3.5" />
+                  {formatNumber(totalVotes)}
+                </div>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">Votes</p>
+              </div>
+              <div className="text-center">
+                <div className="flex items-center justify-center gap-1 text-sm font-bold text-violet-600">
+                  <MessageSquare className="size-3.5" />
+                  {comments.length}
+                </div>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">Bình luận</p>
               </div>
             </CardContent>
           </Card>
 
-          {/* Rating */}
-          <Card>
-            <CardContent className="p-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-muted-foreground">Đánh giá</p>
-                  <div className="mt-0.5 flex items-baseline gap-1">
-                    <span className="text-lg font-bold">{avgRating}</span>
-                    <span className="text-xs text-muted-foreground">/5</span>
-                  </div>
+          {eb ? (
+            <Card className="border-violet-200/70 bg-violet-50/40 shadow-none dark:border-violet-500/30 dark:bg-violet-500/10">
+              <CardHeader className="pb-2 pt-3">
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <Sparkles className="size-4 text-violet-600" />
+                  Hội đồng EB (series)
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 pb-3 pt-0 text-xs">
+                <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+                  <span className="text-muted-foreground">Members</span>
+                  <span className="font-medium">{eb.totalMembers}</span>
+                  <span className="text-muted-foreground">Average</span>
+                  <span className="font-medium">
+                    {eb.councilAverage != null
+                      ? `${Number(eb.councilAverage).toFixed(2)} / 5`
+                      : '—'}
+                  </span>
+                  <span className="text-muted-foreground">Result</span>
+                  <span className="font-medium">
+                    {ebResultLabel(eb.result)}
+                    {eb.status ? ` (${ebStatusLabel(eb.status)})` : ''}
+                  </span>
+                  <span className="text-muted-foreground">First review</span>
+                  <span className="font-medium">{eb.firstReview ? 'Yes' : 'No'}</span>
                 </div>
-                <StarDisplay rating={series.averageRating || 0} />
-              </div>
-              <Separator className="my-2" />
-              <div className="flex items-center justify-between text-sm">
-                <span className="flex items-center gap-1 text-amber-500">
-                  <Heart className="size-3.5" />
-                  {formatNumber(series.votesCount || series.votes_count || 0)}
-                </span>
-                <span className="flex items-center gap-1 text-muted-foreground">
-                  <MessageSquare className="size-3.5" />
-                  {comments.length}
-                </span>
-              </div>
-            </CardContent>
-          </Card>
+                {eb.evaluatedBy?.name ? (
+                  <p className="text-muted-foreground">
+                    Evaluated by:{' '}
+                    <span className="font-medium text-foreground">{eb.evaluatedBy.name}</span>
+                  </p>
+                ) : null}
+                {eb.lastSavedAt || eb.lastSavedBy?.name ? (
+                  <p className="text-muted-foreground">
+                    Last saved: {formatDateTime(eb.lastSavedAt)}
+                    {eb.lastSavedBy?.name ? ` by ${eb.lastSavedBy.name}` : ''}
+                  </p>
+                ) : null}
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="border-border/70 shadow-none">
+              <CardContent className="py-3 text-center text-xs text-muted-foreground">
+                Chưa có đánh giá hội đồng EB
+              </CardContent>
+            </Card>
+          )}
+
+          {chapterEb ? (
+            <Card className="border-sky-200/70 bg-sky-50/40 shadow-none dark:border-sky-500/30 dark:bg-sky-500/10">
+              <CardHeader className="pb-2 pt-3">
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <FileText className="size-4 text-sky-600" />
+                  Điểm EB · Chapter {chapterEb.chapter?.chapterNumber ?? 1}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 pb-3 pt-0 text-xs">
+                {chapterEb.chapter?.title ? (
+                  <p className="font-medium text-foreground">
+                    {chapterEb.chapter.title}
+                  </p>
+                ) : null}
+                <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+                  <span className="text-muted-foreground">Members</span>
+                  <span className="font-medium">{chapterEb.totalMembers}</span>
+                  <span className="text-muted-foreground">Average</span>
+                  <span className="font-medium">
+                    {chapterEb.councilAverage != null
+                      ? `${Number(chapterEb.councilAverage).toFixed(2)} / 5`
+                      : '—'}
+                  </span>
+                  <span className="text-muted-foreground">Result</span>
+                  <span className="font-medium">
+                    {ebResultLabel(chapterEb.result)}
+                    {chapterEb.status ? ` (${ebStatusLabel(chapterEb.status)})` : ''}
+                  </span>
+                </div>
+                {chapterEb.evaluatedBy?.name ? (
+                  <p className="text-muted-foreground">
+                    Evaluated by:{' '}
+                    <span className="font-medium text-foreground">
+                      {chapterEb.evaluatedBy.name}
+                    </span>
+                  </p>
+                ) : null}
+                {chapterEb.lastSavedAt || chapterEb.lastSavedBy?.name ? (
+                  <p className="text-muted-foreground">
+                    Last saved: {formatDateTime(chapterEb.lastSavedAt)}
+                    {chapterEb.lastSavedBy?.name
+                      ? ` by ${chapterEb.lastSavedBy.name}`
+                      : ''}
+                  </p>
+                ) : null}
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="border-border/70 shadow-none">
+              <CardContent className="py-3 text-center text-xs text-muted-foreground">
+                Chưa có điểm chấm chapter 1
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         {/* Right Column - Info & Chapters */}
-        <div className="space-y-3">
-          {/* Series Header */}
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <Badge className={cn('text-xs', statusConfig.class)}>{statusConfig.label}</Badge>
-              </div>
-              <h2 className="mt-2 text-xl font-bold">{series.title || series.name}</h2>
-              {series.author && (
-                <p className="text-sm text-muted-foreground">Tác giả: {series.author}</p>
-              )}
+        <div className="min-w-0 space-y-4">
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-2xl font-bold tracking-tight sm:text-3xl">
+                {series.title || series.name}
+              </h2>
+              <Badge className={cn('text-xs', statusConfig.class)}>{statusConfig.label}</Badge>
             </div>
+            {series.author ? (
+              <p className="text-sm text-muted-foreground">Tác giả: {series.author}</p>
+            ) : null}
+
+            {(series.genre?.length > 0 || series.tags?.length > 0) ? (
+              <div className="flex flex-wrap gap-1.5">
+                {(series.genre?.length ? series.genre : series.tags).map((g) => (
+                  <Badge key={g} variant="outline" className="text-xs">
+                    {g}
+                  </Badge>
+                ))}
+              </div>
+            ) : null}
+
+            <div className="flex flex-wrap gap-2 pt-0.5">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => setEditOpen(true)}
+              >
+                <Edit3 className="size-4" />
+                Sửa thông tin
+              </Button>
+            </div>
+
+            {series.description ? (
+              <div className="rounded-xl border border-border/60 bg-muted/20 p-4">
+                <p className="text-sm leading-relaxed text-gray-600 dark:text-muted-foreground">
+                  {series.description}
+                </p>
+              </div>
+            ) : null}
           </div>
 
-          {/* Description */}
-          {series.description && (
-            <p className="text-sm text-muted-foreground leading-relaxed">
-              {series.description}
-            </p>
-          )}
-
-          {/* Genre Tags */}
-          {series.genre?.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {series.genre.map((g) => (
-                <Badge key={g} variant="outline" className="text-xs">
-                  {g}
-                </Badge>
-              ))}
-            </div>
-          )}
+          {chapterEb?.memberScores?.length > 0 ? (
+            <Card className="border-border/70 shadow-none">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">
+                  Chi tiết điểm EB · Chapter {chapterEb.chapter?.chapterNumber ?? 1}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {chapterEb.memberScores.map((member, idx) => (
+                  <div
+                    key={`${member.memberName}-${idx}`}
+                    className="rounded-lg border border-border/60 bg-muted/10 p-3"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-medium">
+                        Member {idx + 1}:{' '}
+                        {typeof member.memberName === 'string' && member.memberName.trim()
+                          ? member.memberName
+                          : 'Thành viên HĐ'}
+                      </p>
+                      <Badge variant="secondary" className="text-xs">
+                        avg {member.average != null ? Number(member.average).toFixed(1) : '—'}
+                      </Badge>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {EB_SCORE_CRITERIA.map((c) => {
+                        const score = member.scores?.[c.key]
+                        if (score == null) return null
+                        return (
+                          <Badge
+                            key={c.key}
+                            variant="outline"
+                            className="text-[11px] font-normal"
+                          >
+                            {c.shortLabel} {Number(score).toFixed(1)}
+                          </Badge>
+                        )
+                      })}
+                    </div>
+                    {member.overallComment ? (
+                      <p className="mt-2 text-xs italic text-muted-foreground">
+                        “{member.overallComment}”
+                      </p>
+                    ) : null}
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          ) : null}
 
           {/* Chapters List */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <FileText className="size-4 text-primary" />
-                Danh sách chương
-                <Badge variant="secondary" className="ml-auto text-xs">
-                  {chapters.length}
+          <Card className="border-border/70 shadow-none">
+            <CardHeader className="space-y-3 pb-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <FileText className="size-4 text-primary" />
+                  Danh sách chương
+                </CardTitle>
+                <Badge variant="secondary" className="text-xs">
+                  {Array.isArray(chapters) ? chapters.length : 0}
                 </Badge>
-              </CardTitle>
+                <div className="ml-auto flex w-full flex-wrap items-center gap-2 sm:w-auto">
+                  <div className="relative min-w-0 flex-1 sm:w-44 sm:flex-none">
+                    <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      type="search"
+                      value={chapterQuery}
+                      onChange={(e) => setChapterQuery(e.target.value)}
+                      placeholder="Tìm chương..."
+                      className="h-8 pl-8 text-xs"
+                      aria-label="Tìm chương"
+                    />
+                  </div>
+                  <Select value={chapterSort} onValueChange={setChapterSort}>
+                    <SelectTrigger className="h-8 w-[130px] text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="newest">Mới nhất</SelectItem>
+                      <SelectItem value="oldest">Cũ nhất</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
             </CardHeader>
-            <CardContent className="p-0 px-4 pb-4">
-              {chapters.length === 0 ? (
+            <CardContent className="p-0 px-2 pb-2 sm:px-3 sm:pb-3">
+              {!Array.isArray(chapters) || chapters.length === 0 ? (
                 <div className="flex flex-col items-center py-6 text-center">
                   <ImageIcon className="size-8 text-muted-foreground/30" />
                   <p className="mt-2 text-xs text-muted-foreground">Chưa có chương nào</p>
                 </div>
+              ) : visibleChapters.length === 0 ? (
+                <div className="flex flex-col items-center py-6 text-center">
+                  <Search className="size-8 text-muted-foreground/30" />
+                  <p className="mt-2 text-xs text-muted-foreground">Không tìm thấy chương khớp</p>
+                </div>
               ) : (
-                <div className="max-h-[250px] overflow-y-auto">
-                  {chapters.map((chapter) => (
+                <div className="max-h-[320px] overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                  {visibleChapters.map((chapter) => (
                     <div
                       key={chapter.id}
-                      className="group flex items-center gap-3 border-b border-border/50 py-2 last:border-0 hover:bg-muted/30"
+                      className="group flex items-center justify-between gap-3 rounded-lg border-b border-border/40 px-2 py-2.5 transition-colors last:border-0 hover:bg-gray-50 dark:hover:bg-muted/40"
                     >
-                      <div className="flex size-10 shrink-0 items-center justify-center rounded bg-muted text-xs font-bold">
-                        #{chapter.number}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm">{chapter.title || `Chapter ${chapter.number}`}</p>
-                        <p className="text-xs text-muted-foreground">
-                          <Clock className="mr-1 inline size-3" />
-                          {chapter.uploadedAt || formatDate(chapter.createdAt)}
+                      <div className="flex min-w-0 flex-1 items-center gap-3">
+                        <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-bold">
+                          #{chapter.number}
+                        </div>
+                        <p className="truncate text-sm font-medium">
+                          {chapter.title || `Chapter ${chapter.number}`}
                         </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+                        <span className="hidden items-center gap-1 sm:inline-flex">
+                          <Clock className="size-3" />
+                          {chapter.uploadedAt || formatDate(chapter.createdAt)}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          className="size-8 text-muted-foreground opacity-70 group-hover:opacity-100"
+                          title="Xem chương"
+                        >
+                          <Eye className="size-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          className="size-8 text-muted-foreground opacity-70 group-hover:opacity-100"
+                          title="Sửa chương"
+                        >
+                          <Edit3 className="size-4" />
+                        </Button>
                       </div>
                     </div>
                   ))}
@@ -338,6 +615,16 @@ function SeriesDetailCard({ series, chapters, comments, onDeleteComment, onBack,
           )}
         </CardContent>
       </Card>
+
+      <MangaEditDialog
+        manga={series}
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        onSave={(updated) => {
+          setEditOpen(false)
+          onSeriesUpdated?.(updated)
+        }}
+      />
     </div>
   )
 }
@@ -828,6 +1115,19 @@ export default function Chapters() {
           }}
           onBack={() => navigate('/admin/manga')}
           isAdmin={isAdmin}
+          onSeriesUpdated={(updated) => {
+            setSeriesDetail((prev) => {
+              if (!prev) return prev
+              return {
+                ...prev,
+                title: updated?.title ?? prev.title,
+                author: updated?.author ?? prev.author,
+                status: updated?.status ?? prev.status,
+                genre: updated?.genre ?? updated?.tags ?? prev.genre,
+                tags: updated?.tags ?? updated?.genre ?? prev.tags,
+              }
+            })
+          }}
         />
       )}
 

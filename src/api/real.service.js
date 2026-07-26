@@ -46,13 +46,17 @@ function mapMangaListItem(s, index = 0) {
     author: s.author ?? '',
     genre: tags,
     status: s.status ?? 'ongoing',
+    publicationStatus:
+      s.publication_status !== undefined
+        ? s.publication_status
+        : (s.publicationStatus ?? null),
     chapters: s.chapters ?? s.chapterCount ?? 0,
     reads: s.views ?? s.reads ?? 0,
     updatedAt: formatDate(s.updatedAt ?? s.createdAt),
     createdAt: formatDate(s.createdAt),
     initials: title.slice(0, 2).toUpperCase(),
     bg: `hsl(${((title.charCodeAt(0) || index) * 37) % 360} 55% 42%)`,
-    thumbnail: s.thumbnail ?? '',
+    thumbnail: s.thumbnail ?? s.cover_image_url ?? '',
     category: s.category ?? '',
     deletedAt,
     isDeleted: Boolean(deletedAt),
@@ -63,6 +67,182 @@ function mapMangaList(raw) {
   if (Array.isArray(raw)) return raw.map(mapMangaListItem)
   const items = raw?.data ?? raw?.items ?? []
   return Array.isArray(items) ? items.map(mapMangaListItem) : []
+}
+
+/**
+ * GET /admin/manga/:id — tách reader_rating (reader vote) và eb_evaluation (HĐ EB).
+ * Breaking: không còn total_votes / average_score flat ở root.
+ */
+function mapEbCouncilMemberScores(members) {
+  if (!Array.isArray(members)) return []
+  return members.map((m) => {
+    const scores = m.scores && typeof m.scores === 'object' ? m.scores : {}
+    const scoreValues = [
+      'story_dialogue',
+      'art_design',
+      'panel_camera',
+      'pacing_climax',
+      'color',
+    ]
+      .map((key) => Number(scores[key]))
+      .filter((n) => Number.isFinite(n))
+    const computedAvg = scoreValues.length
+      ? scoreValues.reduce((sum, n) => sum + n, 0) / scoreValues.length
+      : null
+    const rawAvg = m.average != null ? Number(m.average) : null
+    const average =
+      rawAvg != null && Number.isFinite(rawAvg) && rawAvg > 0
+        ? rawAvg
+        : computedAvg
+
+    // Chỉ nhận string — tránh Boolean/number từ bug short-circuit BE (String(true) → "true")
+    const rawCandidate = m.member_name ?? m.memberName ?? m.name ?? ''
+    const rawName =
+      typeof rawCandidate === 'string' ? rawCandidate.trim() : ''
+    const looksLikeLocalId = /^member-\d+-[a-z0-9]+$/i.test(rawName)
+    const populatedFromId =
+      m.member_id && typeof m.member_id === 'object'
+        ? String(
+            m.member_id.full_name
+              ?? m.member_id.fullName
+              ?? m.member_id.username
+              ?? '',
+          ).trim()
+        : ''
+    const populatedName = [
+      populatedFromId,
+      typeof m.full_name === 'string' ? m.full_name.trim() : '',
+      typeof m.fullName === 'string' ? m.fullName.trim() : '',
+      typeof m.username === 'string' ? m.username.trim() : '',
+    ].find(Boolean) || ''
+
+    const memberName =
+      rawName && !looksLikeLocalId
+        ? rawName
+        : (populatedName || 'Thành viên HĐ')
+
+    return {
+      memberName,
+      scores,
+      average,
+      totalScore:
+        m.total_score != null
+          ? Number(m.total_score)
+          : (m.totalScore != null ? Number(m.totalScore) : null),
+      overallComment: m.overall_comment ?? m.overallComment ?? '',
+      savedAt: m.saved_at ?? m.savedAt ?? null,
+    }
+  })
+}
+
+/** Chuẩn hóa EBEvaluation / council summary từ BE (eb_evaluation & chapter_evaluation). */
+function mapEbCouncilSummary(ebRaw) {
+  if (!ebRaw || typeof ebRaw !== 'object') return null
+
+  const members = Array.isArray(ebRaw.member_scores)
+    ? ebRaw.member_scores
+    : (Array.isArray(ebRaw.memberScores) ? ebRaw.memberScores : [])
+
+  const chapterRaw = ebRaw.chapter
+  const chapter = chapterRaw && typeof chapterRaw === 'object'
+    ? {
+        id: chapterRaw.id ?? chapterRaw._id ?? null,
+        chapterNumber:
+          chapterRaw.chapter_number != null
+            ? Number(chapterRaw.chapter_number)
+            : (chapterRaw.chapterNumber != null
+              ? Number(chapterRaw.chapterNumber)
+              : null),
+        title: chapterRaw.title ?? '',
+      }
+    : null
+
+  return {
+    ...(chapter ? { chapter } : {}),
+    totalMembers: Number(ebRaw.total_members ?? ebRaw.totalMembers ?? 0) || 0,
+    councilAverage:
+      ebRaw.council_average != null
+        ? Number(ebRaw.council_average)
+        : (ebRaw.councilAverage != null ? Number(ebRaw.councilAverage) : null),
+    result: ebRaw.result ?? null,
+    status: ebRaw.status ?? null,
+    firstReview: Boolean(ebRaw.first_review ?? ebRaw.firstReview),
+    scheduledPublishAt:
+      ebRaw.scheduled_publish_at ?? ebRaw.scheduledPublishAt ?? null,
+    evaluatedAt: ebRaw.evaluated_at ?? ebRaw.evaluatedAt ?? null,
+    evaluatedBy: ebRaw.evaluated_by ?? ebRaw.evaluatedBy ?? null,
+    lastSavedBy: ebRaw.last_saved_by ?? ebRaw.lastSavedBy ?? null,
+    lastSavedAt: ebRaw.last_saved_at ?? ebRaw.lastSavedAt ?? null,
+    memberScores: mapEbCouncilMemberScores(members),
+  }
+}
+
+function mapAdminMangaDetail(raw) {
+  if (!raw || typeof raw !== 'object') return raw
+
+  const readerRaw = raw.reader_rating ?? raw.readerRating ?? null
+  const averageScore = Number(
+    readerRaw?.average_score
+      ?? readerRaw?.averageScore
+      ?? raw.average_score
+      ?? raw.averageRating
+      ?? 0,
+  ) || 0
+  const totalVotes = Number(
+    readerRaw?.total_votes
+      ?? readerRaw?.totalVotes
+      ?? raw.total_votes
+      ?? raw.votesCount
+      ?? 0,
+  ) || 0
+  const formatted =
+    readerRaw?.average_score_formatted
+    ?? readerRaw?.averageScoreFormatted
+    ?? `${averageScore.toFixed(1)} / 5`
+
+  const ebEvaluation = mapEbCouncilSummary(
+    raw.eb_evaluation ?? raw.ebEvaluation ?? null,
+  )
+  const chapterEvaluation = mapEbCouncilSummary(
+    raw.chapter_evaluation ?? raw.chapterEvaluation ?? null,
+  )
+
+  const title = raw.title ?? raw.name ?? '—'
+  const tags = Array.isArray(raw.tags)
+    ? raw.tags
+    : (Array.isArray(raw.genre) ? raw.genre : [])
+
+  return {
+    id: raw.id ?? raw._id,
+    title,
+    author: raw.author ?? '',
+    description: raw.description ?? raw.synopsis ?? '',
+    thumbnail: raw.thumbnail ?? raw.cover_image_url ?? '',
+    status: raw.status ?? 'draft',
+    category: raw.category ?? '',
+    tags,
+    genre: tags,
+    ageRating: raw.age_rating ?? raw.ageRating ?? null,
+    views: raw.views ?? raw.reads ?? 0,
+    createdAt: raw.createdAt ?? raw.created_at ?? null,
+    publicationStatus:
+      raw.publication_status !== undefined
+        ? raw.publication_status
+        : (raw.publicationStatus ?? null),
+    chapters: Array.isArray(raw.chapters) ? raw.chapters : (raw.chapterCount ?? 0),
+    readerRating: {
+      totalVotes,
+      averageScore,
+      averageScoreFormatted: formatted,
+    },
+    ebEvaluation,
+    chapterEvaluation,
+    // aliases dùng UI cũ / fallback
+    averageRating: averageScore,
+    votesCount: totalVotes,
+    bg: `linear-gradient(135deg, hsl(${(title.charCodeAt(0) || 0) * 37 % 360} 60% 45%), hsl(${(title.charCodeAt(0) || 0) * 17 % 360} 70% 55%))`,
+    raw,
+  }
 }
 
 function mapChapterList(raw) {
@@ -214,13 +394,14 @@ export const realService = {
       .then(unwrap)
       .then(mapMangaList),
 
-  getMangaById: (id) => instance.get(`/admin/manga/${id}`).then(unwrap),
+  getMangaById: (id) =>
+    instance.get(`/admin/manga/${id}`).then(unwrap).then(mapAdminMangaDetail),
 
   createManga: (data) => instance.post('/admin/manga', data).then(unwrap),
 
   updateManga: (id, data) => instance.put(`/admin/manga/${id}`, data).then(unwrap),
 
-  /** Soft delete — BE set deleted_at (chỉ draft / rejected / cancelled). */
+  /** Force soft-delete — mọi status; cascade chapters soft + pages/tasks hard. */
   deleteManga: (id) => instance.delete(`/admin/manga/${id}`).then(unwrap),
 
   getChaptersByManga: (mangaId) =>
@@ -246,6 +427,20 @@ export const realService = {
 
   updateSeriesStatus: (id, status) =>
     instance.patch(`/admin/manga/series/${id}/status`, { status }).then(unwrap),
+
+  /**
+   * PATCH /admin/manga/series/:id/publication-status
+   * Đổi publication_status (reader): upcoming|ongoing|hiatus|completed|dropped|null
+   * Khác với status workflow (draft/approved/published/...).
+   */
+  updateSeriesPublicationStatus: (id, { publication_status, note } = {}) => {
+    const body = { publication_status }
+    const trimmedNote = note != null ? String(note).trim() : ''
+    if (trimmedNote) body.note = trimmedNote
+    return instance
+      .patch(`/admin/manga/series/${id}/publication-status`, body)
+      .then(unwrap)
+  },
 
   getUsers: () => instance.get('/admin/users').then(unwrap),
 
@@ -275,6 +470,23 @@ export const realService = {
     instance.patch(`/admin/eb-representative/${userId}`).then(unwrap),
 
   clearEbRepresentative: () => instance.delete('/admin/eb-representative').then(unwrap),
+
+  /**
+   * GET /admin/publication-calendar
+   * Lịch xuất bản toàn hệ thống: overview + upcoming + days.
+   * Query: from_date, to_date, schedule=weekly|monthly, include_published, series_id
+   */
+  getPublicationCalendar: (params = {}) => {
+    const query = {}
+    if (params.from_date) query.from_date = params.from_date
+    if (params.to_date) query.to_date = params.to_date
+    if (params.schedule) query.schedule = params.schedule
+    if (params.series_id) query.series_id = params.series_id
+    if (params.include_published != null) {
+      query.include_published = params.include_published ? 'true' : 'false'
+    }
+    return instance.get('/admin/publication-calendar', { params: query }).then(unwrap)
+  },
 
   getNotifications: (params) =>
     instance.get('/notifications', { params }).then((res) => mapNotifications(res?.data ?? res)),

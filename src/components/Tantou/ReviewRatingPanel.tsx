@@ -5,7 +5,6 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -42,6 +41,10 @@ type ReviewRatingPanelProps = {
   /** Publish chỉ khi approved_by_EB + TE hiện tại được gán chapter */
   publishEnabled?: boolean;
   publishDisabledReason?: string;
+  /** Gợi ý buffer / lịch — chỉ hiển thị, không chặn */
+  publishHint?: string;
+  /** ISO scheduled_publish_at nếu chapter đã lên lịch */
+  scheduledPublishAt?: string | null;
   onReviewTextChange: (text: string) => void;
   onQuickNotesChange?: (text: string) => void;
   onRevisionFeedbackChange?: (text: string) => void;
@@ -61,6 +64,8 @@ export function ReviewRatingPanel({
   publishOnlyMode = false,
   publishEnabled = false,
   publishDisabledReason,
+  publishHint,
+  scheduledPublishAt,
   onReviewTextChange,
   onQuickNotesChange,
   onRevisionFeedbackChange,
@@ -81,11 +86,6 @@ export function ReviewRatingPanel({
           <ClipboardCheck className="size-5 shrink-0 text-sky-600 dark:text-sky-400" />
           Đánh giá & Phê duyệt
         </CardTitle>
-        {publishOnlyMode ? (
-          <CardDescription className="text-pretty text-xs leading-relaxed sm:text-[0.8125rem]">
-            Chapter đã được phê duyệt — bấm Phát hành để xuất bản.
-          </CardDescription>
-        ) : null}
       </CardHeader>
 
       <CardContent className="space-y-3 p-4 lg:p-5">
@@ -147,6 +147,19 @@ export function ReviewRatingPanel({
             />
           </div>
         )}
+
+        {publishOnlyMode && (publishHint || scheduledPublishAt) ? (
+          <div className="space-y-1.5 rounded-xl border border-amber-200/80 bg-amber-50/80 p-2.5 text-xs leading-relaxed text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+            {scheduledPublishAt ? (
+              <p>
+                Đã lên lịch:{" "}
+                <strong className="font-semibold">{scheduledPublishAt}</strong>
+                . Bấm Phát hành lại vẫn được (override lịch hiện tại).
+              </p>
+            ) : null}
+            {publishHint ? <p>{publishHint}</p> : null}
+          </div>
+        ) : null}
 
         {!publishOnlyMode ? (
           <div className="space-y-2 rounded-xl border border-border/80 bg-card/40 p-2.5 dark:bg-zinc-900/40">
