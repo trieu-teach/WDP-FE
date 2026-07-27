@@ -1,41 +1,57 @@
 import { useState } from 'react'
-import { Bell, CheckCheck, Inbox, Trash2 } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
+import {
+  Bell,
+  CheckCheck,
+  CheckCircle2,
+  ChevronDown,
+  FileUp,
+  Flag,
+  Inbox,
+  Info,
+  ListChecks,
+  Trash2,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import { useNotifications } from '@/hooks/useNotifications.js'
 import { getSession } from '@/lib/auth.js'
 import { NotificationDetailDialog } from '@/components/layout/NotificationDetailDialog.jsx'
 
 const TYPE_META = {
-  info: { tone: 'sky', label: 'Thông báo' },
-  success: { tone: 'emerald', label: 'Thành công' },
-  warning: { tone: 'amber', label: 'Cảnh báo' },
-  error: { tone: 'rose', label: 'Lỗi' },
-  assignment: { tone: 'violet', label: 'Giao việc' },
-  review: { tone: 'amber', label: 'Duyệt bản' },
-  cooperation: { tone: 'violet', label: 'Hợp tác' },
-  te_review: { tone: 'sky', label: 'TE review' },
-  eb_evaluation: { tone: 'emerald', label: 'EB đánh giá' },
-  chapter: { tone: 'sky', label: 'Chapter' },
-  series: { tone: 'emerald', label: 'Series' },
-  page: { tone: 'violet', label: 'Trang' },
-  task: { tone: 'violet', label: 'Task' },
-  vote: { tone: 'emerald', label: 'Biểu quyết' },
+  info: { tone: 'sky', label: 'Thông báo', icon: Info },
+  success: { tone: 'emerald', label: 'Thành công', icon: CheckCircle2 },
+  warning: { tone: 'amber', label: 'Cảnh báo', icon: Flag },
+  error: { tone: 'rose', label: 'Lỗi', icon: Flag },
+  assignment: { tone: 'violet', label: 'Giao việc', icon: ListChecks },
+  review: { tone: 'amber', label: 'Duyệt bản', icon: ListChecks },
+  cooperation: { tone: 'violet', label: 'Hợp tác', icon: ListChecks },
+  te_review: { tone: 'sky', label: 'TE review', icon: ListChecks },
+  eb_evaluation: { tone: 'emerald', label: 'EB đánh giá', icon: CheckCircle2 },
+  chapter: { tone: 'sky', label: 'Chapter', icon: CheckCircle2 },
+  series: { tone: 'emerald', label: 'Series', icon: CheckCircle2 },
+  page: { tone: 'violet', label: 'Trang', icon: FileUp },
+  task: { tone: 'violet', label: 'Task', icon: CheckCircle2 },
+  vote: { tone: 'emerald', label: 'Biểu quyết', icon: CheckCircle2 },
+  series_end_request_submitted: { tone: 'amber', label: 'Yêu cầu kết thúc', icon: Flag },
+  series_end_approved: { tone: 'emerald', label: 'Duyệt kết thúc', icon: Flag },
+  series_end_final_chapter_pending: { tone: 'amber', label: 'Chapter cuối', icon: Flag },
+  series_end_rejected: { tone: 'rose', label: 'Từ chối kết thúc', icon: Flag },
+  series_end_auto_cancelled: { tone: 'amber', label: 'Hủy yêu cầu', icon: Flag },
+  series_end_notify_readers: { tone: 'emerald', label: 'Series kết thúc', icon: CheckCircle2 },
+  series_end_notify_assistant: { tone: 'violet', label: 'Series kết thúc', icon: CheckCircle2 },
 }
 
-const TONE_DOT = {
-  sky: 'bg-sky-500',
-  emerald: 'bg-emerald-500',
-  amber: 'bg-amber-500',
-  rose: 'bg-rose-500',
-  violet: 'bg-violet-500',
+const TONE_ICON_RING = {
+  sky: 'bg-sky-100 text-sky-600 dark:bg-sky-500/15 dark:text-sky-400',
+  emerald: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400',
+  amber: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300',
+  rose: 'bg-rose-100 text-rose-600 dark:bg-rose-500/15 dark:text-rose-400',
+  violet: 'bg-violet-100 text-violet-600 dark:bg-violet-500/15 dark:text-violet-400',
 }
 
 function timeAgo(iso) {
@@ -48,6 +64,31 @@ function timeAgo(iso) {
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} giờ`
   if (diff < 604_800_000) return `${Math.floor(diff / 86_400_000)} ngày`
   return new Date(iso).toLocaleDateString('vi-VN')
+}
+
+/** Icon + tone theo type BE hoặc nội dung tiêu đề (chỉ UI). */
+function resolveNotificationVisual(n) {
+  const typeKey = String(n.type ?? '').toLowerCase()
+  const fromType = TYPE_META[typeKey]
+  if (fromType) return fromType
+
+  const combined = `${n.title ?? ''} ${n.message ?? ''}`.toLowerCase()
+
+  if (/assistant đã nộp|đã nộp kết quả/.test(combined)) {
+    return { icon: FileUp, tone: 'sky', label: 'Nộp kết quả' }
+  }
+  if (/yêu cầu kết thúc|kết thúc truyện/.test(combined)) {
+    return { icon: Flag, tone: 'amber', label: 'Kết thúc truyện' }
+  }
+  if (
+    /tasks đã được duyệt|chapter đã xuất bản|đã xuất bản|đã publish/.test(
+      combined,
+    )
+  ) {
+    return { icon: CheckCircle2, tone: 'emerald', label: 'Hoàn tất' }
+  }
+
+  return TYPE_META.info
 }
 
 export function NotificationBell({ className }) {
@@ -72,161 +113,164 @@ export function NotificationBell({ className }) {
 
   return (
     <>
-    <DropdownMenu onOpenChange={(open) => { if (open) void refresh() }}>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="outline"
-          size="icon-sm"
-          className={cn('relative overflow-visible', className)}
-          aria-label={unreadCount > 0 ? `${unreadCount} thông báo chưa đọc` : 'Thông báo'}
-        >
-          <Bell className="size-4" />
-          {unreadCount > 0 ? (
-            <span
-              className="absolute -right-1.5 -top-1.5 flex min-w-[18px] items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold leading-none text-destructive-foreground shadow-sm ring-2 ring-background"
-              aria-hidden
-            >
-              {unreadCount > 99 ? '99+' : unreadCount}
-            </span>
-          ) : null}
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-[380px] overflow-hidden p-0">
-        <div className="flex items-center justify-between gap-2 border-b bg-gradient-to-b from-primary/[0.04] to-transparent px-4 py-3">
-          <div className="flex items-center gap-2">
-            <span className="flex size-7 items-center justify-center rounded-lg bg-primary/10 text-primary">
-              <Bell className="size-3.5" />
-            </span>
-            <div className="leading-tight">
-              <p className="text-sm font-semibold">Thông báo</p>
-              <p className="text-[10px] text-muted-foreground">
-                {unreadCount > 0
-                  ? `${unreadCount} chưa đọc`
-                  : 'Đã đọc hết'}
-              </p>
-            </div>
-          </div>
+      <DropdownMenu onOpenChange={(open) => { if (open) void refresh() }}>
+        <DropdownMenuTrigger asChild>
           <Button
-            size="xs"
-            variant="ghost"
-            disabled={unreadCount === 0}
-            onClick={() => void markAllRead()}
-            className="gap-1 text-xs"
+            variant="outline"
+            size="icon-sm"
+            className={cn('relative shrink-0', className)}
+            aria-label={unreadCount > 0 ? `${unreadCount} thông báo chưa đọc` : 'Thông báo'}
           >
-            <CheckCheck className="size-3" />
-            Đọc tất cả
-          </Button>
-        </div>
-
-        <ScrollArea className="max-h-[400px]">
-          {visibleItems.length === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-2 px-4 py-12 text-center">
-              <span className="flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                <Inbox className="size-4" />
+            <Bell className="size-4" />
+            {unreadCount > 0 ? (
+              <span
+                className="pointer-events-none absolute right-0 top-0 z-10 flex h-[18px] min-w-[18px] -translate-y-1/2 translate-x-1/2 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold leading-none text-destructive-foreground shadow-sm ring-2 ring-background"
+                aria-hidden
+              >
+                {unreadCount > 99 ? '99+' : unreadCount}
               </span>
-              <p className="text-xs text-muted-foreground">
-                {loading ? 'Đang tải thông báo...' : 'Chưa có thông báo nào.'}
-              </p>
+            ) : null}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          sideOffset={8}
+          className="w-[min(100vw-1.5rem,400px)] overflow-hidden rounded-xl border border-border/80 p-0 shadow-lg"
+        >
+          <div className="flex items-center justify-between gap-3 border-b border-border/60 bg-popover px-4 py-3">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                <Bell className="size-4" />
+              </span>
+              <div className="min-w-0 leading-tight">
+                <p className="text-sm font-semibold text-foreground">Thông báo</p>
+                <p className="text-[11px] text-muted-foreground">
+                  {unreadCount > 0
+                    ? `${unreadCount} chưa đọc`
+                    : 'Đã đọc hết'}
+                </p>
+              </div>
             </div>
-          ) : (
-            <ul className="divide-y divide-border/60">
-              {visibleItems.map((n) => {
-                const typeKey = String(n.type ?? '').toLowerCase()
-                const typeMeta = TYPE_META[typeKey]
-                const dot = TONE_DOT[typeMeta?.tone ?? 'sky'] ?? TONE_DOT.sky
-                function handleKeyDown(e) {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    openItem(n)
+            <Button
+              size="xs"
+              variant="ghost"
+              disabled={unreadCount === 0}
+              onClick={() => void markAllRead()}
+              className="shrink-0 gap-1 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <CheckCheck className="size-3.5" />
+              Đọc tất cả
+            </Button>
+          </div>
+
+          <div className="max-h-[min(60vh,420px)] overflow-y-auto overscroll-contain">
+            {visibleItems.length === 0 ? (
+              <div className="flex flex-col items-center justify-center gap-2 px-4 py-14 text-center">
+                <span className="flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                  <Inbox className="size-4" />
+                </span>
+                <p className="text-xs text-muted-foreground">
+                  {loading ? 'Đang tải thông báo...' : 'Chưa có thông báo nào.'}
+                </p>
+              </div>
+            ) : (
+              <ul className="divide-y divide-border/50">
+                {visibleItems.map((n) => {
+                  const visual = resolveNotificationVisual(n)
+                  const Icon = visual.icon ?? Info
+                  const iconRing =
+                    TONE_ICON_RING[visual.tone] ?? TONE_ICON_RING.sky
+
+                  function handleKeyDown(e) {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      openItem(n)
+                    }
                   }
-                }
-                return (
-                  <li key={n.id}>
-                    <div
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => openItem(n)}
-                      onKeyDown={handleKeyDown}
-                      className={cn(
-                        'group relative flex w-full cursor-pointer items-start gap-3 px-4 py-3 text-left transition-colors',
-                        'hover:bg-muted/40 focus:bg-muted/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                        !n.isRead && 'bg-primary/[0.03]',
-                      )}
-                    >
-                      {!n.isRead ? (
+
+                  return (
+                    <li key={n.id}>
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => openItem(n)}
+                        onKeyDown={handleKeyDown}
+                        className={cn(
+                          'group flex w-full cursor-pointer items-start gap-3 px-3 py-3 text-left transition-colors',
+                          'hover:bg-muted/50 focus:bg-muted/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40',
+                          !n.isRead
+                            ? 'border-l-[3px] border-l-primary bg-slate-50 dark:bg-slate-900/50'
+                            : 'border-l-[3px] border-l-transparent bg-popover',
+                        )}
+                      >
                         <span
-                          className="absolute left-1.5 top-1/2 size-1.5 -translate-y-1/2 rounded-full bg-primary"
+                          className={cn(
+                            'mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg',
+                            iconRing,
+                          )}
                           aria-hidden
-                        />
-                      ) : null}
-                      <span
-                        className={cn('mt-1.5 size-2 shrink-0 rounded-full ring-2 ring-background', dot)}
-                        aria-hidden
-                      />
-                      <div className="min-w-0 flex-1 space-y-1">
-                        <div className="flex items-start justify-between gap-2">
-                          <p
-                            className={cn(
-                              'line-clamp-1 text-sm',
-                              !n.isRead ? 'font-semibold' : 'font-medium text-foreground/80',
-                            )}
-                          >
-                            {n.title}
-                          </p>
-                          <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
-                            {timeAgo(n.createdAt)}
-                          </span>
-                        </div>
-                        {n.message ? (
-                          <p className="line-clamp-2 text-xs text-muted-foreground">
-                            {n.message}
-                          </p>
-                        ) : null}
-                        <div className="flex items-center gap-1.5 pt-0.5">
-                          {typeMeta ? (
-                            <Badge
-                              variant="secondary"
-                              className="px-1.5 py-0 text-[9px] font-medium uppercase tracking-wider text-muted-foreground"
+                        >
+                          <Icon className="size-4" strokeWidth={2} />
+                        </span>
+
+                        <div className="min-w-0 flex-1 space-y-1 pr-1">
+                          <div className="flex items-start gap-2">
+                            <p
+                              className={cn(
+                                'min-w-0 flex-1 text-[13px] leading-snug',
+                                !n.isRead
+                                  ? 'font-semibold text-foreground'
+                                  : 'font-medium text-foreground/70',
+                              )}
                             >
-                              {typeMeta.label}
-                            </Badge>
+                              {n.title}
+                            </p>
+                            <span className="shrink-0 pt-0.5 text-[10px] tabular-nums text-muted-foreground">
+                              {timeAgo(n.createdAt)}
+                            </span>
+                          </div>
+                          {n.message ? (
+                            <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+                              {n.message}
+                            </p>
                           ) : null}
                         </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.preventDefault()
-                          e.stopPropagation()
-                          void dismiss(n.id)
-                        }}
-                        className="shrink-0 self-start rounded-md p-1 text-muted-foreground opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
-                        aria-label="Xoá thông báo"
-                      >
-                        <Trash2 className="size-3.5" />
-                      </button>
-                    </div>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </ScrollArea>
 
-        {hasMore ? (
-          <div className="border-t bg-muted/20 px-4 py-2 text-center">
-            <span className="text-[10px] text-muted-foreground">
-              Hiển thị {visibleItems.length} / {items.length} thông báo
-            </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            void dismiss(n.id)
+                          }}
+                          className="mt-0.5 shrink-0 rounded-md p-1.5 text-muted-foreground opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100 focus:opacity-100"
+                          aria-label="Xoá thông báo"
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
           </div>
-        ) : null}
-      </DropdownMenuContent>
-    </DropdownMenu>
-    <NotificationDetailDialog
-      notification={openDetail}
-      open={Boolean(openDetail)}
-      onOpenChange={(o) => { if (!o) setOpenDetail(null) }}
-    />
+
+          {hasMore ? (
+            <div className="border-t border-border/60 bg-muted/25 px-4 py-2.5 text-center">
+              <span className="inline-flex items-center justify-center gap-1 text-[11px] text-muted-foreground">
+                Hiển thị {visibleItems.length} / {items.length} thông báo
+                <ChevronDown className="size-3 opacity-50" aria-hidden />
+              </span>
+            </div>
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <NotificationDetailDialog
+        notification={openDetail}
+        open={Boolean(openDetail)}
+        onOpenChange={(o) => { if (!o) setOpenDetail(null) }}
+      />
     </>
   )
 }

@@ -118,7 +118,8 @@ export const TE_UI_SCHEDULED = 'scheduled'
 /** Gợi ý buffer cho panel Phát hành — chỉ thông tin, không chặn. */
 export const TE_PUBLISH_BUFFER_HINT =
   'Job chỉ phát hành khi đủ ≥2 chapter đã duyệt chưa publish. '
-  + 'Miễn: chapter đầu series, hoặc chapter cuối khi series đã completed. '
+  + 'Miễn: chapter đầu series, chapter cuối của end request đã duyệt, '
+  + 'hoặc chapter cuối khi series đã completed. '
   + 'Buffer chưa đủ → vẫn lên lịch được, job có thể tạm giữ (Policy B).'
 
 /**
@@ -147,6 +148,9 @@ export function formatTeChapterPublishError(err, fallback = 'Không phát hành 
   }
   if (status === 400) {
     if (apiMessage && /scheduled_publish_at|chapter đầu/i.test(apiMessage)) {
+      return apiMessage
+    }
+    if (apiMessage && /end request|chapter cuối|planned_final|sau mốc/i.test(apiMessage)) {
       return apiMessage
     }
     return apiMessage || 'Chapter chưa ở trạng thái approved_by_EB — hãy phê duyệt trước.'
@@ -227,9 +231,11 @@ export function formatTeScheduledPublishDisplay(isoValue) {
  * Buffer soft-warning từ POST .../publish.
  * Shape: {
  *   approved_unpublished_count, min_required, is_final_chapter,
- *   series_completed, is_first_chapter_of_series, ok, warning
+ *   is_approved_end_request_final_chapter, series_completed,
+ *   is_first_chapter_of_series, ok, warning
  * }
- * Buffer OK khi: chapter đầu series HOẶC count >= 2 HOẶC (completed + final).
+ * Buffer OK khi: chapter đầu series HOẶC chapter cuối end request đã duyệt
+ * HOẶC count >= 2 HOẶC (completed + final).
  */
 export function parseTePublishBuffer(res) {
   const raw = res?.buffer ?? null
@@ -242,15 +248,21 @@ export function parseTePublishBuffer(res) {
     raw.is_first_chapter_of_series ?? raw.is_first_chapter,
   )
   const isFinalChapter = Boolean(raw.is_final_chapter)
+  const isApprovedEndRequestFinalChapter = Boolean(
+    raw.is_approved_end_request_final_chapter
+    ?? raw.isApprovedEndRequestFinalChapter,
+  )
   const seriesCompleted = Boolean(raw.series_completed)
   const derivedOk =
     isFirstChapterOfSeries
+    || isApprovedEndRequestFinalChapter
     || (count != null && count >= min)
     || (seriesCompleted && isFinalChapter)
   return {
     approvedUnpublishedCount: count,
     minRequired: min,
     isFinalChapter,
+    isApprovedEndRequestFinalChapter,
     seriesCompleted,
     isFirstChapterOfSeries,
     ok: raw.ok != null ? Boolean(raw.ok) : derivedOk,
@@ -261,6 +273,7 @@ export function parseTePublishBuffer(res) {
 /** Toast / copy khi buffer chưa đủ — schedule vẫn OK, job tạm giữ (Policy B). */
 export function formatTePublishBufferWarning(buffer, fallback) {
   if (!buffer || buffer.ok || buffer.isFirstChapterOfSeries) return ''
+  if (buffer.isApprovedEndRequestFinalChapter) return ''
   if (fallback) return String(fallback)
   const count = buffer.approvedUnpublishedCount
   const min = buffer.minRequired ?? 2
@@ -268,7 +281,7 @@ export function formatTePublishBufferWarning(buffer, fallback) {
     return (
       `Hiện có ${count}/${min} chapter đã duyệt chưa publish. `
       + 'Job sẽ tạm giữ chapter này đến khi đủ buffer '
-      + '(hoặc đây là chapter cuối của series đã completed).'
+      + '(hoặc đây là chapter cuối của end request đã duyệt / series đã completed).'
     )
   }
   return (
@@ -295,7 +308,16 @@ export function formatTePublishSuccessMessage(res, {
   const status = String(chapter.apiChapterStatus ?? '').toLowerCase()
 
   if (status === 'published') {
+    if (buffer?.seriesCompleted) {
+      return `Đã phát hành ${title}. Series đã chuyển completed.`
+    }
     return `Đã phát hành ${title}.`
+  }
+
+  if (buffer?.isApprovedEndRequestFinalChapter) {
+    return when
+      ? `Đã lên lịch chapter cuối ${title} · ${when}. Series sẽ completed khi publish.`
+      : `Đã lên lịch chapter cuối ${title}. Series sẽ completed khi publish.`
   }
 
   if (buffer?.isFirstChapterOfSeries) {

@@ -5,6 +5,7 @@ import {
   ChevronLeft,
   ChevronRight,
   FileImage,
+  Flag,
   ImageIcon,
   Inbox,
   PenSquare,
@@ -13,9 +14,11 @@ import {
 } from 'lucide-react'
 import Header from '@/components/User/Header/Header.jsx'
 import Footer from '@/components/User/Footer/Footer.jsx'
+import SeriesEndRequestDialog from '@/components/Mangaka/SeriesEndRequestDialog.jsx'
 import { getSession, logout } from '@/lib/auth.js'
 import { seriesService } from '@/api/series.service.js'
 import { chaptersService } from '@/api/chapters.service.js'
+import { seriesEndRequestsService } from '@/api/seriesEndRequests.service.js'
 import { getApiErrorMessage, resolveMediaUrl } from '@/api/http.js'
 import {
   getPage1OriginalUrl,
@@ -53,6 +56,13 @@ import {
 } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
+import {
+  blocksNewEndRequest,
+  canRequestSeriesEnd,
+  isApprovedAwaitingFinalPublish,
+  mapSeriesEndRequestListItem,
+  mapSeriesEndRequestListResponse,
+} from '@/utils/seriesEndRequestMappers.js'
 import {
   formatSeriesCardLine,
   slugifySeriesTitle,
@@ -119,7 +129,33 @@ export default function SeriesUploadDetail() {
   const [annotatorChapters, setAnnotatorChapters] = useState([])
   const [loading, setLoading] = useState(true)
   const [editSeriesOpen, setEditSeriesOpen] = useState(false)
+  const [endRequestOpen, setEndRequestOpen] = useState(false)
+  const [activeEndRequest, setActiveEndRequest] = useState(null)
   const [pageStart, setPageStart] = useState(0)
+
+  const refreshEndRequestState = useCallback(async (seriesId) => {
+    if (!seriesId) {
+      setActiveEndRequest(null)
+      return
+    }
+    try {
+      const raw = await seriesEndRequestsService.getMine({
+        page: 1,
+        limit: 50,
+      })
+      const mapped = mapSeriesEndRequestListResponse(raw)
+      const hit = mapped.items.find((it) => {
+        const sid = String(it.seriesId ?? it.series?.id ?? '')
+        return sid === String(seriesId) && blocksNewEndRequest(it)
+      }) ?? mapped.items.find((it) => {
+        const sid = String(it.seriesId ?? it.series?.id ?? '')
+        return sid === String(seriesId) && isApprovedAwaitingFinalPublish(it)
+      }) ?? null
+      setActiveEndRequest(hit)
+    } catch {
+      setActiveEndRequest(null)
+    }
+  }, [])
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -134,6 +170,7 @@ export default function SeriesUploadDetail() {
       const detail = await seriesService.getById(found.id)
       const uiSeries = apiSeriesToUi({ ...found, ...detail }, 0)
       setSeries(uiSeries)
+      void refreshEndRequestState(uiSeries.id)
 
       const { chapters, seriesName } = await seriesService.getChapters(found.id)
       const title = seriesName || uiSeries.title
@@ -179,7 +216,7 @@ export default function SeriesUploadDetail() {
     } finally {
       setLoading(false)
     }
-  }, [seriesSlug])
+  }, [seriesSlug, refreshEndRequestState])
 
   useEffect(() => {
     void loadData()
@@ -383,9 +420,34 @@ export default function SeriesUploadDetail() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">{series.title}</h1>
           <p className="mt-1 text-muted-foreground">{formatSeriesCardLine(series)}</p>
+          {isApprovedAwaitingFinalPublish(activeEndRequest) ? (
+            <p className="mt-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-950 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-100">
+              Series đã được duyệt kết thúc tại chapter #
+              {activeEndRequest.plannedFinalChapterNumber ?? '?'}. Sẽ chuyển
+              completed khi chapter này được publish.
+            </p>
+          ) : null}
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setEditSeriesOpen(true)}>Chỉnh sửa hồ sơ</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => setEditSeriesOpen(true)}>
+            Chỉnh sửa hồ sơ
+          </Button>
+          {canRequestSeriesEnd(series.publicationStatus) && !activeEndRequest ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="gap-1.5 border-amber-200 text-amber-800 hover:bg-amber-50 dark:border-amber-500/40 dark:text-amber-200 dark:hover:bg-amber-500/10"
+              onClick={() => setEndRequestOpen(true)}
+            >
+              <Flag className="size-4" />
+              Yêu cầu kết thúc truyện
+            </Button>
+          ) : activeEndRequest?.status === 'pending' ? (
+            <Button type="button" variant="outline" disabled className="gap-1.5">
+              <Flag className="size-4" />
+              Đã gửi yêu cầu kết thúc
+            </Button>
+          ) : null}
           <Button asChild>
             <Link to="/mangaka" state={{ tab: 'annotate', series: series.title }}>
               <Upload className="size-4" />
@@ -489,6 +551,17 @@ export default function SeriesUploadDetail() {
           mode="edit"
         />
       ) : null}
+
+      <SeriesEndRequestDialog
+        key={series?.id ?? 'series-end'}
+        series={series}
+        open={endRequestOpen}
+        onClose={() => setEndRequestOpen(false)}
+        hasActiveRequest={Boolean(activeEndRequest)}
+        onSubmitted={(raw) => {
+          setActiveEndRequest(mapSeriesEndRequestListItem(raw ?? {}))
+        }}
+      />
     </DetailShell>
   )
 }

@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
+  Bell,
   BookOpen,
   Calendar,
   ChevronLeft,
   ChevronRight,
+  Flag,
   LayoutDashboard,
   LogOut,
   Sparkles,
@@ -28,12 +30,18 @@ const NAV_ITEMS = [
     section: 'Quản lý',
     links: [
       { id: 'users', label: 'Người dùng', icon: UsersIcon },
+      { id: 'notifications', label: 'Thông báo', icon: Bell },
+      { id: 'end-requests', label: 'Yêu cầu kết thúc', icon: Flag },
       { id: 'profile', label: 'Hồ sơ', icon: UserCircle },
     ],
   },
 ]
 
-export default function Sidebar({ activePage = 'dashboard', onNavigate }) {
+export default function Sidebar({
+  activePage = 'dashboard',
+  onNavigate,
+  navBadges = {},
+}) {
   const [collapsed, setCollapsed] = useState(false)
   const [hoveredId, setHoveredId] = useState(null)
 
@@ -115,6 +123,7 @@ export default function Sidebar({ activePage = 'dashboard', onNavigate }) {
                 const Icon = link.icon
                 const active = activePage === link.id
                 const hovered = hoveredId === link.id
+                const badgeCount = Number(navBadges[link.id] ?? 0) || 0
 
                 return (
                   <motion.button
@@ -158,6 +167,11 @@ export default function Sidebar({ activePage = 'dashboard', onNavigate }) {
                       )}
                     >
                       <Icon className={cn('size-4', active && 'scale-110')} />
+                      {collapsed && badgeCount > 0 ? (
+                        <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-amber-500 text-[9px] font-bold text-white">
+                          {badgeCount > 9 ? '9+' : badgeCount}
+                        </span>
+                      ) : null}
                     </div>
 
                     <AnimatePresence>
@@ -166,15 +180,20 @@ export default function Sidebar({ activePage = 'dashboard', onNavigate }) {
                           initial={{ opacity: 0, width: 0 }}
                           animate={{ opacity: 1, width: 'auto' }}
                           exit={{ opacity: 0, width: 0 }}
-                          className="relative z-10 flex-1 overflow-hidden text-left"
+                          className="relative z-10 flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-left"
                         >
-                          {link.label}
+                          <span className="truncate">{link.label}</span>
+                          {badgeCount > 0 ? (
+                            <span className="ml-auto inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-amber-500 px-1.5 text-[10px] font-bold text-white">
+                              {badgeCount > 99 ? '99+' : badgeCount}
+                            </span>
+                          ) : null}
                         </motion.span>
                       )}
                     </AnimatePresence>
 
                     {/* Hover arrow */}
-                    {hovered && !collapsed && !active && (
+                    {hovered && !collapsed && !active && badgeCount === 0 && (
                       <motion.div
                         initial={{ opacity: 0, x: -5 }}
                         animate={{ opacity: 1, x: 0 }}

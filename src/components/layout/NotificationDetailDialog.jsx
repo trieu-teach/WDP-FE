@@ -7,6 +7,7 @@ import {
   Clock,
   ExternalLink,
   FileText,
+  Flag,
   Handshake,
   Image as ImageIcon,
   Info,
@@ -77,6 +78,48 @@ const TYPE_META = {
   task: { icon: UserPlus, label: "Task", tone: "violet" },
 
   vote: { icon: CheckCircle2, label: "Biểu quyết", tone: "emerald" },
+
+  series_end_request_submitted: {
+    icon: Flag,
+    label: "Yêu cầu kết thúc series",
+    tone: "amber",
+  },
+
+  series_end_approved: {
+    icon: CheckCircle2,
+    label: "Duyệt kết thúc series",
+    tone: "emerald",
+  },
+
+  series_end_final_chapter_pending: {
+    icon: Clock,
+    label: "Kết thúc series — cần xử lý chapter cuối",
+    tone: "amber",
+  },
+
+  series_end_rejected: {
+    icon: XCircle,
+    label: "Từ chối kết thúc series",
+    tone: "rose",
+  },
+
+  series_end_auto_cancelled: {
+    icon: Clock,
+    label: "Hủy yêu cầu kết thúc",
+    tone: "amber",
+  },
+
+  series_end_notify_readers: {
+    icon: TrendingUp,
+    label: "Series đã kết thúc",
+    tone: "emerald",
+  },
+
+  series_end_notify_assistant: {
+    icon: Handshake,
+    label: "Series kết thúc · Assistant",
+    tone: "violet",
+  },
 };
 
 const TONE_STYLE = {
@@ -112,6 +155,8 @@ const RELATED_TYPE_LABEL = {
   eb_evaluation: "EB đánh giá",
 
   vote: "Biểu quyết",
+
+  series_end_request: "Yêu cầu kết thúc",
 };
 
 function timeText(iso) {
