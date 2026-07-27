@@ -1,11 +1,15 @@
 import Sidebar from '../Sidebar/Sidebar'
 import Header from '../Header/Header'
 
-export default function Layout({ children, activePage, onNavigate }) {
+export default function Layout({ children, activePage, onNavigate, navBadges }) {
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-gradient-to-br from-background via-muted/20 to-background">
       {/* Sidebar - Fixed full height */}
-      <Sidebar activePage={activePage} onNavigate={onNavigate} />
+      <Sidebar
+        activePage={activePage}
+        onNavigate={onNavigate}
+        navBadges={navBadges}
+      />
 
       {/* Main Content Area */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">

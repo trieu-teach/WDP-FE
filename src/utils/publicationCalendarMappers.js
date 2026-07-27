@@ -184,6 +184,29 @@ export function formatPublicationCalendarDateDisplay(dateText) {
   }
 }
 
+/** Ngày gọn cho sidebar (VD: 27/07). */
+export function formatPublicationCalendarDateCompact(dateText) {
+  if (!dateText) return ''
+  const raw = String(dateText).trim()
+  const isoDay = /^\d{4}-\d{2}-\d{2}/.test(raw) ? raw.slice(0, 10) : raw
+  const parts = isoDay.split('-')
+  if (parts.length >= 3) {
+    const [, month, day] = parts
+    if (month && day) return `${day}/${month}`
+  }
+  try {
+    const date = new Date(`${isoDay}T12:00:00`)
+    if (Number.isNaN(date.getTime())) return raw
+    return new Intl.DateTimeFormat('vi-VN', {
+      day: '2-digit',
+      month: '2-digit',
+      timeZone: 'Asia/Ho_Chi_Minh',
+    }).format(date)
+  } catch {
+    return raw
+  }
+}
+
 export function formatPublicationCalendarDayLabel(dateText, weekday) {
   const pretty = formatPublicationCalendarDateDisplay(dateText)
   if (!pretty) return ''

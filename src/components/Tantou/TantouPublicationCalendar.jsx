@@ -21,12 +21,36 @@ import { Label } from "@/components/ui/label";
 import { formatTeScheduledPublishDisplay } from "@/utils/teReviewPhase.js";
 import {
   formatPublicationCalendarChapterTitle,
-  formatPublicationCalendarDateDisplay,
+  formatPublicationCalendarDateCompact,
   formatPublicationCalendarDayLabel,
   getPublicationCalendarDefaultRange,
   mapTeReviewsCalendarResponse,
 } from "@/utils/publicationCalendarMappers.js";
 import { cn } from "@/lib/utils";
+
+function SeriesThumb({ coverUrl, fallbackIcon: Icon = BookOpen, tone = "sky" }) {
+  const tones = {
+    sky: "bg-sky-500/10 text-sky-700 dark:text-sky-300",
+    amber: "bg-amber-500/15 text-amber-800 dark:text-amber-200",
+  };
+  if (coverUrl) {
+    return (
+      <div className="h-[56px] w-11 shrink-0 overflow-hidden rounded-md border border-border/60 bg-muted">
+        <img src={coverUrl} alt="" className="size-full object-cover" />
+      </div>
+    );
+  }
+  return (
+    <div
+      className={cn(
+        "flex h-[56px] w-11 shrink-0 items-center justify-center rounded-md border border-border/40",
+        tones[tone] ?? tones.sky,
+      )}
+    >
+      <Icon className="size-4" />
+    </div>
+  );
+}
 
 function ChapterRow({ chapter }) {
   const when = formatTeScheduledPublishDisplay(
@@ -34,6 +58,7 @@ function ChapterRow({ chapter }) {
   );
   const seriesName = chapter.series?.name ?? "Series";
   const chapterLabel = formatPublicationCalendarChapterTitle(chapter);
+  const coverUrl = chapter.series?.coverUrl ?? null;
 
   return (
     <div
@@ -44,14 +69,15 @@ function ChapterRow({ chapter }) {
           : "border-border/80 bg-card",
       )}
     >
-      <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-sky-500/10 text-sky-700 dark:text-sky-300">
-        <BookOpen className="size-4" />
-      </div>
+      <SeriesThumb coverUrl={coverUrl} />
       <div className="min-w-0 flex-1 space-y-1.5">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="text-[0.95rem] font-semibold leading-snug text-foreground">
+        <div className="min-w-0">
+          <p className="truncate text-base font-bold leading-snug tracking-tight text-foreground">
             {seriesName}
           </p>
+          <p className="mt-0.5 text-sm text-muted-foreground">{chapterLabel}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
           <Badge
             variant="outline"
             className={cn(
@@ -71,8 +97,15 @@ function ChapterRow({ chapter }) {
               {chapter.publicationSchedule}
             </Badge>
           ) : null}
+          {chapter.te?.name ? (
+            <Badge
+              variant="outline"
+              className="text-[10px] font-normal text-muted-foreground"
+            >
+              TE: {chapter.te.name}
+            </Badge>
+          ) : null}
         </div>
-        <p className="text-sm font-medium text-foreground/85">{chapterLabel}</p>
         {when ? (
           <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Clock className="size-3.5 shrink-0" />
@@ -87,14 +120,19 @@ function ChapterRow({ chapter }) {
 function SeriesLaunchRow({ launch }) {
   return (
     <div className="flex items-start gap-3 rounded-xl border border-amber-200/80 bg-amber-50/50 p-3.5 shadow-sm dark:border-amber-500/25 dark:bg-amber-500/10">
-      <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-800 dark:text-amber-200">
-        <Calendar className="size-4" />
-      </div>
+      <SeriesThumb
+        coverUrl={launch.coverUrl ?? launch.series?.coverUrl ?? null}
+        fallbackIcon={Calendar}
+        tone="amber"
+      />
       <div className="min-w-0 flex-1 space-y-1.5">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="text-[0.95rem] font-semibold leading-snug text-foreground">
+        <div className="min-w-0">
+          <p className="truncate text-base font-bold leading-snug tracking-tight text-foreground">
             {launch.name}
           </p>
+          <p className="mt-0.5 text-sm text-muted-foreground">Ra mắt series</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
           <Badge
             variant="outline"
             className="border-amber-300/80 bg-amber-100 text-[10px] font-medium text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/20 dark:text-amber-100"
@@ -325,7 +363,7 @@ export function TantouPublicationCalendar() {
                           : "text-muted-foreground",
                       )}
                     >
-                      {formatPublicationCalendarDateDisplay(day.date)}
+                      {formatPublicationCalendarDateCompact(day.date)}
                     </div>
                     <div
                       className={cn(

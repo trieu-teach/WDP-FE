@@ -10,6 +10,7 @@ import {
   ChevronRight,
   ClipboardCheck,
   FileText,
+  Flag,
   Lightbulb,
   ListChecks,
   MoreHorizontal,
@@ -58,7 +59,14 @@ import { cn } from "@/lib/utils";
 import ChapterAnnotator from "./ChapterAnnotator.jsx";
 import AddSeriesModal from "./AddSeriesModal.jsx";
 import MangakaAssistants from "./MangakaAssistants.jsx";
+import SeriesEndRequestDialog from "@/components/Mangaka/SeriesEndRequestDialog.jsx";
 import { seriesPath } from "./SeriesUploadDetail.jsx";
+import { seriesEndRequestsService } from "@/api/seriesEndRequests.service.js";
+import {
+  blocksNewEndRequest,
+  canRequestSeriesEnd,
+  mapSeriesEndRequestListResponse,
+} from "@/utils/seriesEndRequestMappers.js";
 import {
   LABEL_EDITOR_BOARD,
   LABEL_TANTOU_EDITOR,
@@ -354,6 +362,10 @@ function SeriesCard({
   onOpenEdit,
   onDelete,
   onCompleteDebut,
+  onRequestEnd,
+  hasBlockingEndRequest = false,
+  /** @deprecated */
+  hasPendingEndRequest = false,
 }) {
   const toSeries = seriesPath(series);
   const statusBadge = STATUS_BADGE[series.status] ?? STATUS_BADGE.draft;
@@ -514,6 +526,20 @@ function SeriesCard({
                     Hoàn tất vòng đầu
                   </DropdownMenuItem>
                 ) : null}
+                {canRequestSeriesEnd(series.publicationStatus)
+                  && !hasBlockingEndRequest
+                  && !hasPendingEndRequest ? (
+                  <DropdownMenuItem onClick={onRequestEnd}>
+                    <Flag className="size-3.5" />
+                    Yêu cầu kết thúc truyện
+                  </DropdownMenuItem>
+                ) : null}
+                {(hasBlockingEndRequest || hasPendingEndRequest) ? (
+                  <DropdownMenuItem disabled>
+                    <Flag className="size-3.5" />
+                    Đã có yêu cầu kết thúc
+                  </DropdownMenuItem>
+                ) : null}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   className="text-destructive focus:text-destructive"
@@ -581,6 +607,11 @@ export default function Mangaka() {
 
   const [tab, setTab] = useState("series");
   const [annotateSeries, setAnnotateSeries] = useState("");
+  const [blockingEndSeriesIds, setBlockingEndSeriesIds] = useState(() => new Set());
+  /** @deprecated alias — dùng blockingEndSeriesIds */
+  const pendingEndSeriesIds = blockingEndSeriesIds;
+  const setPendingEndSeriesIds = setBlockingEndSeriesIds;
+  const [endRequestSeries, setEndRequestSeries] = useState(null);
   const [addSeriesOpen, setAddSeriesOpen] = useState(false);
   const [editingSeries, setEditingSeries] = useState(null);
   const [uploadPctBySeries, setUploadPctBySeries] = useState({});
@@ -620,6 +651,29 @@ export default function Mangaka() {
       .finally(() => { if (!cancelled) setTeLoading(false) });
     return () => { cancelled = true; };
   }, [teSelectorOpen]);
+
+  useEffect(() => {
+    let cancelled = false;
+    seriesEndRequestsService
+      .getMine({ page: 1, limit: 100 })
+      .then((raw) => {
+        if (cancelled) return;
+        const mapped = mapSeriesEndRequestListResponse(raw);
+        const next = new Set();
+        for (const it of mapped.items) {
+          if (!blocksNewEndRequest(it)) continue;
+          const sid = String(it.seriesId ?? it.series?.id ?? "");
+          if (sid) next.add(sid);
+        }
+        setBlockingEndSeriesIds(next);
+      })
+      .catch(() => {
+        if (!cancelled) setBlockingEndSeriesIds(new Set());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [seriesList.length]);
 
   async function verifyChapterPagesReadyForTe(chapterId) {
     const pages = await loadChapterPages(chapterId, { force: true });
@@ -1582,14 +1636,30 @@ export default function Mangaka() {
                       Quản lý hồ sơ từng series
                     </p>
                   </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={openAddSeriesModal}
-                  >
-                    <Plus className="size-4" />
-                    Đăng ký series
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" className="gap-1.5" asChild>
+                      <Link to="/mangaka/end-requests">
+                        <Flag className="size-3.5" />
+                        Yêu cầu kết thúc
+                        {pendingEndSeriesIds.size > 0 ? (
+                          <Badge
+                            variant="secondary"
+                            className="ml-0.5 h-5 min-w-5 justify-center bg-amber-600 px-1.5 text-[10px] text-white hover:bg-amber-600"
+                          >
+                            {pendingEndSeriesIds.size}
+                          </Badge>
+                        ) : null}
+                      </Link>
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={openAddSeriesModal}
+                    >
+                      <Plus className="size-4" />
+                      Đăng ký series
+                    </Button>
+                  </div>
                 </div>
 
                 {seriesList.length === 0 ? (
@@ -1615,6 +1685,9 @@ export default function Mangaka() {
                         onOpenEdit={() => openEditSeriesModal(s)}
                         onDelete={() => deleteSeriesById(s.id)}
                         onCompleteDebut={() => completeDebutPipeline(s.id)}
+                        hasBlockingEndRequest={blockingEndSeriesIds.has(String(s.id))}
+                        hasPendingEndRequest={blockingEndSeriesIds.has(String(s.id))}
+                        onRequestEnd={() => setEndRequestSeries(s)}
                       />
                     ))}
                   </div>
@@ -2222,6 +2295,31 @@ export default function Mangaka() {
         }
         authorName={user?.name}
         existingTitles={existingSeriesTitles}
+      />
+
+      <SeriesEndRequestDialog
+        key={endRequestSeries?.id ?? "end-closed"}
+        series={endRequestSeries}
+        open={Boolean(endRequestSeries)}
+        onClose={() => setEndRequestSeries(null)}
+        hasActiveRequest={
+          endRequestSeries
+            ? blockingEndSeriesIds.has(String(endRequestSeries.id))
+            : false
+        }
+        hasPending={
+          endRequestSeries
+            ? blockingEndSeriesIds.has(String(endRequestSeries.id))
+            : false
+        }
+        onSubmitted={() => {
+          if (!endRequestSeries?.id) return
+          setBlockingEndSeriesIds((prev) => {
+            const next = new Set(prev)
+            next.add(String(endRequestSeries.id))
+            return next
+          })
+        }}
       />
     </div>
   );

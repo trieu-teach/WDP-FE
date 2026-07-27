@@ -497,7 +497,7 @@ export default function Manga() {
   const [deleteAck, setDeleteAck] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [page, setPage] = useState(1)
-  const ITEMS_PER_PAGE = 10
+  const ITEMS_PER_PAGE = 12
 
   // Reset page when search or filter changes
   useEffect(() => {

@@ -29,16 +29,50 @@ import {
 } from '@/components/ui/select'
 import { formatTeScheduledPublishDisplay } from '@/utils/teReviewPhase.js'
 import {
+  formatPublicationCalendarChapterTitle,
+  formatPublicationCalendarDateCompact,
   formatPublicationCalendarDayLabel,
   getPublicationCalendarDefaultRange,
   mapAdminPublicationCalendarResponse,
 } from '@/utils/publicationCalendarMappers.js'
 import { cn } from '@/lib/utils'
 
+function SeriesThumb({ coverUrl, fallbackIcon: Icon = BookOpen, tone = 'sky' }) {
+  const tones = {
+    sky: 'bg-sky-500/10 text-sky-700 dark:text-sky-300',
+    teal: 'bg-teal-500/10 text-teal-700 dark:text-teal-300',
+  }
+  if (coverUrl) {
+    return (
+      <div className="h-[56px] w-11 shrink-0 overflow-hidden rounded-md border border-border/60 bg-muted">
+        <img
+          src={coverUrl}
+          alt=""
+          className="size-full object-cover"
+        />
+      </div>
+    )
+  }
+  return (
+    <div
+      className={cn(
+        'flex h-[56px] w-11 shrink-0 items-center justify-center rounded-md border border-border/40',
+        tones[tone] ?? tones.sky,
+      )}
+    >
+      <Icon className="size-4" />
+    </div>
+  )
+}
+
 function ChapterRow({ chapter }) {
   const when = formatTeScheduledPublishDisplay(
     chapter.scheduledPublishAt || chapter.publishedAt,
   )
+  const seriesName = chapter.series?.name ?? 'Series'
+  const chapterLabel = formatPublicationCalendarChapterTitle(chapter)
+  const coverUrl = chapter.series?.coverUrl ?? null
+
   return (
     <div
       className={cn(
@@ -48,15 +82,17 @@ function ChapterRow({ chapter }) {
           : 'bg-card',
       )}
     >
-      <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-700">
-        <BookOpen className="size-4" />
-      </div>
-      <div className="min-w-0 flex-1 space-y-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="text-sm font-semibold">
-            Ch. {chapter.chapterNumber ?? '?'}
-            {chapter.title ? ` — ${chapter.title}` : ''}
+      <SeriesThumb coverUrl={coverUrl} />
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <div className="min-w-0">
+          <p className="truncate text-base font-bold leading-snug tracking-tight text-foreground">
+            {seriesName}
           </p>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            {chapterLabel}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
           <Badge variant="outline" className="text-[10px]">
             {chapter.isPublished ? 'Đã publish' : 'Đã lên lịch'}
           </Badge>
@@ -65,14 +101,15 @@ function ChapterRow({ chapter }) {
               {chapter.publicationSchedule}
             </Badge>
           ) : null}
+          {chapter.te?.name ? (
+            <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">
+              TE: {chapter.te.name}
+            </Badge>
+          ) : null}
         </div>
-        <p className="text-xs text-muted-foreground">
-          {chapter.series?.name ?? 'Series'}
-          {chapter.te?.name ? ` · TE: ${chapter.te.name}` : ''}
-        </p>
         {when ? (
           <p className="flex items-center gap-1 text-xs text-muted-foreground">
-            <Clock className="size-3" />
+            <Clock className="size-3 shrink-0" />
             {when}
           </p>
         ) : null}
@@ -84,21 +121,30 @@ function ChapterRow({ chapter }) {
 function SeriesLaunchRow({ launch }) {
   return (
     <div className="flex items-start gap-3 rounded-lg border border-teal-200/70 bg-teal-50/40 p-3 dark:border-teal-500/20 dark:bg-teal-500/5">
-      <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-teal-500/10 text-teal-700">
-        <Calendar className="size-4" />
-      </div>
-      <div className="min-w-0 flex-1 space-y-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="text-sm font-semibold">{launch.name}</p>
+      <SeriesThumb
+        coverUrl={launch.coverUrl ?? launch.series?.coverUrl ?? null}
+        fallbackIcon={Calendar}
+        tone="teal"
+      />
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <div className="min-w-0">
+          <p className="truncate text-base font-bold leading-snug tracking-tight text-foreground">
+            {launch.name}
+          </p>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            Ra mắt series
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
           <Badge variant="outline" className="text-[10px]">
             Ra mắt series
           </Badge>
+          {launch.publicationSchedule ? (
+            <Badge variant="secondary" className="text-[10px]">
+              {launch.publicationSchedule}
+            </Badge>
+          ) : null}
         </div>
-        {launch.publicationSchedule ? (
-          <p className="text-xs text-muted-foreground">
-            Chu kỳ: {launch.publicationSchedule}
-          </p>
-        ) : null}
       </div>
     </div>
   )
@@ -298,8 +344,10 @@ export default function PublicationCalendar() {
                         : 'hover:bg-muted/50',
                     )}
                   >
-                    <div className="font-medium">{day.weekday || day.date.slice(8)}</div>
-                    <div className="text-xs text-muted-foreground">{day.date}</div>
+                    <div className="font-medium">{day.weekday || '—'}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {formatPublicationCalendarDateCompact(day.date)}
+                    </div>
                     <div className="mt-1 text-[11px] text-muted-foreground">
                       {day.eventCount} sự kiện
                     </div>
