@@ -14,14 +14,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -41,7 +33,6 @@ import { getApiErrorMessage, resolveMediaUrl } from "@/api/http.js";
 import { cn } from "@/lib/utils";
 import { apiSeriesToUi } from "@/utils/apiMappers.js";
 import {
-  getAllowedTePublicationStatuses,
   getPublicationStatusLabel,
   SERIES_PUBLICATION_STATUSES,
 } from "@/utils/seriesModel.js";
@@ -389,8 +380,6 @@ export default function TantouEditor() {
   const [tick, setTick] = useState(0);
   const [publicationSeries, setPublicationSeries] = useState([]);
   const [publicationLoading, setPublicationLoading] = useState(false);
-  const [publicationSavingId, setPublicationSavingId] = useState(null);
-  const [publicationConfirm, setPublicationConfirm] = useState(null);
   const [publicationSearch, setPublicationSearch] = useState("");
   const [publicationStatusFilter, setPublicationStatusFilter] = useState("all");
   const [heroSlide, setHeroSlide] = useState(0);
@@ -554,44 +543,6 @@ export default function TantouEditor() {
     void loadPublicationSeries();
   }, [loadPublicationSeries, tick, needsPublication]);
 
-  async function handlePublicationStatusChange(seriesId, nextStatus) {
-    const id = String(seriesId ?? "").trim();
-    if (!id || !nextStatus) return;
-    setPublicationSavingId(id);
-    try {
-      const res = await teReviewsService.updatePublicationStatus(id, nextStatus);
-      const updated =
-        res?.series?.publication_status
-        ?? res?.publication_status
-        ?? nextStatus;
-      setPublicationSeries((prev) =>
-        prev.map((row) =>
-          row.id === id ? { ...row, publicationStatus: updated } : row,
-        ),
-      );
-      setPublicationConfirm(null);
-      toast.success(
-        res?.message
-          ?? `Đã cập nhật trạng thái phát hành → ${getPublicationStatusLabel(updated)}.`,
-      );
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, "Không cập nhật được trạng thái phát hành."));
-    } finally {
-      setPublicationSavingId(null);
-    }
-  }
-
-  function requestPublicationStatusChange(row, nextStatus) {
-    if (!row?.id || !nextStatus) return;
-    if (nextStatus === row.publicationStatus) return;
-    setPublicationConfirm({
-      seriesId: row.id,
-      title: row.title,
-      fromStatus: row.publicationStatus,
-      toStatus: nextStatus,
-    });
-  }
-
   const selected = useMemo(
     () => submissions.find((s) => s.id === selectedId) ?? null,
     [submissions, selectedId],
@@ -676,7 +627,12 @@ export default function TantouEditor() {
         submissions.filter(
           (s) =>
             isTeChapterLevelSubmission(s)
-            && (s.status === "pending" || s.status === "revision"),
+            && (
+              s.status === "pending"
+              || s.status === "revision"
+              // Đã duyệt (approved_by_EB) — vẫn hiện để TE vào lại bấm Phát hành
+              || s.status === TE_UI_AWAITING_PUBLISH
+            ),
         ),
       ),
     [submissions],
@@ -1365,7 +1321,7 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
                   <FileText className="size-5 text-sky-500" />
                   {pendingSections?.chapterLevel?.label ?? "Series đã được duyệt"}
                   <Badge variant="secondary" className="font-normal">
-                    {recurringQueue.length || pendingSections?.chapterLevel?.count || 0}
+                    {recurringQueue.length}
                   </Badge>
                 </CardTitle>
                 <CardDescription>
@@ -1396,66 +1352,11 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
 
         {sectionId === "publication-status" ? (
           <>
-            <Dialog
-              open={Boolean(publicationConfirm)}
-              onOpenChange={(open) => {
-                if (!open && !publicationSavingId) setPublicationConfirm(null);
-              }}
-            >
-              <DialogContent className="sm:max-w-md">
-                <DialogHeader>
-                  <DialogTitle>Xác nhận đổi trạng thái</DialogTitle>
-                  <DialogDescription>
-                    Bạn có chắc muốn đổi trạng thái phát hành của series{" "}
-                    <span className="font-medium text-foreground">
-                      {publicationConfirm?.title}
-                    </span>
-                    ?
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
-                  <p>
-                    <span className="text-muted-foreground">Hiện tại: </span>
-                    {getPublicationStatusLabel(publicationConfirm?.fromStatus)}
-                  </p>
-                  <p>
-                    <span className="text-muted-foreground">Đổi thành: </span>
-                    <span className="font-medium">
-                      {getPublicationStatusLabel(publicationConfirm?.toStatus)}
-                    </span>
-                  </p>
-                </div>
-                <DialogFooter>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={Boolean(publicationSavingId)}
-                    onClick={() => setPublicationConfirm(null)}
-                  >
-                    Huỷ
-                  </Button>
-                  <Button
-                    type="button"
-                    disabled={Boolean(publicationSavingId)}
-                    onClick={() => {
-                      if (!publicationConfirm) return;
-                      void handlePublicationStatusChange(
-                        publicationConfirm.seriesId,
-                        publicationConfirm.toStatus,
-                      );
-                    }}
-                  >
-                    {publicationSavingId ? "Đang cập nhật..." : "Xác nhận đổi"}
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-
             <section className="space-y-3">
               <div>
                 <h2 className="text-xl font-semibold">Trạng thái phát hành</h2>
                 <p className="text-sm text-muted-foreground">
-                  Cập nhật trạng thái series sau khi đã phát hành: đang phát hành, tạm ngưng, hoàn thành hoặc bị drop.
+                  Xem trạng thái series sau khi đã phát hành: đang phát hành, tạm ngưng, hoàn thành hoặc bị drop.
                 </p>
               </div>
 
@@ -1509,10 +1410,7 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
                 </Card>
               ) : (
                 <div className="space-y-2">
-                  {filteredPublicationSeries.map((row) => {
-                    const allowed = getAllowedTePublicationStatuses(row.publicationStatus);
-                    const busy = publicationSavingId === row.id;
-                    return (
+                  {filteredPublicationSeries.map((row) => (
                       <Card key={row.id} className="border-border/70 shadow-none">
                         <CardContent className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center">
                           <div
@@ -1546,44 +1444,10 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
                                 {getPublicationStatusLabel(row.publicationStatus)}
                               </Badge>
                             </div>
-                            {allowed.length === 0 ? (
-                              <p className="text-xs text-muted-foreground">
-                                {row.publicationStatus === "upcoming"
-                                  ? "Chuẩn bị phát hành — chờ job tự chuyển sang đang phát hành."
-                                  : row.publicationStatus === "completed"
-                                    ? "Đã hoàn thành — không đổi được."
-                                    : "Không có chuyển trạng thái khả dụng."}
-                              </p>
-                            ) : null}
                           </div>
-                          {allowed.length > 0 ? (
-                            <Select
-                              key={`${row.id}-${row.publicationStatus}-${
-                                publicationConfirm?.seriesId === row.id ? "confirming" : "idle"
-                              }`}
-                              disabled={busy}
-                              onValueChange={(v) => {
-                                if (v) requestPublicationStatusChange(row, v);
-                              }}
-                            >
-                              <SelectTrigger className="h-9 w-full border-gray-300 text-sm hover:bg-muted/60 sm:w-[200px]">
-                                <SelectValue
-                                  placeholder={busy ? "Đang cập nhật..." : "Đổi trạng thái"}
-                                />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {allowed.map((status) => (
-                                  <SelectItem key={status} value={status}>
-                                    {getPublicationStatusLabel(status)}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          ) : null}
                         </CardContent>
                       </Card>
-                    );
-                  })}
+                  ))}
                 </div>
               )}
             </section>

@@ -107,6 +107,14 @@ http.interceptors.response.use(
 )
 
 export function getApiErrorMessage(err, fallback = 'Có lỗi xảy ra. Vui lòng thử lại.') {
+  const code = String(err?.response?.data?.code ?? '').trim()
+  if (code === 'DEBUT_SUBMIT_LOCKED' || code === 'DEBUT_GATE_LOCKED') {
+    return (
+      err?.response?.data?.message
+      || 'Series đang khóa debut — chỉ gửi được 1 chapter sang TE cho đến khi EB confirm-publish.'
+    )
+  }
+
   const message = err?.response?.data?.message
   if (!message) return fallback
 

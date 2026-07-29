@@ -20,7 +20,7 @@ export const TANTOU_SECTIONS = [
     id: 'publication-status',
     path: `${PATH_TANTOU_EDITOR}/publication-status`,
     title: 'Trạng thái phát hành',
-    description: 'Cập nhật đang phát hành, tạm ngưng, hoàn thành hoặc bị drop.',
+    description: 'Xem đang phát hành, tạm ngưng, hoàn thành hoặc bị drop.',
     icon: 'book',
   },
   {

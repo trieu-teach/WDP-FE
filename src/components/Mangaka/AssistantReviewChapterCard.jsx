@@ -87,6 +87,8 @@ export function AssistantReviewChapterCard({
   onRequestRevision,
   revisionSending = false,
   highlightPageNumbers = [],
+  debutSubmitLocked = false,
+  debutSubmitLockedMessage = "",
 }) {
   const chapter = review?.chapter;
   const submission = review?.submission ?? null;
@@ -100,7 +102,7 @@ export function AssistantReviewChapterCard({
   const hasImages = pageCompare.resultCount > 0;
   const loading = pagesLoading || (tasksLoading && !hasImages);
 
-  const canSend = canApprove;
+  const canSend = canApprove && !debutSubmitLocked;
   const highlightSet = new Set(
     (highlightPageNumbers ?? []).map((n) => Number(n)).filter((n) => !Number.isNaN(n)),
   );
@@ -332,6 +334,11 @@ export function AssistantReviewChapterCard({
           ) : canSend ? (
             <p className="text-[11px] text-muted-foreground">
               Chưa chọn {LABEL_TANTOU_EDITOR} — bấm Gửi để gửi cho tất cả.
+            </p>
+          ) : debutSubmitLocked ? (
+            <p className="text-[11px] text-amber-700 dark:text-amber-400">
+              {debutSubmitLockedMessage
+                || "Đang khóa debut — chờ EB confirm-publish rồi mới gửi chapter tiếp."}
             </p>
           ) : null}
           <Button

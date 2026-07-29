@@ -1,4 +1,5 @@
 import { resolveMediaUrl } from '@/api/http.js'
+import { apiDebutGateToUi } from './debutGate.js'
 import { normalizeSeries, slugifySeriesTitle } from './seriesModel.js'
 
 const API_STATUS_TO_UI = {
@@ -88,6 +89,7 @@ export function apiSeriesToUi(raw, index = 0) {
     category: String(s.category ?? '').trim(),
     tags: Array.isArray(s.tags) ? s.tags : [],
     age_rating: s.age_rating ?? s.ageRating ?? 'All ages',
+    debutGate: apiDebutGateToUi(s.debut_gate ?? s.debutGate),
     deletedAt: s.deleted_at ?? s.deletedAt ?? null,
   })
 }

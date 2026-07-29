@@ -52,8 +52,9 @@ function mapMangaListItem(s, index = 0) {
         : (s.publicationStatus ?? null),
     chapters: s.chapters ?? s.chapterCount ?? 0,
     reads: s.views ?? s.reads ?? 0,
-    updatedAt: formatDate(s.updatedAt ?? s.createdAt),
-    createdAt: formatDate(s.createdAt),
+    // Giữ ISO — UI format 1 lần (tránh Invalid Date khi normalize lại).
+    updatedAt: s.updatedAt ?? s.updated_at ?? s.createdAt ?? s.created_at ?? null,
+    createdAt: s.createdAt ?? s.created_at ?? null,
     initials: title.slice(0, 2).toUpperCase(),
     bg: `hsl(${((title.charCodeAt(0) || index) * 37) % 360} 55% 42%)`,
     thumbnail: s.thumbnail ?? s.cover_image_url ?? '',

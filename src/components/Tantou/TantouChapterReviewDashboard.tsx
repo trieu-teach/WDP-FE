@@ -42,7 +42,6 @@ import type {
   TantouSubmission,
 } from "./reviewTypes";
 import {
-  buildChapterRowsFromSeriesProfile,
   createReviewDraft,
   formatReleaseDate,
   getMangakaNotesForStoryPage,
@@ -256,7 +255,7 @@ export function TantouChapterReviewDashboard({
   const [seriesChapters, setSeriesChapters] = useState<SeriesProfileChapter[]>(
     [],
   );
-  const [seriesChaptersLoading, setSeriesChaptersLoading] = useState(false);
+  const [, setSeriesChaptersLoading] = useState(false);
   const [publishScheduleOpen, setPublishScheduleOpen] = useState(false);
   const readerRef = useRef<HTMLDivElement>(null);
 
@@ -569,13 +568,8 @@ export function TantouChapterReviewDashboard({
     notesByPage,
   ]);
 
+  // Chỉ hiện chapter Mangaka đã gửi TE (hàng chờ), không lấy toàn bộ series profile.
   const chapterRows: ChapterRow[] = useMemo(() => {
-    if (seriesChapters.length) {
-      return buildChapterRowsFromSeriesProfile(
-        seriesChapters,
-        relatedSubmissions,
-      );
-    }
     return groupSubmissionsByChapter(
       relatedSubmissions,
       submission.seriesTitle,
@@ -586,7 +580,7 @@ export function TantouChapterReviewDashboard({
       releaseDate: formatReleaseDate(group.sentAt),
       status: group.status,
     }));
-  }, [seriesChapters, relatedSubmissions, submission.seriesTitle]);
+  }, [relatedSubmissions, submission.seriesTitle]);
 
   const viewingSubmissionWithPages = useMemo(
     () => ({
@@ -913,7 +907,7 @@ export function TantouChapterReviewDashboard({
             rows={chapterRows}
             activeId={activeChapterId}
             viewingId={viewingChapterId ?? activeChapterId}
-            loading={seriesChaptersLoading}
+            loading={false}
             onOpen={handleOpenChapter}
           />
         </div>

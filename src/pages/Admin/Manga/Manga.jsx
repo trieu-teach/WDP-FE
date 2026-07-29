@@ -95,12 +95,10 @@ function formatNumber(n) {
 }
 
 function formatDate(value) {
-  if (!value) return '—'
-  try {
-    return new Date(value).toLocaleDateString('vi-VN', { day: '2-digit', month: 'short', year: 'numeric' })
-  } catch {
-    return '—'
-  }
+  if (!value || value === '—') return '—'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleDateString('vi-VN', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
 function normalizeManga(raw, index = 0) {
@@ -972,6 +970,7 @@ export default function Manga() {
         onSaved={(nextStatus) => {
           const id = publicationTarget?.id
           if (id) {
+            // Optimistic — rồi reload để khớp GET /admin/manga (có publication_status).
             setList((prev) =>
               prev.map((m) =>
                 m.id === id ? { ...m, publicationStatus: nextStatus } : m,
@@ -979,6 +978,7 @@ export default function Manga() {
             )
           }
           setPublicationTarget(null)
+          void loadList(includeDeleted)
         }}
       />
 
