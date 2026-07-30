@@ -103,6 +103,11 @@ import {
 } from "@/utils/teReviewPhase.js";
 import { useMangakaCooperation } from "@/hooks/useMangakaCooperation.js";
 import {
+  canSubmitMoreChaptersToTe,
+  findSeriesDebutGate,
+  getDebutSubmitLockedMessage,
+} from "@/utils/debutGate.js";
+import {
   formatSeriesCardLine,
   seriesToExternalSummary,
   slugifySeriesTitle,
@@ -688,6 +693,11 @@ export default function Mangaka() {
 
   function openTeSelector(chapter) {
     if (!chapter) return;
+    const debutGate = findSeriesDebutGate(seriesList, chapter);
+    if (!canSubmitMoreChaptersToTe(debutGate)) {
+      toast.error(getDebutSubmitLockedMessage(debutGate));
+      return;
+    }
     setTeSendChapter(chapter);
     setSelectedTeId(chapter.teId ?? chapter.te_id ?? null);
     setTeSelectorOpen(true);
@@ -718,6 +728,11 @@ export default function Mangaka() {
     const apiStatus = chapter.apiStatus ?? chapter.status;
     if (!canMangakaSendToTe(apiStatus)) {
       toast.error("Chapter chưa sẵn sàng gửi TE. Vui lòng duyệt chapter trước.");
+      return;
+    }
+    const debutGate = findSeriesDebutGate(seriesList, chapter);
+    if (!canSubmitMoreChaptersToTe(debutGate)) {
+      toast.error(getDebutSubmitLockedMessage(debutGate));
       return;
     }
 
@@ -1184,6 +1199,11 @@ export default function Mangaka() {
     imageOverride,
   }) {
     if (!chapter?.series || !chapter?.id) return;
+    const debutGate = findSeriesDebutGate(seriesList, chapter);
+    if (!canSubmitMoreChaptersToTe(debutGate)) {
+      toast.error(getDebutSubmitLockedMessage(debutGate));
+      return;
+    }
     try {
       const res = await submissionsService.submitChapterToTe(chapter.id);
       setChapterRows((prev) =>
@@ -1207,6 +1227,7 @@ export default function Mangaka() {
       toast.success(
         res.message || `Đã gửi Ch. ${chapter.num} sang ${LABEL_TANTOU_EDITOR}.`,
       );
+      await refreshWorkspace();
     } catch (err) {
       toast.error(
         getApiErrorMessage(err, `Gửi chapter sang ${LABEL_TANTOU_EDITOR} thất bại.`),
@@ -1796,7 +1817,10 @@ export default function Mangaka() {
                               const statusBadge = hasSubmittedImages
                                 ? { label: 'Đã gửi ảnh', className: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400' }
                                 : (STATUS_BADGE[c.status] ?? STATUS_BADGE.draft);
-                              const canSendTe = canMangakaSendToTe(c.apiStatus);
+                              const debutGate = findSeriesDebutGate(seriesList, c);
+                              const debutSubmitAllowed = canSubmitMoreChaptersToTe(debutGate);
+                              const canSendTe =
+                                canMangakaSendToTe(c.apiStatus) && debutSubmitAllowed;
                               const pageCount = Math.max(
                                 Number(c.pages) || 0,
                                 Array.isArray(annot?.pages) ? annot.pages.length : 0,
@@ -1900,6 +1924,12 @@ export default function Mangaka() {
                                         Gửi cho {LABEL_TANTOU_EDITOR}
                                       </Button>
                                     </div>
+                                  ) : canMangakaSendToTe(c.apiStatus) && !debutSubmitAllowed ? (
+                                    <div className="border-t bg-muted/30 px-3 py-2">
+                                      <p className="text-[11px] leading-snug text-muted-foreground">
+                                        Đang khóa debut — chờ EB confirm-publish rồi mới gửi chapter tiếp.
+                                      </p>
+                                    </div>
                                   ) : null}
                                 </div>
                               );
@@ -1985,25 +2015,52 @@ export default function Mangaka() {
                       <p className="mt-1 text-xs text-muted-foreground">
                         {lastApprovedChapter.series}
                       </p>
-                      <div className="mt-2 flex gap-2">
-                        <Button
-                          size="xs"
-                          variant="outline"
-                          onClick={() => setLastApprovedChapter(null)}
-                        >
-                          Để sau
-                        </Button>
-                        <Button
-                          size="xs"
-                          onClick={() => openTeSelector(lastApprovedChapter)}
-                        >
-                          Gửi {LABEL_TANTOU_EDITOR}
-                        </Button>
-                      </div>
+                      {(() => {
+                        const gate = findSeriesDebutGate(seriesList, lastApprovedChapter);
+                        const allowSubmit = canSubmitMoreChaptersToTe(gate);
+                        return (
+                          <div className="mt-2 flex gap-2">
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              onClick={() => setLastApprovedChapter(null)}
+                            >
+                              Để sau
+                            </Button>
+                            <Button
+                              size="xs"
+                              disabled={!allowSubmit}
+                              title={
+                                allowSubmit
+                                  ? undefined
+                                  : getDebutSubmitLockedMessage(gate)
+                              }
+                              onClick={() => openTeSelector(lastApprovedChapter)}
+                            >
+                              Gửi {LABEL_TANTOU_EDITOR}
+                            </Button>
+                          </div>
+                        );
+                      })()}
+                      {!canSubmitMoreChaptersToTe(
+                        findSeriesDebutGate(seriesList, lastApprovedChapter),
+                      ) ? (
+                        <p className="mt-2 text-[11px] text-muted-foreground">
+                          Đang khóa debut — chờ EB confirm-publish.
+                        </p>
+                      ) : null}
                     </div>
                   ) : null}
 
-                  {teReadyChapters.slice(0, 3).map(({ chapter, submission }) => (
+                  {teReadyChapters.slice(0, 3).map(({ chapter, submission }) => {
+                    const payload = {
+                      ...chapter,
+                      apiStatus: submission?.status ?? chapter.apiStatus,
+                      te_id: submission?.te_id,
+                    };
+                    const gate = findSeriesDebutGate(seriesList, payload);
+                    const allowSubmit = canSubmitMoreChaptersToTe(gate);
+                    return (
                     <div
                       key={chapter.id}
                       className="flex items-center justify-between gap-2 rounded-lg border bg-card px-3 py-2"
@@ -2013,24 +2070,27 @@ export default function Mangaka() {
                           {chapter.series} · Ch. {chapter.num}
                         </p>
                         <p className="text-[10px] text-muted-foreground">
-                          Sẵn sàng gửi {LABEL_TANTOU_EDITOR}
+                          {allowSubmit
+                            ? `Sẵn sàng gửi ${LABEL_TANTOU_EDITOR}`
+                            : "Khóa debut — chờ confirm-publish"}
                         </p>
                       </div>
                       <Button
                         size="xs"
                         variant="secondary"
-                        onClick={() =>
-                          openTeSelector({
-                            ...chapter,
-                            apiStatus: submission?.status ?? chapter.apiStatus,
-                            te_id: submission?.te_id,
-                          })
+                        disabled={!allowSubmit}
+                        title={
+                          allowSubmit
+                            ? undefined
+                            : getDebutSubmitLockedMessage(gate)
                         }
+                        onClick={() => openTeSelector(payload)}
                       >
                         Gửi
                       </Button>
                     </div>
-                  ))}
+                    );
+                  })}
 
                   {tantouRevisions.slice(0, 2).map((s) => {
                     const revisionPath = getMangakaTeRevisionPath(s.chapterId ?? s.id);
@@ -2269,13 +2329,25 @@ export default function Mangaka() {
               </Button>
               <Button
                 variant="outline"
-                disabled={teSending || teLoading}
+                disabled={
+                  teSending
+                  || teLoading
+                  || !canSubmitMoreChaptersToTe(
+                    findSeriesDebutGate(seriesList, teTargetChapter),
+                  )
+                }
                 onClick={() => void handleSubmitToTe(null)}
               >
                 {teSending ? "Đang gửi..." : "Gửi tất cả TE"}
               </Button>
               <Button
-                disabled={teSending || teLoading}
+                disabled={
+                  teSending
+                  || teLoading
+                  || !canSubmitMoreChaptersToTe(
+                    findSeriesDebutGate(seriesList, teTargetChapter),
+                  )
+                }
                 onClick={() => void handleSubmitToTe(selectedTeId || undefined)}
               >
                 {teSending ? "Đang gửi..." : selectedTeId ? "Gửi cho TE đã chọn" : "Gửi cho TE"}

@@ -20,6 +20,11 @@ import {
   chapterPagesToCompareUrls,
 } from "@/utils/apiMappers.js";
 import {
+  canSubmitMoreChaptersToTe,
+  findSeriesDebutGate,
+  getDebutSubmitLockedMessage,
+} from "@/utils/debutGate.js";
+import {
   buildReviewPageCompare,
   canMangakaApproveChapterReview,
   countUnapprovedTasks,
@@ -40,6 +45,7 @@ export default function MangakaAssistantReviewDetail() {
   const user = getSession();
 
   const {
+    seriesList,
     chapterRows,
     loadChapterPages,
     refresh: refreshWorkspace,
@@ -69,6 +75,15 @@ export default function MangakaAssistantReviewDetail() {
       ) ?? null
     );
   }, [pendingReviews, teReadyChapters, chapterId]);
+
+  const debutGate = useMemo(
+    () => findSeriesDebutGate(seriesList, review?.chapter),
+    [seriesList, review?.chapter],
+  );
+  const debutSubmitLocked = !canSubmitMoreChaptersToTe(debutGate);
+  const debutSubmitLockedMessage = debutSubmitLocked
+    ? getDebutSubmitLockedMessage(debutGate)
+    : "";
 
   const [taskActionBusy, setTaskActionBusy] = useState(null);
   const [highlightPageNumbers, setHighlightPageNumbers] = useState([]);
@@ -235,6 +250,11 @@ export default function MangakaAssistantReviewDetail() {
       ?? review.submission?.status
       ?? chapter.status;
 
+    if (debutSubmitLocked) {
+      toast.error(debutSubmitLockedMessage || getDebutSubmitLockedMessage(debutGate));
+      return;
+    }
+
     setTeSending(true);
     setHighlightPageNumbers([]);
     try {
@@ -379,6 +399,8 @@ export default function MangakaAssistantReviewDetail() {
             onRequestRevision={handleRequestRevision}
             revisionSending={false}
             highlightPageNumbers={highlightPageNumbers}
+            debutSubmitLocked={debutSubmitLocked}
+            debutSubmitLockedMessage={debutSubmitLockedMessage}
           />
         )}
       </main>
