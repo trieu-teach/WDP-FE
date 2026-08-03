@@ -125,11 +125,13 @@ export function saveCouncilMemberAssessment(seriesTitle, memberId, payload) {
     [memberId]: {
       scores: { ...payload.scores },
       criterionNotes: { ...(payload.criterionNotes ?? {}) },
+      extensionScores: { ...(payload.extensionScores ?? {}) },
       overallComment: payload.overallComment ?? '',
       notes: payload.notes ?? '',
       average: payload.average,
       assessedAt: payload.assessedAt ?? new Date().toISOString(),
       enteredBy: payload.enteredBy ?? null,
+      rubricId: payload.rubricId ?? null,
     },
   }
   all[key] = current
@@ -167,7 +169,10 @@ export function buildCouncilAggregate(seriesRecord, scoreFieldKeys, councilMembe
 
   const memberRows = membersList.map((member) => {
     const entry = seriesRecord.members[member.id]
-    const scores = entry?.scores
+    const scores = {
+      ...(entry?.scores ?? {}),
+      ...(entry?.extensionScores ?? {}),
+    }
     const requiredKeys = scoreFieldKeys.length
       ? scoreFieldKeys
       : [
@@ -178,7 +183,7 @@ export function buildCouncilAggregate(seriesRecord, scoreFieldKeys, councilMembe
           'color',
         ]
     const fullyScored = Boolean(
-      scores
+      entry
       && requiredKeys.every((key) => {
         const raw = scores[key]
         if (raw == null || String(raw).trim() === '') return false
@@ -190,7 +195,7 @@ export function buildCouncilAggregate(seriesRecord, scoreFieldKeys, councilMembe
       return {
         ...member,
         scored: false,
-        scores: scores ?? {},
+        scores,
         average: null,
         assessedAt: null,
         enteredBy: null,

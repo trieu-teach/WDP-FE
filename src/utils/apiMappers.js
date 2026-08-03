@@ -1,6 +1,10 @@
 import { resolveMediaUrl } from '@/api/http.js'
 import { apiDebutGateToUi } from './debutGate.js'
-import { normalizeSeries, slugifySeriesTitle } from './seriesModel.js'
+import {
+  normalizeSeries,
+  slugifySeriesTitle,
+  SERIES_AGE_RATING_VALUES,
+} from './seriesModel.js'
 
 const API_STATUS_TO_UI = {
   draft: 'draft',
@@ -44,11 +48,15 @@ export function apiSeriesToUi(raw, index = 0) {
   const title = String(s.name ?? s.title ?? '').trim() || `Series ${index + 1}`
   // BE trả genre là array; fallback để parse từ string (legacy)
   const genreRaw = s.genre
-  const genres = Array.isArray(genreRaw)
+  const genresRaw = Array.isArray(genreRaw)
     ? genreRaw
     : genreRaw
       ? String(genreRaw).split(/[,;|]/).map(g => g.trim()).filter(Boolean)
       : (Array.isArray(s.genres) ? s.genres : [])
+  // Chuẩn hóa casing lệch cũ ("Slice of Life" → "Slice of life")
+  const genres = genresRaw.map((g) =>
+    String(g) === 'Slice of Life' ? 'Slice of life' : g,
+  )
 
   // author_id can be a populated object {_id, username, full_name} or a raw ObjectId string
   const authorObj = s.author_id
@@ -99,17 +107,27 @@ export function apiSeriesToUi(raw, index = 0) {
  * BE nhận `cover` là multipart field.
  */
 export function uiSeriesFormToApi(form) {
-  const genres = Array.isArray(form.genre) ? form.genre : []
+  const genres = Array.isArray(form.genre)
+    ? form.genre.filter(Boolean)
+    : []
+  const tags = Array.isArray(form.tags) ? form.tags.filter(Boolean) : []
+  const ageRating = String(form.age_rating ?? 'All ages').trim() || 'All ages'
+  const description = String(form.description ?? '').trim()
   const payload = {
     name: String(form.name ?? '').trim(),
-    description: String(form.description ?? '').trim(),
+    description,
+    // BE nhận mảng hoặc CSV — service sẽ serialize CSV khi multipart
     genre: genres,
     target_audience: String(form.target_audience ?? '').trim(),
-    synopsis: String(form.description ?? '').trim(),
-    tags: Array.isArray(form.tags) ? form.tags : [],
-    age_rating: String(form.age_rating ?? 'All ages').trim(),
+    synopsis: description,
+    tags,
+    age_rating: SERIES_AGE_RATING_VALUES.includes(ageRating)
+      ? ageRating
+      : 'All ages',
   }
-  const coverFile = form.cover && typeof form.cover === 'object' ? form.cover : null
+  const coverFile = form.cover && typeof form.cover === 'object' && form.cover instanceof Blob
+    ? form.cover
+    : null
   return { payload, coverFile }
 }
 

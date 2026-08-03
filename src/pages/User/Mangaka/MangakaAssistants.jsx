@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   Clock,
   Globe,
+  HandCoins,
   RotateCcw,
   Search,
   Send,
@@ -18,10 +19,7 @@ import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
-  CardDescription,
   CardFooter,
-  CardHeader,
-  CardTitle,
 } from '@/components/ui/card'
 import {
   Dialog,
@@ -60,10 +58,33 @@ const AVAILABILITY_CHIPS = [
 ]
 
 const AVAILABILITY_BADGE = {
-  available: { label: 'Sẵn sàng', className: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400' },
-  mine: { label: 'Đội của bạn', className: 'bg-violet-100 text-violet-700 hover:bg-violet-100 dark:bg-violet-500/15 dark:text-violet-400' },
-  pending: { label: 'Chờ phản hồi', className: 'bg-amber-100 text-amber-700 hover:bg-amber-100 dark:bg-amber-500/15 dark:text-amber-400' },
-  unavailable: { label: 'Chưa liên kết tài khoản', className: 'bg-zinc-100 text-zinc-600 hover:bg-zinc-100 dark:bg-zinc-500/15 dark:text-zinc-400' },
+  available: {
+    label: 'Sẵn sàng',
+    className:
+      'border-emerald-200/80 bg-emerald-50 text-emerald-800 hover:bg-emerald-50 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300',
+  },
+  mine: {
+    label: 'Đang hợp tác',
+    className:
+      'border-violet-200/80 bg-violet-50 text-violet-800 hover:bg-violet-50 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300',
+  },
+  pending: {
+    label: 'Chờ phản hồi',
+    className:
+      'border-amber-200/80 bg-amber-50 text-amber-900 hover:bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200',
+  },
+  unavailable: {
+    label: 'Chưa liên kết',
+    className:
+      'border-zinc-200 bg-zinc-50 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-500/30 dark:bg-zinc-500/10 dark:text-zinc-400',
+  },
+}
+
+const SPECIALTY_BADGE = {
+  background: 'border-sky-200/70 bg-sky-50 text-sky-800 dark:border-sky-500/25 dark:bg-sky-500/10 dark:text-sky-300',
+  shading: 'border-fuchsia-200/70 bg-fuchsia-50 text-fuchsia-800 dark:border-fuchsia-500/25 dark:bg-fuchsia-500/10 dark:text-fuchsia-300',
+  fx: 'border-orange-200/70 bg-orange-50 text-orange-800 dark:border-orange-500/25 dark:bg-orange-500/10 dark:text-orange-300',
+  other: 'border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-zinc-500/25 dark:bg-zinc-500/10 dark:text-zinc-300',
 }
 
 const DEFAULT_FILTERS = {
@@ -71,6 +92,26 @@ const DEFAULT_FILTERS = {
   specialtyFilter: 'all',
   styleFilter: 'all',
   availabilityFilter: 'available',
+}
+
+const DEFAULT_ASSISTANT_BIO = 'Assistant đã đăng ký trên hệ thống.'
+
+function truncateHandle(handle, max = 18) {
+  const value = String(handle ?? '').trim()
+  if (!value) return '@assistant'
+  if (value.length <= max) return value
+  return `${value.slice(0, Math.max(1, max - 1))}…`
+}
+
+function formatRateLabel(profile) {
+  if (profile?.rateLabel) return String(profile.rateLabel)
+  if (profile?.ratePerChapter != null && profile.ratePerChapter !== '') {
+    return `${profile.ratePerChapter}/chương`
+  }
+  if (profile?.hourlyRate != null && profile.hourlyRate !== '') {
+    return `${profile.hourlyRate}/giờ`
+  }
+  return null
 }
 
 function AssistantAvatar({ profile, size = 'default', className }) {
@@ -89,7 +130,12 @@ function AssistantAvatar({ profile, size = 'default', className }) {
 function ActionButton({ profile }) {
   if (profile.availability === 'pending') {
     return (
-      <Button className="h-9 w-full" size="sm" variant="secondary" disabled>
+      <Button
+        className="h-9 w-full rounded-lg"
+        size="sm"
+        variant="secondary"
+        disabled
+      >
         <span className="mk-pulse" aria-hidden />
         Đang chờ phản hồi
       </Button>
@@ -97,37 +143,32 @@ function ActionButton({ profile }) {
   }
   if (profile.availability === 'mine') {
     return (
-      <Button className="h-9 w-full" size="sm" variant="outline" disabled>
+      <Button className="h-9 w-full rounded-lg" size="sm" variant="outline" disabled>
         <CheckCircle2 className="size-3.5" />
         Đã trong đội
       </Button>
     )
   }
   return (
-    <Button className="h-9 w-full" size="sm" variant="outline" disabled>
+    <Button className="h-9 w-full rounded-lg" size="sm" variant="outline" disabled>
       Chưa có tài khoản hệ thống
     </Button>
   )
 }
 
-const DEFAULT_ASSISTANT_BIO = 'Assistant đã đăng ký trên hệ thống.'
-
 function AssistantCardSkeleton() {
   return (
-    <Card className="overflow-hidden p-0">
+    <Card className="overflow-hidden rounded-xl p-0 shadow-sm">
       <div className="h-1 animate-pulse bg-muted" />
       <div className="space-y-4 p-5">
         <div className="flex items-start gap-3">
-          <div className="size-14 shrink-0 animate-pulse rounded-full bg-muted" />
+          <div className="size-12 shrink-0 animate-pulse rounded-full bg-muted" />
           <div className="min-w-0 flex-1 space-y-2 pt-0.5">
-            <div className="flex items-center gap-2">
-              <div className="h-4 w-1/2 animate-pulse rounded bg-muted" />
-              <div className="ml-auto h-5 w-16 animate-pulse rounded-full bg-muted" />
-            </div>
+            <div className="h-4 w-1/2 animate-pulse rounded bg-muted" />
             <div className="h-3 w-2/5 animate-pulse rounded bg-muted" />
           </div>
         </div>
-        <div className="h-9 animate-pulse rounded-md bg-muted" />
+        <div className="h-9 animate-pulse rounded-lg bg-muted" />
       </div>
     </Card>
   )
@@ -137,28 +178,29 @@ function AssistantProfileCard({ profile, onHire, highlighted = false, entranceDe
   const badge = AVAILABILITY_BADGE[profile.availability] ?? AVAILABILITY_BADGE.available
   const canHire = profile.availability === 'available'
   const accent = profile.avatarColor ?? '#e63946'
+  const rateLabel = formatRateLabel(profile)
 
   const bioText = String(profile.bio ?? '').trim()
   const hasRealBio = bioText && bioText !== DEFAULT_ASSISTANT_BIO
-  const hasSpecialties = Array.isArray(profile.specialties) && profile.specialties.length > 0
+  const specialties = Array.isArray(profile.specialties) ? profile.specialties : []
+  const hasSpecialties = specialties.length > 0
   const hasCustomStyle = Boolean(profile.style) && profile.style !== 'manga'
-  const showTags = hasSpecialties || hasCustomStyle
   const responseTime = String(profile.responseTime ?? '').trim()
   const hasResponseTime = responseTime && responseTime !== '—'
   const languages = Array.isArray(profile.languages) ? profile.languages.filter(Boolean) : []
   const hasLanguages = languages.length > 1 || (languages.length === 1 && languages[0] !== 'VI')
-  const showMeta = hasResponseTime || hasLanguages
   const hasRating = Number(profile.rating) > 0
+  const displayHandle = truncateHandle(profile.handle)
 
   return (
     <Card
       id={profile.accountId ? `assistant-${profile.accountId}` : `assistant-${profile.id}`}
       style={{ animationDelay: `${entranceDelayMs}ms` }}
       className={cn(
-        'group relative flex h-full flex-col gap-0 overflow-hidden p-0 transition-all duration-200',
+        'group relative flex h-full flex-col gap-0 overflow-hidden rounded-xl p-0 shadow-sm transition-all duration-200',
         'hover:-translate-y-0.5 hover:shadow-md',
-        profile.availability === 'mine' && 'ring-1 ring-violet-500/35',
-        highlighted && 'ring-2 ring-primary shadow-md',
+        profile.availability === 'mine' && 'ring-1 ring-violet-400/30',
+        highlighted && 'ring-2 ring-primary/70 shadow-md',
       )}
     >
       <div
@@ -166,21 +208,25 @@ function AssistantProfileCard({ profile, onHire, highlighted = false, entranceDe
         style={{ background: accent }}
       />
 
-      <div className="flex flex-1 flex-col gap-4 p-5 pb-4 pt-6">
-        <div className="flex items-start gap-3.5">
+      <div className="flex flex-1 flex-col gap-3.5 p-5 pb-4 pt-6">
+        <div className="flex items-start gap-3">
           <AssistantAvatar
             profile={profile}
             size="lg"
-            className="size-14 shrink-0 text-base shadow-sm"
+            className="size-12 shrink-0 text-sm shadow-sm"
           />
           <div className="min-w-0 flex-1">
             <div className="flex items-start gap-2">
-              <p className="min-w-0 flex-1 truncate text-[0.95rem] font-semibold leading-snug tracking-tight">
+              <p
+                className="min-w-0 flex-1 truncate text-[0.95rem] font-semibold leading-snug tracking-tight text-foreground"
+                title={profile.name}
+              >
                 {profile.name}
               </p>
               <Badge
+                variant="outline"
                 className={cn(
-                  'mt-0.5 shrink-0',
+                  'mt-0.5 h-6 shrink-0 rounded-md px-2 text-[11px] font-medium',
                   badge.className,
                   profile.availability === 'pending' && 'gap-1',
                 )}
@@ -191,40 +237,67 @@ function AssistantProfileCard({ profile, onHire, highlighted = false, entranceDe
                 {badge.label}
               </Badge>
             </div>
-            <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
-              {profile.handle}
+            <p
+              className="mt-1 truncate font-mono text-xs text-zinc-500 dark:text-zinc-400"
+              title={profile.handle}
+            >
+              {displayHandle}
             </p>
-            {hasRating ? (
-              <div className="mt-2 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
-                <Star className="size-3 shrink-0 fill-amber-500 text-amber-500" />
-                <strong className="text-amber-600 dark:text-amber-400">{profile.rating}</strong>
-                <span>· {profile.completedPages} trang</span>
-              </div>
-            ) : null}
+            <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
+              {hasRating ? (
+                <span className="inline-flex items-center gap-1">
+                  <Star className="size-3 shrink-0 fill-amber-500 text-amber-500" />
+                  <strong className="tabular-nums text-amber-700 dark:text-amber-400">
+                    {profile.rating}
+                  </strong>
+                </span>
+              ) : null}
+              {profile.completedPages > 0 ? (
+                <span className="tabular-nums">{profile.completedPages} trang</span>
+              ) : null}
+              {rateLabel ? (
+                <span className="inline-flex items-center gap-1 font-medium text-zinc-600 dark:text-zinc-300">
+                  <HandCoins className="size-3 shrink-0" />
+                  {rateLabel}
+                </span>
+              ) : null}
+            </div>
           </div>
         </div>
 
         {hasRealBio ? (
-          <p className="line-clamp-2 text-sm leading-relaxed text-muted-foreground">
+          <p className="line-clamp-2 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
             {bioText}
           </p>
         ) : null}
 
-        {showTags ? (
+        {(hasSpecialties || hasCustomStyle) ? (
           <div className="flex flex-wrap gap-1.5">
-            {(profile.specialties ?? []).map(s => (
-              <Badge key={s} variant="secondary" className="h-6 shrink-0 text-xs">
+            {specialties.map((s) => (
+              <Badge
+                key={s}
+                variant="outline"
+                className={cn(
+                  'h-6 rounded-md px-2 text-[11px] font-medium',
+                  SPECIALTY_BADGE[s] ?? SPECIALTY_BADGE.other,
+                )}
+              >
                 {specialtyLabel(s)}
               </Badge>
             ))}
-            <Badge variant="outline" className="h-6 shrink-0 text-xs">
-              {styleLabel(profile.style)}
-            </Badge>
+            {hasCustomStyle ? (
+              <Badge
+                variant="outline"
+                className="h-6 rounded-md border-zinc-200 bg-white px-2 text-[11px] text-zinc-600 dark:border-zinc-600 dark:bg-zinc-900/40 dark:text-zinc-300"
+              >
+                {styleLabel(profile.style)}
+              </Badge>
+            ) : null}
           </div>
         ) : null}
 
-        {showMeta ? (
-          <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+        {(hasResponseTime || hasLanguages) ? (
+          <div className="flex items-center justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400">
             {hasResponseTime ? (
               <span className="inline-flex min-w-0 items-center gap-1">
                 <Clock className="size-3 shrink-0" />
@@ -241,9 +314,14 @@ function AssistantProfileCard({ profile, onHire, highlighted = false, entranceDe
         ) : null}
       </div>
 
-      <CardFooter className="shrink-0 border-t p-4 pt-3">
+      <CardFooter className="shrink-0 border-t border-border/70 bg-muted/20 p-4 pt-3">
         {canHire ? (
-          <Button className="h-9 w-full" size="sm" onClick={() => onHire(profile)}>
+          <Button
+            className="h-9 w-full rounded-lg border-rose-200/80 text-rose-700 hover:border-rose-600 hover:bg-rose-600 hover:text-white dark:border-rose-500/40 dark:text-rose-300 dark:hover:bg-rose-600 dark:hover:text-white"
+            size="sm"
+            variant="outline"
+            onClick={() => onHire(profile)}
+          >
             <Send className="size-3.5" />
             Gửi yêu cầu thuê
           </Button>
@@ -358,255 +436,252 @@ export default function MangakaAssistants() {
   }), [catalog])
 
   return (
-    <div className="mk-assistants space-y-5">
-      <header className="space-y-3 border-b border-border/60 pb-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 text-sm font-medium text-primary">
+    <div className="mk-assistants space-y-6">
+      <header className="space-y-4 border-b border-border/50 pb-5">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 text-sm font-medium text-rose-700 dark:text-rose-300">
               <Sparkles className="size-4" />
               Thuê Assistant
             </div>
-            <h2 className="text-xl font-bold tracking-tight sm:text-2xl">Chọn trợ lý phù hợp</h2>
-            <p className="max-w-2xl text-sm text-muted-foreground">
+            <h2 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
+              Chọn trợ lý phù hợp
+            </h2>
+            <p className="max-w-2xl text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
               Sau khi chốt hợp tác, Assistant xuất hiện sẵn khi giao chapter ở tab Upload &amp; Ghi chú.
             </p>
           </div>
-          <p className="text-xs text-muted-foreground tabular-nums">
-            {stats.total} trên hệ thống
-            <span className="mx-1.5 text-border">·</span>
-            <span className="font-medium text-emerald-600 dark:text-emerald-400">{stats.available} có thể thuê</span>
-            <span className="mx-1.5 text-border">·</span>
-            {stats.team} trong đội
-            <span className="mx-1.5 text-border">·</span>
-            {stats.pending} đang chờ
-          </p>
         </div>
+
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="rounded-xl border border-border/70 bg-card px-3.5 py-3 shadow-sm">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+              Có thể thuê
+            </p>
+            <p className="mt-1 text-xl font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">
+              {stats.available}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setAvailabilityFilter('mine')
+              setSpotlightAssistantId(null)
+            }}
+            className="rounded-xl border border-border/70 bg-card px-3.5 py-3 text-left shadow-sm transition-colors hover:border-violet-300/70 hover:bg-violet-50/40 dark:hover:bg-violet-500/10"
+          >
+            <p className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+              <Users className="size-3" />
+              Đội tôi
+            </p>
+            <p className="mt-1 text-xl font-semibold tabular-nums text-violet-700 dark:text-violet-300">
+              {stats.team}
+            </p>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setAvailabilityFilter('pending')
+              setSpotlightAssistantId(null)
+            }}
+            className="rounded-xl border border-border/70 bg-card px-3.5 py-3 text-left shadow-sm transition-colors hover:border-amber-300/70 hover:bg-amber-50/40 dark:hover:bg-amber-500/10"
+          >
+            <p className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+              <Clock className="size-3" />
+              Đang chờ
+            </p>
+            <p className="mt-1 text-xl font-semibold tabular-nums text-amber-700 dark:text-amber-300">
+              {stats.pending}
+            </p>
+          </button>
+          <div className="rounded-xl border border-border/70 bg-card px-3.5 py-3 shadow-sm">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+              Tổng hệ thống
+            </p>
+            <p className="mt-1 text-xl font-semibold tabular-nums text-foreground">
+              {stats.total}
+            </p>
+          </div>
+        </div>
+
+        {pendingRequests.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-200/70 bg-amber-50/50 px-3.5 py-2.5 dark:border-amber-500/25 dark:bg-amber-500/10">
+            <Clock className="size-3.5 shrink-0 text-amber-700 dark:text-amber-300" />
+            <p className="text-xs font-medium text-amber-900 dark:text-amber-100">
+              {pendingRequests.length} yêu cầu đang chờ phản hồi
+            </p>
+            <div className="flex min-w-0 flex-1 flex-wrap gap-1.5 sm:justify-end">
+              {pendingRequests.slice(0, 3).map((r) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => focusAssistant(r.assistantId, 'pending')}
+                  className="max-w-[10rem] truncate rounded-md border border-amber-200/80 bg-white/80 px-2 py-1 text-[11px] font-medium text-amber-900 transition-colors hover:bg-white dark:border-amber-500/30 dark:bg-zinc-950/40 dark:text-amber-100"
+                  title={`${r.assistantName} · ${requestStatusLabel(r.status)}`}
+                >
+                  {r.assistantName}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </header>
 
-      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,280px)_minmax(0,1fr)]">
-        <aside className="min-w-0 space-y-4">
-          <Card className="flex min-w-0 flex-col overflow-hidden shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Users className="size-4 shrink-0 text-primary" />
-                Đội Assistant
-              </CardTitle>
-              <CardDescription>Đã chốt hợp tác</CardDescription>
-            </CardHeader>
-            <CardContent className="min-h-[100px] min-w-0 flex-1">
-              {roster.length === 0 ? (
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  Chưa có Assistant — gửi yêu cầu thuê và chờ họ chấp nhận.
-                </p>
-              ) : (
-                <ul className="max-h-72 space-y-2 overflow-y-auto overflow-x-hidden pr-0.5">
-                  {roster.map(r => {
-                    const active = spotlightAssistantId === String(r.assistantId)
-                    return (
-                      <li key={r.assistantId} className="min-w-0">
-                        <button
-                          type="button"
-                          onClick={() => focusAssistant(r.assistantId, 'mine')}
-                          className={cn(
-                            'flex w-full min-w-0 items-start gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors',
-                            'hover:border-primary/30 hover:bg-muted/50',
-                            active && 'border-primary/40 bg-primary/5 ring-1 ring-primary/20',
-                          )}
-                        >
-                          <Avatar size="sm" className="mt-0.5 shrink-0">
-                            <AvatarFallback
-                              className="text-[10px] font-semibold text-white"
-                              style={{ background: r.avatarColor ?? '#8b5cf6' }}
-                            >
-                              {r.name.slice(0, 2).toUpperCase()}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="min-w-0 flex-1 space-y-1.5">
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-medium leading-tight">{r.name}</p>
-                              <p className="truncate text-[11px] text-muted-foreground">
-                                {r.handle ?? 'Assistant'}
-                              </p>
-                            </div>
-                            <Badge variant="secondary" className="h-5 max-w-full truncate px-1.5 text-[10px]">
-                              Đang hợp tác
-                            </Badge>
-                          </div>
-                        </button>
-                      </li>
-                    )
-                  })}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
-
-          {pendingRequests.length > 0 ? (
-            <Card className="border-amber-200/60 bg-amber-50/30 shadow-sm dark:border-amber-500/20 dark:bg-amber-500/5">
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center gap-2 text-sm">
-                  <Clock className="size-3.5 text-amber-600" />
-                  Yêu cầu đang chờ
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {pendingRequests.map(r => (
-                  <button
-                    key={r.id}
-                    type="button"
-                    onClick={() => focusAssistant(r.assistantId, 'pending')}
-                    className="flex w-full flex-col gap-0.5 rounded-lg border bg-background/80 px-3 py-2 text-left text-sm transition-colors hover:border-amber-300/60 hover:bg-background"
-                  >
-                    <strong className="truncate">{r.assistantName}</strong>
-                    <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                      <span className="mk-pulse" aria-hidden />
-                      {requestStatusLabel(r.status)}
-                    </span>
-                  </button>
-                ))}
-              </CardContent>
-            </Card>
-          ) : null}
-        </aside>
-
-        <div className="min-w-0 space-y-4">
-          <div className="space-y-3 rounded-lg border bg-card/50 p-4 shadow-sm">
-            <div className="flex flex-wrap gap-2">
-              {AVAILABILITY_CHIPS.map(chip => (
+      <div className="space-y-4">
+        <div className="space-y-3.5 rounded-xl border border-border/70 bg-card p-4 shadow-sm">
+          <div className="flex flex-wrap gap-2">
+            {AVAILABILITY_CHIPS.map((chip) => {
+              const active = availabilityFilter === chip.value
+              return (
                 <Button
                   key={chip.value}
                   type="button"
                   size="sm"
-                  variant={availabilityFilter === chip.value ? 'default' : 'outline'}
-                  className="h-8 gap-1.5 transition-all"
+                  variant="outline"
+                  className={cn(
+                    'h-9 rounded-lg gap-1.5 border-border/80 px-3 font-medium transition-all',
+                    active
+                      ? 'border-rose-600 bg-rose-600 text-white hover:bg-rose-600 hover:text-white dark:border-rose-500 dark:bg-rose-600'
+                      : 'bg-background text-zinc-600 hover:bg-muted/60 hover:text-foreground dark:text-zinc-300',
+                  )}
                   onClick={() => {
                     setAvailabilityFilter(chip.value)
                     setSpotlightAssistantId(null)
                   }}
                 >
                   {chip.label}
-                  <span className={cn(
-                    'rounded-full px-1.5 py-0 text-[10px] tabular-nums',
-                    availabilityFilter === chip.value
-                      ? 'bg-primary-foreground/20 text-primary-foreground'
-                      : 'bg-muted text-muted-foreground',
-                  )}>
+                  <span
+                    className={cn(
+                      'rounded-md px-1.5 py-0.5 text-[10px] tabular-nums',
+                      active
+                        ? 'bg-white/20 text-white'
+                        : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400',
+                    )}
+                  >
                     {chipCount[chip.value]}
                   </span>
                 </Button>
-              ))}
-            </div>
+              )
+            })}
+          </div>
 
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-              <div className="relative min-w-0 flex-1">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  className="h-10 pl-9"
-                  placeholder="Tìm tên, handle, mô tả..."
-                  value={query}
-                  onChange={e => {
-                    setQuery(e.target.value)
-                    setSpotlightAssistantId(null)
-                  }}
-                />
-              </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:w-auto lg:min-w-[320px]">
-                <Select value={specialtyFilter} onValueChange={setSpecialtyFilter}>
-                  <SelectTrigger className="h-10 w-full">
-                    <SelectValue placeholder="Chuyên môn" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Mọi chuyên môn</SelectItem>
-                    {ASSISTANT_SPECIALTIES.map(s => (
-                      <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Select value={styleFilter} onValueChange={setStyleFilter}>
-                  <SelectTrigger className="h-10 w-full">
-                    <SelectValue placeholder="Phong cách" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Mọi phong cách</SelectItem>
-                    {ASSISTANT_STYLES.map(s => (
-                      <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
+            <div className="relative min-w-0 flex-1 xl:min-w-[280px]">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" />
+              <Input
+                className="h-10 rounded-lg border-border/80 bg-background pl-9 text-sm placeholder:text-zinc-400"
+                placeholder="Tìm tên, handle, mô tả…"
+                value={query}
+                onChange={(e) => {
+                  setQuery(e.target.value)
+                  setSpotlightAssistantId(null)
+                }}
+              />
             </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-              <span>
-                Hiển thị <strong className="text-foreground">{filtered.length}</strong>
-                {availabilityFilter === 'all' ? ` / ${catalog.length}` : ''} Assistant
-              </span>
-              {hasActiveFilters ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 gap-1 text-xs"
-                  onClick={clearFilters}
-                >
-                  <RotateCcw className="size-3" />
-                  Xóa bộ lọc
-                </Button>
-              ) : null}
+            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:w-[340px] xl:shrink-0">
+              <Select value={specialtyFilter} onValueChange={setSpecialtyFilter}>
+                <SelectTrigger className="h-10 w-full rounded-lg border-border/80 bg-background px-3 text-sm text-zinc-700 dark:text-zinc-200">
+                  <SelectValue placeholder="Chuyên môn" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Mọi chuyên môn</SelectItem>
+                  {ASSISTANT_SPECIALTIES.map((s) => (
+                    <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={styleFilter} onValueChange={setStyleFilter}>
+                <SelectTrigger className="h-10 w-full rounded-lg border-border/80 bg-background px-3 text-sm text-zinc-700 dark:text-zinc-200">
+                  <SelectValue placeholder="Phong cách" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Mọi phong cách</SelectItem>
+                  {ASSISTANT_STYLES.map((s) => (
+                    <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
-          {loading ? (
-            <div className="grid grid-cols-1 items-stretch gap-4 sm:grid-cols-2">
-              {Array.from({ length: 4 }, (_, i) => (
-                <AssistantCardSkeleton key={i} />
-              ))}
-            </div>
-          ) : filtered.length === 0 ? (
-            <Card className="border-dashed shadow-sm">
-              <CardContent className="flex flex-col items-center gap-4 py-14 text-center">
-                <div className="flex size-12 items-center justify-center rounded-full bg-muted">
-                  <UserSearch className="size-6 text-muted-foreground" />
-                </div>
-                <div className="space-y-1">
-                  <p className="font-medium">Không có Assistant phù hợp</p>
-                  <p className="max-w-sm text-sm text-muted-foreground">
-                    {availabilityFilter === 'available'
-                      ? 'Hiện không có ai sẵn sàng nhận việc — thử xem Đội tôi, Đang chờ hoặc Tất cả.'
-                      : 'Thử đổi từ khóa hoặc bộ lọc khác.'}
-                  </p>
-                </div>
-                <div className="flex flex-wrap justify-center gap-2">
-                  {availabilityFilter !== 'available' ? (
-                    <Button size="sm" variant="outline" onClick={() => setAvailabilityFilter('available')}>
-                      Xem có thể thuê
-                    </Button>
-                  ) : null}
-                  {hasActiveFilters ? (
-                    <Button size="sm" variant="secondary" onClick={clearFilters}>
-                      Xóa bộ lọc
-                    </Button>
-                  ) : null}
-                </div>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="grid grid-cols-1 items-stretch gap-4 sm:grid-cols-2">
-              {filtered.map((profile, index) => (
-                <AssistantProfileCard
-                  key={profile.id}
-                  profile={profile}
-                  onHire={openHireDialog}
-                  highlighted={spotlightAssistantId != null && String(profile.accountId) === spotlightAssistantId}
-                  entranceDelayMs={Math.min(index, 8) * 40}
-                />
-              ))}
-            </div>
-          )}
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+            <span>
+              Hiển thị <strong className="text-foreground">{filtered.length}</strong>
+              {availabilityFilter === 'all' ? ` / ${catalog.length}` : ''} Assistant
+            </span>
+            {hasActiveFilters ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 rounded-lg text-xs text-zinc-600"
+                onClick={clearFilters}
+              >
+                <RotateCcw className="size-3" />
+                Xóa bộ lọc
+              </Button>
+            ) : null}
+          </div>
         </div>
+
+        {loading ? (
+          <div className="grid grid-cols-1 items-stretch gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {Array.from({ length: 6 }, (_, i) => (
+              <AssistantCardSkeleton key={i} />
+            ))}
+          </div>
+        ) : filtered.length === 0 ? (
+          <Card className="rounded-xl border-dashed shadow-sm">
+            <CardContent className="flex flex-col items-center gap-4 py-14 text-center">
+              <div className="flex size-12 items-center justify-center rounded-full bg-muted">
+                <UserSearch className="size-6 text-muted-foreground" />
+              </div>
+              <div className="space-y-1">
+                <p className="font-medium text-foreground">Không có Assistant phù hợp</p>
+                <p className="max-w-sm text-sm text-zinc-600 dark:text-zinc-400">
+                  {availabilityFilter === 'available'
+                    ? 'Hiện không có ai sẵn sàng nhận việc — thử xem Đội tôi, Đang chờ hoặc Tất cả.'
+                    : 'Thử đổi từ khóa hoặc bộ lọc khác.'}
+                </p>
+              </div>
+              <div className="flex flex-wrap justify-center gap-2">
+                {availabilityFilter !== 'available' ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="rounded-lg"
+                    onClick={() => setAvailabilityFilter('available')}
+                  >
+                    Xem có thể thuê
+                  </Button>
+                ) : null}
+                {hasActiveFilters ? (
+                  <Button size="sm" variant="secondary" className="rounded-lg" onClick={clearFilters}>
+                    Xóa bộ lọc
+                  </Button>
+                ) : null}
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 items-stretch gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {filtered.map((profile, index) => (
+              <AssistantProfileCard
+                key={profile.id}
+                profile={profile}
+                onHire={openHireDialog}
+                highlighted={
+                  spotlightAssistantId != null
+                  && String(profile.accountId) === spotlightAssistantId
+                }
+                entranceDelayMs={Math.min(index, 8) * 40}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
-      <Dialog open={!!hireTarget} onOpenChange={open => !open && setHireTarget(null)}>
+      <Dialog open={!!hireTarget} onOpenChange={(open) => !open && setHireTarget(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Gửi yêu cầu thuê Assistant</DialogTitle>
@@ -621,20 +696,23 @@ export default function MangakaAssistants() {
           </DialogHeader>
           {hireTarget ? (
             <div className="space-y-4 py-2">
-              <div className="flex h-16 items-center gap-3 rounded-lg border bg-muted/30 px-3">
+              <div className="flex h-16 items-center gap-3 rounded-xl border bg-muted/30 px-3">
                 <AssistantAvatar profile={hireTarget} />
                 <div className="min-w-0">
                   <p className="truncate font-medium">{hireTarget.name}</p>
-                  <p className="truncate text-xs text-muted-foreground">{hireTarget.handle}</p>
+                  <p className="truncate text-xs text-zinc-500">
+                    {truncateHandle(hireTarget.handle)}
+                  </p>
                 </div>
               </div>
               {!hireTarget.accountId ? (
                 <div className="space-y-2">
                   <Label>Assistant User ID</Label>
                   <Input
+                    className="rounded-lg"
                     placeholder="MongoDB userId của Assistant đã đăng ký"
                     value={manualAssistantId}
-                    onChange={e => setManualAssistantId(e.target.value)}
+                    onChange={(e) => setManualAssistantId(e.target.value)}
                   />
                 </div>
               ) : null}
@@ -642,17 +720,19 @@ export default function MangakaAssistants() {
                 <Label>Lời nhắn (tuỳ chọn)</Label>
                 <Textarea
                   rows={3}
-                  className="min-h-[88px] resize-none"
+                  className="min-h-[88px] resize-none rounded-lg"
                   placeholder="VD: Cần hỗ trợ vẽ nền fantasy, 2 chapter mỗi tuần..."
                   value={hireNote}
-                  onChange={e => setHireNote(e.target.value)}
+                  onChange={(e) => setHireNote(e.target.value)}
                 />
               </div>
             </div>
           ) : null}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setHireTarget(null)}>Huỷ</Button>
-            <Button onClick={submitHireRequest} disabled={sending}>
+            <Button variant="outline" className="rounded-lg" onClick={() => setHireTarget(null)}>
+              Huỷ
+            </Button>
+            <Button className="rounded-lg" onClick={submitHireRequest} disabled={sending}>
               <Send className="size-3.5" />
               Gửi yêu cầu
             </Button>

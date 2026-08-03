@@ -50,19 +50,28 @@ import { mangakaProfileService } from "@/api/mangakaProfile.service.js";
 import { getApiErrorMessage } from "@/api/http.js";
 import { updateSeriesEbAssessmentInWorkspace } from "@/utils/mangakaWorkspaceReader.js";
 import { placeholderPageDataUrl } from "@/utils/placeholderPageDataUrl.js";
+import { EB_NAV_LINKS } from "@/constants/ebNav.js";
 import { LABEL_EDITOR_BOARD } from "@/constants/roleTerminology.js";
 import {
   EB_SCORE_CRITERIA,
   EB_SCORE_MAX,
   EB_COUNCIL_MIN_FOR_PUBLISH,
+  EB_COUNCIL_MAX_FOR_EVALUATE,
+  EB_EVALUATION_RESULTS,
+  EB_PUBLICATION_SCHEDULES,
   buildEmptyEbComments,
   buildEmptyEbScores,
   buildMemberScoresPayload,
   clampEbScore,
   formatEbClassification,
+  getEbAgeSafetyFailFromError,
+  getEbClassificationStyle,
+  getEbDebutGateLockFromError,
+  isEbFirstReviewSeriesStatus,
   mapEbChapterDetailResponse,
   mapEbChapterPendingItem,
   mapEbChapterPreviewResponse,
+  mapEbPreviewCouncilAverageResponse,
   mapEbSeriesPendingItem,
   normalizeEbEvaluateResponse,
   normalizeMemberCommentsMap,
@@ -70,6 +79,21 @@ import {
   validateEbScore,
   validateMemberScoresPayload,
 } from "@/utils/ebEvaluationMappers.js";
+import {
+  EB_CONTENT_LEVEL_FIELDS,
+  EB_CONTENT_LEVEL_LABELS,
+  EB_CONTENT_LEVEL_MAX,
+  buildEmptyContentLevels,
+  buildEmptyExtensionScores,
+  computeWeightedAverage,
+  defaultRubricFromCore,
+  mapAgeSafetyResponse,
+  mapEbRubricList,
+  mapExtensionScoresToApi,
+  mapSuggestedRubricResponse,
+  normalizeContentLevels,
+  normalizeExtensionScoreMap,
+} from "@/utils/ebScoringRubric.js";
 import {
   addCouncilMember,
   buildCouncilAggregate,
@@ -80,9 +104,7 @@ import {
 } from "@/utils/ebCouncilStorage.js";
 import "./Eb.css";
 
-const NAV_LINKS = [
-  { to: "/", label: "Trang chủ" },
-];
+const NAV_LINKS = EB_NAV_LINKS;
 
 const HERO_IMAGES = [
   "/images/eb1.png",
@@ -92,9 +114,9 @@ const HERO_IMAGES = [
 ];
 const HERO_SLIDE_MS = 5000;
 
-const SCORE_FIELDS = EB_SCORE_CRITERIA;
 const SCORE_MAX = EB_SCORE_MAX;
 const SCORE_STEP = 0.5;
+const DEFAULT_RUBRIC = defaultRubricFromCore();
 
 function clampScore(value) {
   return clampEbScore(value);
@@ -104,16 +126,16 @@ function validateScore(value) {
   return validateEbScore(value);
 }
 
-function buildInitialNotes() {
-  return buildEmptyEbComments();
+function buildInitialNotes(scoreKeys) {
+  return buildEmptyEbComments(scoreKeys);
 }
 
-function buildInitialScores() {
-  return buildEmptyEbScores();
+function buildInitialScores(scoreKeys) {
+  return buildEmptyEbScores(scoreKeys);
 }
 
-function buildEmptyScoreErrors() {
-  return Object.fromEntries(SCORE_FIELDS.map((field) => [field.key, ""]));
+function buildEmptyScoreErrors(scoreKeys = EB_SCORE_CRITERIA.map((c) => c.key)) {
+  return Object.fromEntries(scoreKeys.map((key) => [key, ""]));
 }
 
 function formatScoreOrEmpty(value, { scored = true } = {}) {
@@ -156,9 +178,19 @@ function seriesItemToQueueChapter(seriesItem) {
     classification: seriesItem.classification ?? null,
     classificationText: seriesItem.classificationText ?? "",
     councilAverage: seriesItem.councilAverage ?? null,
+    ageRating: seriesItem.ageRating ?? null,
+    genre: seriesItem.genre ?? [],
     pages: [],
     raw: seriesItem.raw,
   };
+}
+
+function resolveSeriesIdFromRaw(seriesRaw, mapped) {
+  return (
+    String(mapped?.seriesId ?? "").trim()
+    || String(seriesRaw?._id ?? seriesRaw?.id ?? "").trim()
+    || ""
+  );
 }
 
 function ebMangakaGroupKey(item) {
@@ -216,56 +248,56 @@ function EbMangakaSelectCard({ group, onSelect }) {
     <button
       type="button"
       onClick={() => onSelect(group.key)}
-      className="group relative text-left"
+      className="group cursor-pointer overflow-hidden rounded-2xl border border-gray-100 bg-white text-left shadow-sm transition-all duration-200 hover:-translate-y-1 hover:shadow-md"
     >
-      <Card className="gap-0 overflow-hidden py-0 shadow-sm transition-all hover:-translate-y-0.5 hover:border-sky-300 hover:shadow-md dark:hover:border-sky-500/40">
-        <div className="relative flex aspect-[4/3] w-full items-center justify-center overflow-hidden bg-gradient-to-br from-sky-500/15 via-muted to-violet-500/10">
-          {group.coverUrl ? (
-            <img
-              src={group.coverUrl}
-              alt=""
-              className="size-full object-cover transition-transform duration-300 group-hover:scale-105"
-            />
-          ) : (
+      <div className="relative aspect-[3/4] w-full overflow-hidden rounded-t-2xl bg-gradient-to-br from-sky-500/15 via-muted to-violet-500/10">
+        {group.coverUrl ? (
+          <img
+            src={group.coverUrl}
+            alt=""
+            className="aspect-[3/4] size-full object-cover transition-transform duration-300 group-hover:scale-105"
+          />
+        ) : (
+          <div className="flex size-full items-center justify-center">
             <div className="flex size-20 items-center justify-center rounded-2xl bg-sky-600 text-2xl font-bold text-white shadow-lg shadow-sky-900/20">
               {initials}
             </div>
-          )}
-          <Badge className="absolute right-2 top-2 h-6 min-w-6 justify-center bg-amber-600 px-1.5 text-xs text-white hover:bg-amber-600">
-            {group.count}
-          </Badge>
-        </div>
-        <CardContent className="space-y-1 p-3">
-          <p className="flex items-center gap-2 truncate text-sm font-semibold">
-            <span className="group/avatar inline-flex shrink-0">
-              <Avatar
-                size="sm"
-                className={cn(
-                  "size-6 ring-1 ring-border",
-                  "transition-all duration-200 ease-out",
-                  "group-hover/avatar:scale-110 group-hover/avatar:ring-2 group-hover/avatar:ring-sky-400",
-                  "group-hover/avatar:shadow-sm group-hover/avatar:shadow-sky-500/30",
-                )}
-              >
-                {group.avatarUrl ? (
-                  <AvatarImage
-                    src={group.avatarUrl}
-                    alt=""
-                    className="transition-transform duration-300 group-hover/avatar:scale-110"
-                  />
-                ) : null}
-                <AvatarFallback className="bg-sky-600 text-[10px] font-bold text-white">
-                  {initials}
-                </AvatarFallback>
-              </Avatar>
-            </span>
-            <span className="truncate">{group.name}</span>
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {group.count} series chờ duyệt
-          </p>
-        </CardContent>
-      </Card>
+          </div>
+        )}
+        <span className="absolute top-3 right-3 rounded-full bg-amber-500/90 px-2.5 py-0.5 text-xs font-bold text-white shadow-sm backdrop-blur-md">
+          {group.count}
+        </span>
+      </div>
+      <div className="rounded-b-2xl border-t border-gray-100 bg-white p-3.5">
+        <p className="flex items-center gap-2 truncate text-sm font-semibold text-gray-900">
+          <span className="group/avatar inline-flex shrink-0">
+            <Avatar
+              size="sm"
+              className={cn(
+                "size-6 ring-1 ring-border",
+                "transition-all duration-200 ease-out",
+                "group-hover/avatar:scale-110 group-hover/avatar:ring-2 group-hover/avatar:ring-sky-400",
+                "group-hover/avatar:shadow-sm group-hover/avatar:shadow-sky-500/30",
+              )}
+            >
+              {group.avatarUrl ? (
+                <AvatarImage
+                  src={group.avatarUrl}
+                  alt=""
+                  className="transition-transform duration-300 group-hover/avatar:scale-110"
+                />
+              ) : null}
+              <AvatarFallback className="bg-sky-600 text-[10px] font-bold text-white">
+                {initials}
+              </AvatarFallback>
+            </Avatar>
+          </span>
+          <span className="truncate">{group.name}</span>
+        </p>
+        <p className="mt-1 text-xs text-gray-500">
+          {group.count} series chờ duyệt
+        </p>
+      </div>
     </button>
   );
 }
@@ -360,13 +392,21 @@ function CriterionScoreRow({
   const display = String(value ?? "").trim() === "" ? "" : numeric.toFixed(1);
 
   return (
-    <div className="space-y-2 rounded-xl border bg-card px-3 py-3 sm:px-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-        <div className="min-w-0 lg:w-44 lg:shrink-0">
-          <Label htmlFor={field.key} className="text-sm font-medium">
+    <div className="mb-3 space-y-3 rounded-2xl border border-gray-100 bg-white p-4 shadow-2xs">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="min-w-0 sm:w-40 sm:shrink-0">
+          <Label
+            htmlFor={field.key}
+            className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-gray-900"
+          >
             {field.label}
+            {field.weightPct != null ? (
+              <span className="rounded-md bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-gray-600">
+                {field.weightPct}%
+              </span>
+            ) : null}
           </Label>
-          <p className="text-xs text-muted-foreground">{field.hint}</p>
+          <p className="text-xs text-gray-500">{field.hint}</p>
         </div>
 
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
@@ -383,7 +423,7 @@ function CriterionScoreRow({
             value={numeric}
             disabled={disabled}
             aria-label={`Slider ${field.label}`}
-            className="eb-score-slider h-2 min-w-[7rem] flex-1 cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-50"
+            className="eb-score-slider h-1.5 min-w-[7rem] flex-1 cursor-pointer rounded-lg bg-gray-200 accent-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
             onChange={(event) =>
               onScoreChange(clampScore(event.target.value).toFixed(1))
             }
@@ -396,12 +436,12 @@ function CriterionScoreRow({
             step={String(SCORE_STEP)}
             value={display}
             disabled={disabled}
-            className="h-9 w-[4.5rem] shrink-0 tabular-nums"
+            className="h-9 w-16 shrink-0 rounded-xl border border-gray-200 bg-gray-50 py-1 text-center font-bold tabular-nums text-gray-900 shadow-none"
             onChange={(event) => onScoreChange(event.target.value)}
             onBlur={onScoreBlur}
             aria-invalid={Boolean(error)}
           />
-          <span className="shrink-0 text-xs text-muted-foreground">
+          <span className="shrink-0 text-xs text-gray-500">
             / {SCORE_MAX}
           </span>
         </div>
@@ -413,55 +453,14 @@ function CriterionScoreRow({
         disabled={disabled}
         onChange={(event) => onNoteChange(event.target.value)}
         placeholder="Ghi chú tiêu chí (tuỳ chọn)..."
-        className="min-h-16 text-sm"
+        className="min-h-16 border-gray-100 text-sm"
       />
     </div>
   );
 }
 
-function getClassification(average, { scored = true } = {}) {
-  if (!scored || average == null || Number.isNaN(Number(average))) {
-    return {
-      label: "CHƯA CHẤM",
-      note: "Chưa có điểm Hội đồng để phân loại.",
-      className:
-        "border-amber-300/80 bg-amber-500/15 text-amber-900 dark:border-amber-500/40 dark:text-amber-200",
-    };
-  }
-
-  if (average < 2.5) {
-    return {
-      label: "KHÔNG ĐẠT",
-      note: "Series chưa đạt chất lượng, cần chỉnh sửa lớn trước khi xét lại.",
-      className:
-        "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/15 dark:text-rose-200",
-    };
-  }
-
-  if (average < 3.5) {
-    return {
-      label: "ĐẠT",
-      note: "Series có thể thông qua, nhưng cần cải thiện theo ghi chú.",
-      className:
-        "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200",
-    };
-  }
-
-  if (average < 4.25) {
-    return {
-      label: "TỐT",
-      note: "Chất lượng series ổn định, phù hợp duyệt nhanh.",
-      className:
-        "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-500/30 dark:bg-sky-500/15 dark:text-sky-200",
-    };
-  }
-
-  return {
-    label: "XUẤT SẮC",
-    note: "Series chất lượng cao, phù hợp đẩy nổi bật/banner.",
-    className:
-      "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200",
-  };
+function getClassification(average, { scored = true, classification = null } = {}) {
+  return getEbClassificationStyle(classification, { scored, average });
 }
 
 function CouncilScoresTable({
@@ -604,20 +603,49 @@ export default function Eb() {
   const [selectedChapterId, setSelectedChapterId] = useState("");
   const [activeMemberId, setActiveMemberId] = useState("");
   const [newCouncilMemberName, setNewCouncilMemberName] = useState("");
-  const [scores, setScores] = useState(buildInitialScores);
-  const [criterionNotes, setCriterionNotes] = useState(buildInitialNotes);
+  const [scores, setScores] = useState(() => buildInitialScores(DEFAULT_RUBRIC.coreKeys));
+  const [criterionNotes, setCriterionNotes] = useState(() =>
+    buildInitialNotes(DEFAULT_RUBRIC.coreKeys),
+  );
+  const [extensionScores, setExtensionScores] = useState(() =>
+    buildEmptyExtensionScores(DEFAULT_RUBRIC.extensionKeys),
+  );
   const [overallComment, setOverallComment] = useState("");
   const [memberNotes, setMemberNotes] = useState("");
   const [evaluationNotes, setEvaluationNotes] = useState("");
   const [lastEvaluation, setLastEvaluation] = useState(null);
   /** true chỉ sau Nộp kết quả chấm thành công (hoặc BE đã có evaluation history). */
   const [scoresSubmitted, setScoresSubmitted] = useState(false);
-  const [scoreErrors, setScoreErrors] = useState(buildEmptyScoreErrors);
+  const [scoreErrors, setScoreErrors] = useState(() =>
+    buildEmptyScoreErrors(DEFAULT_RUBRIC.coreKeys),
+  );
   const [pinnedChapter, setPinnedChapter] = useState(null);
   const [previewPageIndex, setPreviewPageIndex] = useState(0);
   const [zoomOpen, setZoomOpen] = useState(false);
   const [heroSlide, setHeroSlide] = useState(0);
   const [selectedMangakaKey, setSelectedMangakaKey] = useState(null);
+  const [rubrics, setRubrics] = useState([DEFAULT_RUBRIC]);
+  const [selectedRubricId, setSelectedRubricId] = useState(DEFAULT_RUBRIC.id);
+  const [suggestedRubricId, setSuggestedRubricId] = useState("");
+  /** null = dùng gợi ý BE (không gửi rubric_id); string = EB override từ alternatives */
+  const [rubricOverrideId, setRubricOverrideId] = useState(null);
+  const [rubricSuggestMeta, setRubricSuggestMeta] = useState({
+    reason: "",
+    isFallback: false,
+    seriesInfo: null,
+    alternatives: [],
+  });
+  const [contentLevels, setContentLevels] = useState(buildEmptyContentLevels);
+  const [ageSafety, setAgeSafety] = useState(null);
+  const [ageSafetyChecking, setAgeSafetyChecking] = useState(false);
+  const [previewCouncilAvg, setPreviewCouncilAvg] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewClassification, setPreviewClassification] = useState(null);
+  const [seriesContext, setSeriesContext] = useState(null);
+  const [evaluationResult, setEvaluationResult] = useState("approved");
+  const [publicationSchedule, setPublicationSchedule] = useState("weekly");
+  const [quickNotes, setQuickNotes] = useState("");
+  const [debutGateLock, setDebutGateLock] = useState(null);
   const refresh = useCallback(() => bumpCouncil((n) => n + 1), []);
 
   useEffect(() => {
@@ -744,13 +772,39 @@ export default function Eb() {
       const mapped = mapEbChapterDetailResponse(data)
       if (mapped) {
         setPinnedChapter(mapped)
+        const seriesRaw = mapped.seriesDetail ?? data?.series ?? {}
         const latestEval = mapped.evaluationHistory?.at(-1)
+        setSeriesContext({
+          seriesId: mapped.seriesId ?? resolveSeriesIdFromRaw(seriesRaw, mapped),
+          status: seriesRaw.status ?? mapped.status ?? null,
+          ageRating:
+            seriesRaw.age_rating
+            ?? seriesRaw.ageRating
+            ?? seriesRaw.content_rating
+            ?? null,
+          genre: Array.isArray(seriesRaw.genre) ? seriesRaw.genre : [],
+          name: seriesRaw.name ?? mapped.seriesName ?? '',
+          publicationSchedule: seriesRaw.publication_schedule ?? null,
+          firstReview: latestEval
+            ? Boolean(latestEval.first_review ?? latestEval.firstReview)
+            : isEbFirstReviewSeriesStatus(seriesRaw.status),
+        })
+        setDebutGateLock(null)
         const normalized = normalizeEbEvaluateResponse({
           evaluation: latestEval,
           council_average: mapped.councilAverage,
           classification: mapped.classification,
           classification_text: mapped.classificationText,
         })
+        if (seriesRaw.publication_schedule) {
+          setPublicationSchedule(seriesRaw.publication_schedule)
+        }
+        if (latestEval?.content_levels) {
+          setContentLevels(normalizeContentLevels(latestEval.content_levels))
+        }
+        if (latestEval?.applied_rubric_id) {
+          setSelectedRubricId(String(latestEval.applied_rubric_id))
+        }
         // Chỉ coi là đã nộp khi BE có bản evaluation — không unlock bằng councilAverage lẻ
         if (latestEval && normalized.councilAverage != null) {
           setLastEvaluation({
@@ -758,8 +812,10 @@ export default function Eb() {
             council_average: normalized.councilAverage,
             classification: normalized.classification,
             classification_text: normalized.classificationText,
+            age_safety: normalized.ageSafety,
           })
           setScoresSubmitted(true)
+          if (normalized.ageSafety) setAgeSafety(normalized.ageSafety)
         } else {
           setLastEvaluation(null)
           setScoresSubmitted(false)
@@ -770,6 +826,28 @@ export default function Eb() {
       // fallback: dùng item từ pending list
     }
     return null
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const body = await ebEvaluationsService.getRubrics()
+        if (cancelled) return
+        const list = mapEbRubricList(body)
+        if (list.length) {
+          setRubrics(list)
+          setSelectedRubricId((prev) =>
+            list.some((r) => r.id === prev) ? prev : list[0].id,
+          )
+        }
+      } catch {
+        // giữ default rubric khi BE chưa sẵn sàng
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
   }, []);
 
   useEffect(() => {
@@ -864,7 +942,84 @@ export default function Eb() {
 
   const councilKey = activeChapter?.id ?? "";
   const activeTitle = activeChapter?.seriesName ?? "";
-  const scoreFields = SCORE_FIELDS;
+  const activeSeriesId = String(
+    seriesContext?.seriesId
+    ?? activeChapter?.seriesId
+    ?? "",
+  ).trim();
+
+  const selectedRubric = useMemo(() => {
+    return rubrics.find((r) => r.id === selectedRubricId) ?? rubrics[0] ?? DEFAULT_RUBRIC;
+  }, [rubrics, selectedRubricId]);
+
+  const scoreFields = useMemo(
+    () => selectedRubric?.scoreFields ?? DEFAULT_RUBRIC.scoreFields,
+    [selectedRubric],
+  );
+  const coreScoreKeys = useMemo(
+    () => selectedRubric?.coreKeys ?? DEFAULT_RUBRIC.coreKeys,
+    [selectedRubric],
+  );
+  const extensionKeys = useMemo(
+    () => selectedRubric?.extensionKeys ?? [],
+    [selectedRubric],
+  );
+  const hasExtension = Boolean(selectedRubric?.hasExtension && extensionKeys.length);
+
+  useEffect(() => {
+    if (!activeSeriesId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const body = await ebEvaluationsService.suggestRubric(activeSeriesId);
+        if (cancelled) return;
+        const suggested = mapSuggestedRubricResponse(body);
+        if (!suggested.rubric) return;
+        setSuggestedRubricId(suggested.rubric.id);
+        setRubricOverrideId(null);
+        setRubricSuggestMeta({
+          reason: suggested.reason,
+          isFallback: suggested.isFallback,
+          seriesInfo: suggested.seriesInfo,
+          alternatives: suggested.alternatives ?? [],
+        });
+        setRubrics(() => {
+          const byId = new Map();
+          byId.set(suggested.rubric.id, suggested.rubric);
+          for (const alt of suggested.alternatives ?? []) {
+            byId.set(alt.id, alt);
+          }
+          return [...byId.values()];
+        });
+        setSelectedRubricId(suggested.rubric.id);
+        if (suggested.seriesInfo) {
+          setSeriesContext((prev) => ({
+            ...(prev ?? {}),
+            seriesId: prev?.seriesId || activeSeriesId,
+            ageRating: suggested.seriesInfo.ageRating ?? prev?.ageRating ?? null,
+            genre: suggested.seriesInfo.genre?.length
+              ? suggested.seriesInfo.genre
+              : (prev?.genre ?? []),
+            name: suggested.seriesInfo.name || prev?.name || "",
+          }));
+        }
+      } catch {
+        // giữ default khi suggest lỗi
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSeriesId]);
+
+  useEffect(() => {
+    setScores(buildInitialScores(coreScoreKeys));
+    setCriterionNotes(buildInitialNotes(coreScoreKeys));
+    setExtensionScores(buildEmptyExtensionScores(extensionKeys));
+    setScoreErrors(buildEmptyScoreErrors([...coreScoreKeys, ...extensionKeys]));
+    setAgeSafety(null);
+    setPreviewCouncilAvg(null);
+  }, [selectedRubricId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const councilRecord = useMemo(
     () => (councilKey ? readCouncilSeriesScores(councilKey) : null),
@@ -904,8 +1059,12 @@ export default function Eb() {
     const record = readCouncilSeriesScores(councilKey);
     const memberEntry = record?.members?.[activeMemberId];
     if (memberEntry?.scores) {
-      const normalizedScores = normalizeMemberScoreMap(memberEntry.scores);
+      const normalizedScores = normalizeMemberScoreMap(
+        memberEntry.scores,
+        coreScoreKeys,
+      );
       setScores((current) => ({
+        ...buildInitialScores(coreScoreKeys),
         ...current,
         ...Object.fromEntries(
           Object.entries(normalizedScores).map(([key, value]) => [
@@ -915,21 +1074,35 @@ export default function Eb() {
         ),
       }));
       setCriterionNotes((current) => ({
+        ...buildInitialNotes(coreScoreKeys),
         ...current,
-        ...normalizeMemberCommentsMap(memberEntry.criterionNotes),
+        ...normalizeMemberCommentsMap(memberEntry.criterionNotes, coreScoreKeys),
+      }));
+      setExtensionScores((current) => ({
+        ...buildEmptyExtensionScores(extensionKeys),
+        ...current,
+        ...Object.fromEntries(
+          Object.entries(
+            normalizeExtensionScoreMap(
+              memberEntry.extensionScores ?? {},
+              extensionKeys,
+            ),
+          ).map(([key, value]) => [key, Number(value).toFixed(1)]),
+        ),
       }));
       setOverallComment(memberEntry.overallComment ?? "");
       setMemberNotes(memberEntry.notes ?? "");
-      setScoreErrors(buildEmptyScoreErrors());
+      setScoreErrors(buildEmptyScoreErrors([...coreScoreKeys, ...extensionKeys]));
       return;
     }
 
-    setScores(buildInitialScores());
-    setCriterionNotes(buildInitialNotes());
+    setScores(buildInitialScores(coreScoreKeys));
+    setCriterionNotes(buildInitialNotes(coreScoreKeys));
+    setExtensionScores(buildEmptyExtensionScores(extensionKeys));
     setOverallComment("");
     setMemberNotes("");
-    setScoreErrors(buildEmptyScoreErrors());
-  }, [councilKey, activeMemberId, councilTick]);
+    setScoreErrors(buildEmptyScoreErrors([...coreScoreKeys, ...extensionKeys]));
+  }, [councilKey, activeMemberId, councilTick, selectedRubricId, coreScoreKeys, extensionKeys]);
   const activeSeriesImage =
     activeChapter?.previewImageUrl ||
     placeholderPageDataUrl(
@@ -938,27 +1111,57 @@ export default function Eb() {
         : "Chưa chọn chapter",
     );
   const average = useMemo(() => {
-    const total = scoreFields.reduce(
-      (sum, field) => sum + clampScore(scores[field.key]),
+    const coreTotal = coreScoreKeys.reduce(
+      (sum, key) => sum + clampScore(scores[key]),
       0,
     );
-    return scoreFields.length ? total / scoreFields.length : 0;
-  }, [scoreFields, scores]);
+    const extTotal = extensionKeys.reduce(
+      (sum, key) => sum + clampScore(extensionScores[key]),
+      0,
+    );
+    const count = coreScoreKeys.length + extensionKeys.length;
+    return count ? (coreTotal + extTotal) / count : 0;
+  }, [coreScoreKeys, extensionKeys, scores, extensionScores]);
   const hasPersonalScores = useMemo(
     () =>
-      scoreFields.some((field) => String(scores[field.key] ?? "").trim() !== ""),
-    [scoreFields, scores],
+      coreScoreKeys.some((key) => String(scores[key] ?? "").trim() !== "")
+      || extensionKeys.some(
+        (key) => String(extensionScores[key] ?? "").trim() !== "",
+      ),
+    [coreScoreKeys, extensionKeys, scores, extensionScores],
   );
   const personalAvgDisplay = formatScoreOrEmpty(average, {
     scored: hasPersonalScores,
   });
+  const localWeightedPreview = useMemo(() => {
+    const combined = { ...scores, ...extensionScores };
+    return computeWeightedAverage(combined, selectedRubric?.weights ?? {});
+  }, [scores, extensionScores, selectedRubric]);
   const councilAggregate = useMemo(() => {
     const keys = scoreFields.map((field) => field.key);
     return buildCouncilAggregate(councilRecord, keys, councilRoster);
   }, [councilRecord, scoreFields, councilRoster]);
+  const isFirstReview = useMemo(() => {
+    if (seriesContext?.firstReview === false) return false;
+    if (seriesContext?.status) {
+      return isEbFirstReviewSeriesStatus(seriesContext.status);
+    }
+    return true;
+  }, [seriesContext]);
+
   const councilClassification = getClassification(
-    councilAggregate.councilAverage,
-    { scored: councilAggregate.scoredCount > 0 },
+    previewCouncilAvg ?? councilAggregate.councilAverage,
+    {
+      scored:
+        previewCouncilAvg != null
+        || councilAggregate.scoredCount > 0
+        || lastEvaluation?.classification != null,
+      classification:
+        previewClassification
+        ?? lastEvaluation?.classification
+        ?? activeChapter?.classification
+        ?? null,
+    },
   );
   const activeMember = councilRoster.find((m) => m.id === activeMemberId) ?? null;
   const savedScoredCount = councilAggregate.scoredCount;
@@ -979,6 +1182,47 @@ export default function Eb() {
   const canConfirmPublish = Boolean(
     activeChapter?.id && canSubmitScores && scoresSubmitted,
   );
+
+  // Live preview weighted average từ BE khi đã lưu đủ draft
+  useEffect(() => {
+    if (!isFirstReview || !canSubmitScores || !selectedRubric?.id) return undefined;
+    const timer = window.setTimeout(() => {
+      void runPreviewCouncilAverage({ silent: true });
+    }, 600);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- chỉ refresh khi draft/rubric đổi
+  }, [canSubmitScores, selectedRubricId, councilTick, isFirstReview]);
+
+  // Age safety realtime khi chỉnh content_levels
+  useEffect(() => {
+    if (!isFirstReview) return undefined;
+    const ageRating =
+      seriesContext?.ageRating
+      ?? activeChapter?.ageRating
+      ?? selectedRubric?.ageRating;
+    if (!ageRating) return undefined;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const body = await ebEvaluationsService.checkAgeSafety({
+            age_rating: ageRating,
+            content_levels: contentLevels,
+          });
+          setAgeSafety(mapAgeSafetyResponse(body));
+        } catch {
+          /* ignore realtime errors */
+        }
+      })();
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [
+    contentLevels,
+    isFirstReview,
+    seriesContext?.ageRating,
+    activeChapter?.ageRating,
+    selectedRubric?.ageRating,
+  ]);
+
   const previewPageCount = chapterPages.length;
   const activePreviewPage =
     previewPageCount > 0
@@ -1016,10 +1260,30 @@ export default function Eb() {
     setScoreErrors((current) => ({ ...current, [key]: validateScore(value) }));
   }
 
+  function updateExtensionScore(key, value) {
+    setExtensionScores((current) => ({ ...current, [key]: value }));
+    setScoreErrors((current) => ({ ...current, [key]: validateScore(value) }));
+  }
+
   function normalizeScoreField(key) {
     const nextValue = clampScore(scores[key]).toFixed(1);
     setScores((current) => ({ ...current, [key]: nextValue }));
     setScoreErrors((current) => ({ ...current, [key]: validateScore(nextValue) }));
+  }
+
+  function normalizeExtensionField(key) {
+    const nextValue = clampScore(extensionScores[key]).toFixed(1);
+    setExtensionScores((current) => ({ ...current, [key]: nextValue }));
+    setScoreErrors((current) => ({ ...current, [key]: validateScore(nextValue) }));
+  }
+
+  function updateContentLevel(key, value) {
+    const next = Math.min(
+      EB_CONTENT_LEVEL_MAX,
+      Math.max(0, Number(value) || 0),
+    );
+    setContentLevels((current) => ({ ...current, [key]: next }));
+    setAgeSafety(null);
   }
 
   function updateCriterionNote(key, value) {
@@ -1045,7 +1309,65 @@ export default function Eb() {
       members: councilRoster,
       activeMemberId: null,
       draft: null,
+      scoreKeys: coreScoreKeys,
+      extensionKeys: hasExtension ? extensionKeys : [],
+      mapExtensionScoresToApi,
     });
+  }
+
+  async function runAgeSafetyCheck() {
+    const ageRating =
+      seriesContext?.ageRating
+      ?? activeChapter?.ageRating
+      ?? selectedRubric?.ageRating
+      ?? "";
+    setAgeSafetyChecking(true);
+    try {
+      const body = await ebEvaluationsService.checkAgeSafety({
+        age_rating: ageRating,
+        content_levels: contentLevels,
+      });
+      const mapped = mapAgeSafetyResponse(body);
+      setAgeSafety(mapped);
+      return mapped;
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Không kiểm tra được age safety."));
+      return null;
+    } finally {
+      setAgeSafetyChecking(false);
+    }
+  }
+
+  async function runPreviewCouncilAverage({ silent = false } = {}) {
+    const memberScores = buildMemberScoresDraft();
+    if (!memberScores.length) {
+      if (!silent) toast.error("Cần lưu nháp điểm trước khi xem preview ĐTB.");
+      return null;
+    }
+    if (!silent) setPreviewLoading(true);
+    try {
+      const res = await ebEvaluationsService.previewCouncilAverage({
+        ...(rubricOverrideId ? { rubric_id: rubricOverrideId } : {}),
+        member_scores: memberScores,
+      });
+      const mapped = mapEbPreviewCouncilAverageResponse(res);
+      setPreviewCouncilAvg(mapped.weightedCouncilAverage);
+      setPreviewClassification(mapped.classification);
+      if (!silent && mapped.weightedCouncilAverage != null) {
+        toast.success(
+          `Preview ĐTB weighted: ${Number(mapped.weightedCouncilAverage).toFixed(2)}`
+          + (mapped.classificationText ? ` · ${mapped.classificationText}` : ""),
+        );
+      }
+      return mapped;
+    } catch (err) {
+      if (!silent) {
+        toast.error(getApiErrorMessage(err, "Không preview được ĐTB."));
+      }
+      return null;
+    } finally {
+      if (!silent) setPreviewLoading(false);
+    }
   }
 
   function warnMissingCouncilDrafts() {
@@ -1079,8 +1401,63 @@ export default function Eb() {
   }
 
   async function handleSubmitScores() {
-    if (!activeChapter?.id) {
-      toast.error("Chưa có chapter trong hàng chờ để chấm điểm.");
+    if (debutGateLock) {
+      toast.error(debutGateLock.message);
+      return;
+    }
+
+    if (!activeChapter?.id && !activeSeriesId) {
+      toast.error("Chưa có series/chapter trong hàng chờ để chấm điểm.");
+      return;
+    }
+
+    if (!evaluationResult) {
+      toast.error("Chọn kết quả đánh giá (approved / revision / rejected).");
+      return;
+    }
+
+    if (evaluationResult === "approved" && !String(publicationSchedule || "").trim()) {
+      toast.error("Khi duyệt (approved) bắt buộc chọn tần suất phát hành.");
+      return;
+    }
+
+    // Quick decision — series đã chấm trước đó
+    if (!isFirstReview) {
+      if (!activeSeriesId) {
+        toast.error("Thiếu seriesId để gửi quick decision.");
+        return;
+      }
+      setSubmitting(true);
+      try {
+        const payload = {
+          quick_decision: evaluationResult,
+          result: evaluationResult,
+          ...(quickNotes.trim() ? { quick_notes: quickNotes.trim() } : {}),
+          ...(evaluationNotes.trim() ? { notes: evaluationNotes.trim() } : {}),
+          ...(evaluationResult === "approved"
+            ? { publication_schedule: publicationSchedule }
+            : {}),
+        };
+        const res = await ebEvaluationsService.evaluateSeries(activeSeriesId, payload);
+        const normalized = normalizeEbEvaluateResponse(res);
+        setLastEvaluation({
+          ...(normalized.evaluation ?? {}),
+          council_average: normalized.councilAverage,
+          classification: normalized.classification,
+          classification_text: normalized.classificationText,
+        });
+        setScoresSubmitted(true);
+        toast.success(
+          normalized.message
+          || `Đã gửi quick decision: ${evaluationResult}.`,
+        );
+        void loadPending({ silent: true });
+        refresh();
+      } catch (err) {
+        toast.error(getApiErrorMessage(err, "Không gửi được quick decision."));
+      } finally {
+        setSubmitting(false);
+      }
       return;
     }
 
@@ -1094,10 +1471,22 @@ export default function Eb() {
       return;
     }
 
+    if (rosterCount > EB_COUNCIL_MAX_FOR_EVALUATE) {
+      toast.error(`Tối đa ${EB_COUNCIL_MAX_FOR_EVALUATE} thành viên Hội đồng mỗi lần chấm.`);
+      return;
+    }
+
     const memberScores = buildMemberScoresDraft();
     const payloadError = validateMemberScoresPayload(
       memberScores,
-      Math.max(rosterCount, EB_COUNCIL_MIN_FOR_PUBLISH),
+      rosterCount,
+      {
+        scoreKeys: coreScoreKeys,
+        criteria: scoreFields,
+        extensionKeys: hasExtension ? extensionKeys : [],
+        minCount: EB_COUNCIL_MIN_FOR_PUBLISH,
+        maxCount: EB_COUNCIL_MAX_FOR_EVALUATE,
+      },
     );
     if (payloadError) {
       toast.error(payloadError);
@@ -1106,22 +1495,86 @@ export default function Eb() {
 
     setSubmitting(true);
     try {
-      const res = await ebEvaluationsService.evaluateChapter(activeChapter.id, {
+      const safety = await runAgeSafetyCheck();
+      if (safety && !safety.passed) {
+        toast.error(
+          safety.violations?.[0]?.message
+          || "Age safety không đạt — không thể nộp đánh giá.",
+        );
+        return;
+      }
+
+      const payload = {
+        result: evaluationResult,
         member_scores: memberScores,
+        content_levels: contentLevels,
+        // Chỉ gửi rubric_id khi EB override từ alternatives — mặc định BE tự derive
+        ...(rubricOverrideId
+          ? { rubric_id: rubricOverrideId }
+          : {}),
         ...(evaluationNotes.trim() ? { notes: evaluationNotes.trim() } : {}),
-      });
+        ...(evaluationResult === "approved"
+          ? { publication_schedule: publicationSchedule }
+          : {}),
+      };
+
+      // First review: ưu tiên series-level; chapter-level khi không có seriesId
+      let res;
+      try {
+        if (activeSeriesId) {
+          res = await ebEvaluationsService.evaluateSeries(activeSeriesId, payload);
+        } else {
+          res = await ebEvaluationsService.evaluateChapter(activeChapter.id, payload);
+        }
+      } catch (primaryErr) {
+        const gate = getEbDebutGateLockFromError(primaryErr);
+        if (gate) {
+          setDebutGateLock(gate);
+          toast.error(gate.message);
+          return;
+        }
+        if (
+          activeSeriesId
+          && primaryErr?.response?.status === 404
+          && activeChapter?.id
+        ) {
+          res = await ebEvaluationsService.evaluateChapter(
+            activeChapter.id,
+            payload,
+          );
+        } else {
+          throw primaryErr;
+        }
+      }
+
       const normalized = normalizeEbEvaluateResponse(res);
+      if (normalized.ageSafety && !normalized.ageSafety.passed) {
+        setAgeSafety(normalized.ageSafety);
+        toast.error("Age safety không đạt — BE từ chối lưu đánh giá.");
+        return;
+      }
+      if (normalized.ageSafety) setAgeSafety(normalized.ageSafety);
+      if (normalized.councilAverage != null) {
+        setPreviewCouncilAvg(Number(normalized.councilAverage));
+      }
+      if (normalized.classification) {
+        setPreviewClassification(normalized.classification);
+      }
+
       const evaluation = {
         ...(normalized.evaluation ?? {}),
         council_average: normalized.councilAverage,
         classification: normalized.classification,
         classification_text: normalized.classificationText,
+        age_safety: normalized.ageSafety,
+        result: evaluationResult,
       };
       setLastEvaluation(evaluation);
       setScoresSubmitted(true);
       setPinnedChapter((current) => {
         const base =
-          current?.id === activeChapter.id ? current : activeChapter;
+          current?.id === activeChapter?.id ? current : activeChapter;
+        if (!base) return current;
         return {
           ...base,
           councilAverage: normalized.councilAverage ?? base?.councilAverage ?? null,
@@ -1137,11 +1590,31 @@ export default function Eb() {
       const councilAvg = normalized.councilAverage;
       toast.success(
         normalized.message
-        || `Đã gửi điểm Hội đồng${classificationLabel ? ` · ${classificationLabel}` : ""}${councilAvg != null ? ` · ĐTB ${Number(councilAvg).toFixed(1)}` : ""}.`,
+        || `Đã gửi điểm Hội đồng · ${evaluationResult}${classificationLabel ? ` · ${classificationLabel}` : ""}${councilAvg != null ? ` · ĐTB ${Number(councilAvg).toFixed(1)}` : ""}.`,
       );
+      if (evaluationResult === "approved") {
+        toast.message(
+          "Tiếp theo: Confirm-publish để mở debut gate. Series chưa published ngay — job sẽ publish khi tới lịch.",
+        );
+      }
       void loadPending({ silent: true });
       refresh();
     } catch (err) {
+      const gate = getEbDebutGateLockFromError(err);
+      if (gate) {
+        setDebutGateLock(gate);
+        toast.error(gate.message);
+        return;
+      }
+      const apiSafety = getEbAgeSafetyFailFromError(err);
+      if (apiSafety) {
+        setAgeSafety(mapAgeSafetyResponse({ age_safety: apiSafety }));
+        toast.error(
+          err?.response?.data?.message
+          || "AGE_SAFETY_FAIL — nội dung vượt mức cho phép theo age rating.",
+        );
+        return;
+      }
       toast.error(getApiErrorMessage(err, "Không gửi được điểm đánh giá."));
     } finally {
       setSubmitting(false);
@@ -1158,9 +1631,10 @@ export default function Eb() {
       return;
     }
 
-    const nextErrors = Object.fromEntries(
-      scoreFields.map((field) => [field.key, validateScore(scores[field.key])]),
-    );
+    const nextErrors = Object.fromEntries([
+      ...coreScoreKeys.map((key) => [key, validateScore(scores[key])]),
+      ...extensionKeys.map((key) => [key, validateScore(extensionScores[key])]),
+    ]);
     setScoreErrors((current) => ({ ...current, ...nextErrors }));
     const hasInvalid = Object.values(nextErrors).some(Boolean);
     if (hasInvalid) {
@@ -1168,13 +1642,22 @@ export default function Eb() {
       return;
     }
 
-    const criterionDetails = scoreFields.map((field) => ({
+    const criterionDetails = selectedRubric.coreCriteria.map((field) => ({
       key: field.key,
       label: field.label,
       hint: field.hint,
       score: clampScore(scores[field.key]),
       note: criterionNotes[field.key] || "",
     }));
+    const extensionDetails = hasExtension
+      ? selectedRubric.extensionCriteria.map((field) => ({
+          key: field.key,
+          label: field.label,
+          hint: field.hint,
+          score: clampScore(extensionScores[field.key]),
+          note: "",
+        }))
+      : [];
     const summaryNotes = criterionDetails
       .filter((criterion) => criterion.note.trim())
       .map((criterion) => `${criterion.label}: ${criterion.note.trim()}`);
@@ -1183,12 +1666,16 @@ export default function Eb() {
       scores: Object.fromEntries(
         criterionDetails.map((criterion) => [criterion.key, criterion.score]),
       ),
+      extensionScores: Object.fromEntries(
+        extensionDetails.map((criterion) => [criterion.key, criterion.score]),
+      ),
       criterionNotes: { ...criterionNotes },
       overallComment,
       notes: memberNotes,
       average: Number(average.toFixed(1)),
       assessedAt: new Date().toISOString(),
       enteredBy: user?.name ?? "Đại diện EB",
+      rubricId: selectedRubric.id,
     });
 
     const updatedRecord = readCouncilSeriesScores(councilKey);
@@ -1239,8 +1726,11 @@ export default function Eb() {
 
     refresh();
     toast.success(
-      `Đã lưu điểm ${activeMember?.name ?? "thành viên"} · ĐTB HĐ ${aggregate.councilAverage.toFixed(1)} (${aggregate.scoredCount}/${councilRoster.length || 0})`,
+      `Đã lưu nháp ${activeMember?.name ?? "thành viên"} (${aggregate.scoredCount}/${councilRoster.length || 0}). ĐTB chính thức lấy từ BE khi Preview/Nộp.`,
     );
+    if (aggregate.scoredCount >= rosterCount && rosterCount >= EB_COUNCIL_MIN_FOR_PUBLISH) {
+      void runPreviewCouncilAverage({ silent: true });
+    }
   }
 
   return (
@@ -1262,8 +1752,11 @@ export default function Eb() {
               />
             ))}
           </div>
-          <div className="eb-hero-slides__veil" aria-hidden />
-          <div className="page-container relative py-10 md:py-14">
+          <div
+            className="pointer-events-none absolute inset-0 z-[1] bg-gradient-to-r from-black/75 via-black/40 to-transparent"
+            aria-hidden
+          />
+          <div className="page-container relative z-[2] px-8 pt-10 pb-12">
             <div className="max-w-2xl space-y-3">
               <Badge
                 variant="secondary"
@@ -1274,7 +1767,7 @@ export default function Eb() {
               <h1 className="text-3xl font-bold tracking-tight md:text-4xl">
                 {`Xin chào${user?.name ? `, ${user.name}` : ""}`}
               </h1>
-              <p className="leading-relaxed text-zinc-300">
+              <p className="leading-relaxed text-zinc-200">
                 Chọn series trong hàng chờ để xem nội dung và chấm điểm.
               </p>
             </div>
@@ -1282,7 +1775,7 @@ export default function Eb() {
         </section>
       ) : null}
 
-      <main className={cn("page-container flex-1 space-y-8 py-8", isChapterDetail && "pb-36")}>
+      <main className={cn("page-container flex-1 space-y-8 py-8", isChapterDetail && "pb-28")}>
         {isChapterDetail ? (
           <>
             <header className="flex flex-wrap items-center gap-3 border-b border-border/60 pb-4">
@@ -1325,8 +1818,8 @@ export default function Eb() {
                 </CardContent>
               </Card>
             ) : (
-        <section className="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(300px,0.85fr)] xl:items-start">
-          <Card className="shadow-sm">
+        <section className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[1fr_420px]">
+          <Card className="border-gray-100 shadow-sm">
             <CardHeader className="space-y-1 pb-3">
               <CardTitle>Nhập điểm (tài khoản đại diện)</CardTitle>
               <CardDescription>
@@ -1413,6 +1906,204 @@ export default function Eb() {
               </div>
 
               <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-gray-900">
+                    Rubric chấm điểm
+                  </h3>
+                  {rubricOverrideId ? (
+                    <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-[11px] font-medium text-amber-800 ring-1 ring-amber-100">
+                      Đã chọn thủ công
+                    </span>
+                  ) : (
+                    <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-emerald-100">
+                      Gợi ý tự động
+                    </span>
+                  )}
+                </div>
+
+                <div className="space-y-3 rounded-2xl border border-gray-100 bg-white p-4 shadow-2xs">
+                  <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+                    <div>
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">
+                        Thể loại
+                      </p>
+                      <p className="mt-0.5 font-medium text-gray-900">
+                        {(seriesContext?.genre ?? activeChapter?.genre ?? [])[0]
+                          || (selectedRubric?.sourceGenre
+                            && !String(selectedRubric.sourceGenre).startsWith("__")
+                            ? selectedRubric.sourceGenre
+                            : null)
+                          || (selectedRubric?.genreFamily
+                            && !String(selectedRubric.genreFamily).startsWith("__")
+                            ? selectedRubric.genreFamily
+                            : null)
+                          || "Chưa xác định"}
+                        {(seriesContext?.genre ?? []).length > 1
+                          ? ` (+${seriesContext.genre.length - 1})`
+                          : ""}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">
+                        Độ tuổi series
+                      </p>
+                      <p className="mt-0.5 font-medium text-gray-900">
+                        {seriesContext?.ageRating
+                          ?? selectedRubric?.ageRating
+                          ?? "All ages"}
+                      </p>
+                    </div>
+                    {hasExtension ? (
+                      <div>
+                        <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">
+                          Mở rộng
+                        </p>
+                        <p className="mt-0.5 font-medium text-gray-900">
+                          Có tiêu chí theo thể loại
+                        </p>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {rubricSuggestMeta.isFallback || rubricSuggestMeta.reason ? (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50/90 px-3.5 py-2.5 text-xs text-amber-900">
+                      <p className="font-semibold">Cần chọn rubric phù hợp</p>
+                      <p className="mt-0.5 leading-relaxed text-amber-800/90">
+                        {rubricSuggestMeta.reason
+                          || "Không khớp được rubric từ thể loại/độ tuổi — đang dùng mặc định."}
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {rubricSuggestMeta.alternatives?.length > 0 ? (
+                    <div className="space-y-1.5 border-t border-gray-100 pt-3">
+                      <Label htmlFor="eb-rubric-alt" className="text-xs text-gray-600">
+                        Đổi rubric (tuỳ chọn)
+                      </Label>
+                      <Select
+                        value={rubricOverrideId ?? "__auto__"}
+                        onValueChange={(value) => {
+                          if (value === "__auto__") {
+                            setRubricOverrideId(null);
+                            if (suggestedRubricId) setSelectedRubricId(suggestedRubricId);
+                          } else {
+                            setRubricOverrideId(value);
+                            setSelectedRubricId(value);
+                          }
+                          setScoresSubmitted(false);
+                        }}
+                      >
+                        <SelectTrigger
+                          id="eb-rubric-alt"
+                          className="h-9 rounded-xl border-gray-200 bg-white text-sm shadow-none"
+                        >
+                          <SelectValue placeholder="Dùng gợi ý hệ thống" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__auto__">
+                            Dùng gợi ý hệ thống
+                            {suggestedRubricId
+                              ? ` · ${
+                                rubrics.find((r) => r.id === suggestedRubricId)?.ageRating
+                                || ""
+                              }`
+                              : ""}
+                          </SelectItem>
+                          {rubricSuggestMeta.alternatives.map((alt) => (
+                            <SelectItem key={alt.id} value={alt.id}>
+                              {(alt.genreFamily
+                                && !String(alt.genreFamily).startsWith("__")
+                                ? alt.genreFamily
+                                : alt.name)
+                                || "Rubric"}
+                              {alt.ageRating ? ` · ${alt.ageRating}` : ""}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="space-y-3 rounded-2xl border border-gray-100 bg-white p-4 shadow-2xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h4 className="text-sm font-semibold text-gray-900">Mức nội dung</h4>
+                      <p className="text-[11px] text-gray-500">
+                        Chọn mức 0–3 cho từng hạng mục (đối chiếu độ tuổi series).
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 border-gray-200 text-xs shadow-none"
+                      disabled={ageSafetyChecking}
+                      onClick={() => void runAgeSafetyCheck()}
+                    >
+                      {ageSafetyChecking ? "Đang kiểm…" : "Kiểm tra an toàn"}
+                    </Button>
+                  </div>
+                  <div className="space-y-3">
+                    {EB_CONTENT_LEVEL_FIELDS.map((field) => (
+                      <div key={field.key} className="space-y-1">
+                        <div className="flex items-center justify-between gap-2 text-xs">
+                          <Label htmlFor={`eb-level-${field.key}`}>
+                            {field.label}
+                          </Label>
+                          <span className="tabular-nums text-muted-foreground">
+                            {EB_CONTENT_LEVEL_LABELS.find(
+                              (l) => l.value === contentLevels[field.key],
+                            )?.label
+                              ?? contentLevels[field.key]}
+                          </span>
+                        </div>
+                        <input
+                          id={`eb-level-${field.key}`}
+                          type="range"
+                          min={0}
+                          max={EB_CONTENT_LEVEL_MAX}
+                          step={1}
+                          value={contentLevels[field.key] ?? 0}
+                          className="eb-score-slider h-1.5 w-full cursor-pointer rounded-lg bg-gray-200 accent-emerald-600"
+                          onChange={(event) =>
+                            updateContentLevel(field.key, event.target.value)
+                          }
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  {ageSafety ? (
+                    <div
+                      className={cn(
+                        "rounded-lg border px-3 py-2 text-xs",
+                        ageSafety.passed
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200"
+                          : "border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200",
+                      )}
+                    >
+                      {ageSafety.passed ? (
+                        <p>An toàn nội dung: đạt{ageSafety.severity ? ` · ${ageSafety.severity}` : ""}.</p>
+                      ) : (
+                        <div className="space-y-1">
+                          <p className="font-semibold">
+                            An toàn nội dung: không đạt
+                            {ageSafety.severity ? ` (${ageSafety.severity})` : ""}
+                          </p>
+                          {ageSafety.violations?.map((v, index) => (
+                            <p key={`${v.field}-${index}`}>
+                              {v.message
+                                || `${v.field}: mức ${v.level} vượt tối đa ${v.maxAllowed}`}
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="space-y-3">
                 <h3 className="text-sm font-semibold text-foreground">
                   Điểm các thành viên Hội đồng
                 </h3>
@@ -1443,10 +2134,16 @@ export default function Eb() {
                     >
                       {personalAvgDisplay.text}
                     </strong>
+                    {localWeightedPreview != null ? (
+                      <>
+                        {" "}
+                        · Ước tính local ~{localWeightedPreview.toFixed(2)}
+                      </>
+                    ) : null}
                   </p>
                 </div>
                 <div className="space-y-2">
-                  {scoreFields.map((field) => (
+                  {(selectedRubric?.coreCriteria ?? []).map((field) => (
                     <CriterionScoreRow
                       key={field.key}
                       field={field}
@@ -1463,6 +2160,34 @@ export default function Eb() {
                   ))}
                 </div>
               </div>
+
+              {hasExtension ? (
+                <div className="space-y-2">
+                  <h3 className="text-sm font-semibold text-foreground">
+                    Tiêu chí mở rộng
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    Rubric này yêu cầu thêm điểm extension theo thể loại.
+                  </p>
+                  <div className="space-y-2">
+                    {selectedRubric.extensionCriteria.map((field) => (
+                      <CriterionScoreRow
+                        key={field.key}
+                        field={field}
+                        value={extensionScores[field.key]}
+                        error={scoreErrors[field.key]}
+                        note=""
+                        disabled={!activeMemberId}
+                        onScoreChange={(next) =>
+                          updateExtensionScore(field.key, next)
+                        }
+                        onScoreBlur={() => normalizeExtensionField(field.key)}
+                        onNoteChange={() => {}}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
 
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
@@ -1487,30 +2212,11 @@ export default function Eb() {
                 </div>
               </div>
 
-              <div className="overflow-hidden rounded-xl border border-border/80 bg-gradient-to-br from-muted/40 via-card to-amber-500/5 p-4 shadow-sm">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-amber-800 dark:text-amber-200">
-                      ĐTB Hội đồng
-                    </p>
-                    <div className="mt-1.5 flex items-end gap-2">
-                      <span
-                        className={cn(
-                          "text-4xl font-bold tracking-tight tabular-nums",
-                          councilAggregate.scoredCount > 0
-                            ? "text-foreground"
-                            : "text-muted-foreground/50",
-                        )}
-                      >
-                        {councilAggregate.scoredCount > 0
-                          ? councilAggregate.councilAverage.toFixed(1)
-                          : "—"}
-                      </span>
-                      <span className="mb-1 text-sm text-muted-foreground">
-                        / {SCORE_MAX}.0
-                      </span>
-                    </div>
-                  </div>
+              <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+                <div className="mb-4 flex items-center justify-between gap-3 border-b border-gray-100 pb-3">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-700">
+                    ĐTB Hội đồng
+                  </p>
                   <Badge
                     variant="outline"
                     className={cn(
@@ -1521,41 +2227,171 @@ export default function Eb() {
                     {councilClassification.label}
                   </Badge>
                 </div>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  {councilAggregate.scoredCount}/{councilRoster.length || 0} thành
-                  viên đã chấm
-                  {activeMember ? (
-                    <>
-                      {" "}
-                      · Đang nhập cho{" "}
-                      <strong className="text-foreground">
-                        {activeMember.name}
-                      </strong>{" "}
-                      (ĐTB {personalAvgDisplay.text})
-                    </>
-                  ) : null}
-                </p>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  {councilClassification.note}
-                </p>
 
-                <div className="mt-4 space-y-2">
-                  <Label htmlFor="eb-evaluation-notes">
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                  <div>
+                    <div className="flex items-end gap-2">
+                      <span
+                        className={cn(
+                          "text-3xl font-extrabold tracking-tight tabular-nums",
+                          (previewCouncilAvg != null || councilAggregate.scoredCount > 0)
+                            ? "text-gray-900"
+                            : "text-gray-300",
+                        )}
+                      >
+                        {previewCouncilAvg != null
+                          ? Number(previewCouncilAvg).toFixed(2)
+                          : (councilAggregate.scoredCount > 0
+                            ? councilAggregate.councilAverage.toFixed(1)
+                            : "—")}
+                      </span>
+                      <span className="mb-1 text-sm font-medium text-gray-400">
+                        / {SCORE_MAX}.0
+                      </span>
+                    </div>
+                    <p className="mt-1.5 text-xs text-gray-500">
+                      Đã lưu nháp{" "}
+                      <span className="font-medium text-gray-700">
+                        {councilAggregate.scoredCount}/{councilRoster.length || 0}
+                      </span>
+                      {" "}thành viên
+                      {activeMember ? (
+                        <>
+                          {" "}
+                          · đang nhập:{" "}
+                          <span className="font-medium text-gray-700">
+                            {activeMember.name}
+                          </span>
+                        </>
+                      ) : null}
+                    </p>
+                    {councilClassification.code && councilClassification.note ? (
+                      <p className="mt-1 text-[11px] text-gray-400">
+                        {councilClassification.note}
+                      </p>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    disabled={previewLoading || !canSubmitScores}
+                    onClick={() => void runPreviewCouncilAverage()}
+                    className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-2xs transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {previewLoading ? "Đang tính…" : "Cập nhật ĐTB"}
+                  </button>
+                </div>
+
+                <div className="mt-5 space-y-4 rounded-xl border border-gray-100 bg-gray-50/50 p-4">
+                  <h4 className="text-sm font-semibold text-gray-900">
+                    {isFirstReview ? "Quyết định đánh giá" : "Quyết định nhanh"}
+                  </h4>
+
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="eb-evaluation-result" className="text-xs text-gray-600">
+                        Kết quả
+                      </Label>
+                      <Select
+                        value={evaluationResult}
+                        onValueChange={setEvaluationResult}
+                      >
+                        <SelectTrigger
+                          id="eb-evaluation-result"
+                          className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm shadow-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                        >
+                          <SelectValue placeholder="Chọn kết quả" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {EB_EVALUATION_RESULTS.map((item) => (
+                            <SelectItem key={item.value} value={item.value}>
+                              {item.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {evaluationResult === "approved" ? (
+                      <div className="space-y-1.5">
+                        <Label htmlFor="eb-eval-schedule" className="text-xs text-gray-600">
+                          Tần suất phát hành
+                        </Label>
+                        <Select
+                          value={publicationSchedule}
+                          onValueChange={setPublicationSchedule}
+                        >
+                          <SelectTrigger
+                            id="eb-eval-schedule"
+                            className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm shadow-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                          >
+                            <SelectValue placeholder="Chọn lịch" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {EB_PUBLICATION_SCHEDULES.map((item) => (
+                              <SelectItem key={item.value} value={item.value}>
+                                {item.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {!isFirstReview ? (
+                    <div className="space-y-1.5">
+                      <Label htmlFor="eb-quick-notes" className="text-xs text-gray-600">
+                        Ghi chú quyết định
+                      </Label>
+                      <Textarea
+                        id="eb-quick-notes"
+                        value={quickNotes}
+                        onChange={(event) => setQuickNotes(event.target.value)}
+                        placeholder="Lý do ngắn gọn…"
+                        className="min-h-16 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm shadow-none focus-visible:border-emerald-500 focus-visible:ring-1 focus-visible:ring-emerald-500"
+                      />
+                    </div>
+                  ) : null}
+                </div>
+
+                {debutGateLock ? (
+                  <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+                    <p className="font-semibold">Đang khóa debut</p>
+                    <p className="mt-1">{debutGateLock.message}</p>
+                    {activeSeriesId ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="mt-2"
+                        onClick={() =>
+                          navigate(
+                            `/eb/chapter/${encodeURIComponent(activeChapter?.id ?? "")}/publish`,
+                          )
+                        }
+                        disabled={!activeChapter?.id}
+                      >
+                        Tới trang xác nhận lịch
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                <div className="mt-4 space-y-1.5">
+                  <Label htmlFor="eb-evaluation-notes" className="text-xs text-gray-600">
                     Ghi chú đánh giá (tuỳ chọn)
                   </Label>
                   <Textarea
                     id="eb-evaluation-notes"
                     value={evaluationNotes}
                     onChange={(event) => setEvaluationNotes(event.target.value)}
-                    placeholder="Ghi chú gửi kèm khi chấm điểm series…"
-                    className="min-h-16"
+                    placeholder="Ghi chú kèm theo khi nộp điểm…"
+                    className="min-h-16 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm shadow-none focus-visible:border-emerald-500 focus-visible:ring-1 focus-visible:ring-emerald-500"
                   />
                 </div>
 
                 {lastEvaluation?.council_average != null ? (
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Kết quả vừa gửi: ĐTB{" "}
-                    <strong className="text-foreground">
+                  <p className="mt-2 text-[11px] text-gray-400">
+                    Đã nộp · ĐTB{" "}
+                    <strong className="font-medium text-gray-700">
                       {Number(lastEvaluation.council_average).toFixed(1)}
                     </strong>
                     {formatEbClassification(lastEvaluation)
@@ -1566,35 +2402,32 @@ export default function Eb() {
 
                 {activeChapter?.id ? (
                   <div className="mt-4 space-y-2">
-                    <Button
+                    <button
                       type="button"
-                      className={cn(
-                        "w-full gap-2",
-                        canConfirmPublish
-                          ? "bg-emerald-600 text-white hover:bg-emerald-700"
-                          : undefined,
-                      )}
-                      variant={canConfirmPublish ? "default" : "outline"}
                       onClick={handleConfirmPublishClick}
                       title={
                         canConfirmPublish
                           ? undefined
                           : "Cần lưu nháp đủ tất cả thành viên và nộp kết quả chấm trước"
                       }
+                      className={cn(
+                        "flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-gray-900 py-2.5 text-xs font-medium text-white shadow-xs transition-colors hover:bg-black",
+                        !canConfirmPublish && "opacity-70",
+                      )}
                     >
-                      <Calendar className="size-4" />
+                      <Calendar className="size-3.5" />
                       Xác nhận lịch phát hành
-                      <ArrowRight className="size-4" />
-                    </Button>
+                      <ArrowRight className="size-3.5" />
+                    </button>
                     {!canConfirmPublish ? (
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-[11px] text-gray-400">
                         {!allMembersDraftSaved || rosterCount < EB_COUNCIL_MIN_FOR_PUBLISH
-                          ? `Bước 1: Lưu nháp đủ tất cả thành viên hội đồng (hiện ${savedScoredCount}/${rosterCount || 0}${
+                          ? `Cần lưu nháp đủ hội đồng (${savedScoredCount}/${rosterCount || 0}${
                             unscoredMemberNames.length
-                              ? ` · chưa lưu: ${unscoredMemberNames.join(", ")}`
+                              ? ` · thiếu: ${unscoredMemberNames.join(", ")}`
                               : ""
                           }).`
-                          : "Bước 2: Bấm Nộp kết quả chấm trước khi xác nhận lịch phát hành."}
+                          : "Cần nộp kết quả chấm trước khi xác nhận lịch."}
                       </p>
                     ) : null}
                   </div>
@@ -1603,15 +2436,15 @@ export default function Eb() {
             </CardContent>
           </Card>
 
-          <div className="xl:sticky xl:top-4 xl:self-start">
-          <Card className="overflow-hidden shadow-sm">
-            <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-3">
+          <aside className="sticky top-20 flex max-h-[calc(100vh-120px)] flex-col self-start">
+          <Card className="flex min-h-0 flex-1 flex-col overflow-hidden border-gray-100 shadow-sm">
+            <CardHeader className="flex shrink-0 flex-row items-center justify-between gap-2 space-y-0 border-b border-gray-100 pb-3">
               <CardTitle className="text-base">Xem trước chapter</CardTitle>
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
-                className="h-8 gap-1.5"
+                className="h-8 gap-1.5 border-gray-200"
                 disabled={!previewImageSrc}
                 onClick={() => setZoomOpen(true)}
               >
@@ -1619,7 +2452,7 @@ export default function Eb() {
                 Phóng to
               </Button>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="scrollbar-hide min-h-0 flex-1 space-y-4 overflow-y-auto pt-4">
               <p className="text-sm font-medium text-foreground">
                 {activeChapter
                   ? `${activeChapter.seriesName}${activeChapter.title ? ` — ${activeChapter.title}` : ""}`
@@ -1631,7 +2464,7 @@ export default function Eb() {
                 <div className="space-y-3">
                   <button
                     type="button"
-                    className="group relative block w-full overflow-hidden rounded-2xl border bg-muted/30 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="group relative block w-full overflow-hidden rounded-2xl border border-gray-100 bg-muted/30 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     onClick={() => setZoomOpen(true)}
                     aria-label="Phóng to trang truyện"
                   >
@@ -1644,7 +2477,7 @@ export default function Eb() {
                             ? `${activeChapter.seriesName} Ch.${activeChapter.chapterNumber}`
                             : "Ảnh chapter đang chấm"
                       }
-                      className="max-h-[min(70vh,720px)] w-full object-contain"
+                      className="w-full object-contain"
                     />
                     <span className="pointer-events-none absolute right-3 top-3 rounded-md bg-black/55 px-2 py-1 text-[10px] font-medium text-white opacity-0 transition group-hover:opacity-100">
                       Bấm để phóng to
@@ -1705,7 +2538,7 @@ export default function Eb() {
                 </div>
               )}
               {activeChapter?.seriesId ? (
-                <Button variant="outline" size="sm" asChild>
+                <Button variant="outline" size="sm" asChild className="border-gray-200">
                   <Link to={`/eb/series/${encodeURIComponent(activeChapter.seriesId)}`}>
                     Xem toàn bộ series & chapters
                   </Link>
@@ -1713,21 +2546,26 @@ export default function Eb() {
               ) : null}
             </CardContent>
           </Card>
-          </div>
+          </aside>
         </section>
             )}
           </>
         ) : null}
 
         {!isChapterDetail ? (
-        <section className="space-y-4">
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <h2 className="flex items-center gap-2 text-xl font-semibold">
+        <section className="space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="flex flex-wrap items-center gap-2.5 text-xl font-semibold tracking-tight text-gray-900">
                 <Gavel className="size-5 text-amber-600" />
                 Hàng chờ duyệt
+                {!apiLoading && queueItems.length > 0 ? (
+                  <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-amber-50 px-2 text-xs font-semibold text-amber-700 ring-1 ring-amber-100">
+                    {queueItems.length}
+                  </span>
+                ) : null}
               </h2>
-              <p className="text-sm text-muted-foreground">
+              <p className="mt-0.5 text-sm text-gray-500">
                 Đồng bộ từ{" "}
                 <Link
                   to="/mangaka"
@@ -1745,217 +2583,194 @@ export default function Eb() {
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant="outline" size="sm" asChild>
-                <Link to="/eb/history">
-                  <History className="size-4" />
-                  Lịch sử chấm
-                </Link>
-              </Button>
-              <Button variant="outline" size="sm" asChild>
-                <Link to="/eb/schedule">
-                  <Calendar className="size-4" />
-                  Lịch publish
-                </Link>
-              </Button>
+              <Link
+                to="/eb/history"
+                className="flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-xs font-medium text-gray-700 shadow-2xs transition-colors hover:bg-gray-50"
+              >
+                <History className="size-3.5" />
+                Lịch sử chấm
+              </Link>
+              <Link
+                to="/eb/schedule"
+                className="flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-xs font-medium text-gray-700 shadow-2xs transition-colors hover:bg-gray-50"
+              >
+                <Calendar className="size-3.5" />
+                Lịch publish
+              </Link>
             </div>
           </div>
 
           {apiLoading ? (
-            <Card>
-              <CardContent className="py-16 text-center text-muted-foreground">
-                Đang tải hàng chờ EB...
-              </CardContent>
-            </Card>
+            <div className="rounded-2xl border border-gray-100 bg-white py-16 text-center text-sm text-gray-500 shadow-sm">
+              Đang tải hàng chờ EB...
+            </div>
           ) : queueItems.length === 0 ? (
-            <Card>
-              <CardContent className="py-16 text-center text-muted-foreground">
-                Không có series nào đang chờ EB duyệt.
-              </CardContent>
-            </Card>
+            <div className="rounded-2xl border border-gray-100 bg-white py-16 text-center text-sm text-gray-500 shadow-sm">
+              Không có series nào đang chờ EB duyệt.
+            </div>
           ) : (
-            <Card className="flex flex-col gap-0 overflow-hidden py-0 shadow-sm">
-              <CardHeader className="shrink-0 border-b bg-muted/20 px-5 py-4 sm:px-6">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0 space-y-1.5">
-                    <CardTitle className="flex flex-wrap items-center gap-2.5 text-xl tracking-tight sm:text-2xl">
-                      {selectedMangakaGroup ? (
-                        <span className="group/avatar inline-flex shrink-0">
-                          <Avatar
-                            className={cn(
-                              "size-9 rounded-full shadow-sm shadow-sky-900/20 ring-1 ring-border",
-                              "transition-all duration-200 ease-out",
-                              "group-hover/avatar:scale-110 group-hover/avatar:ring-2 group-hover/avatar:ring-sky-400",
-                              "group-hover/avatar:shadow-md group-hover/avatar:shadow-sky-500/25",
-                            )}
-                          >
-                            {selectedMangakaGroup.avatarUrl ? (
-                              <AvatarImage
-                                src={selectedMangakaGroup.avatarUrl}
-                                alt=""
-                                className="transition-transform duration-300 group-hover/avatar:scale-110"
-                              />
-                            ) : null}
-                            <AvatarFallback className="rounded-full bg-sky-600 text-sm font-bold text-white">
-                              {(selectedMangakaGroup.name.length >= 2
-                                ? selectedMangakaGroup.name
-                                : `${selectedMangakaGroup.name}●`
-                              )
-                                .slice(0, 2)
-                                .toUpperCase()}
-                            </AvatarFallback>
-                          </Avatar>
-                        </span>
-                      ) : (
-                        <Gavel className="size-5 text-amber-500" />
-                      )}
-                      <span className="truncate">
-                        {selectedMangakaGroup
-                          ? selectedMangakaGroup.name
-                          : "Chọn Mangaka"}
-                      </span>
-                      <Badge
-                        className={cn(
-                          "h-6 min-w-6 justify-center px-2 text-xs font-semibold",
-                          selectedMangakaGroup
-                            ? "bg-amber-600 text-white hover:bg-amber-600"
-                            : "bg-secondary text-secondary-foreground hover:bg-secondary",
-                        )}
-                      >
-                        {selectedMangakaGroup
-                          ? selectedMangakaGroup.count
-                          : queueItems.length}
-                      </Badge>
-                    </CardTitle>
-                    {!selectedMangakaGroup ? (
-                      <CardDescription>
-                        Chọn Mangaka để xem series đang chờ EB duyệt.
-                      </CardDescription>
-                    ) : (
-                      <CardDescription>
-                        {selectedMangakaGroup.count} series chờ duyệt từ Mangaka
-                        này.
-                      </CardDescription>
-                    )}
-                  </div>
-                  {selectedMangakaGroup ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-9 shrink-0 gap-1.5 border-sky-200 bg-background shadow-sm hover:bg-sky-50 dark:border-sky-500/30 dark:hover:bg-sky-500/10"
-                      onClick={() => setSelectedMangakaKey(null)}
-                    >
-                      <ArrowLeft className="size-4" />
-                      Tất cả Mangaka
-                    </Button>
-                  ) : null}
-                </div>
-              </CardHeader>
-              <CardContent className="scrollbar-hide max-h-[min(640px,calc(100vh-260px))] space-y-2.5 overflow-y-auto px-4 py-4 sm:px-5">
-                {selectedMangakaGroup ? (
-                  selectedMangakaGroup.items.map((series) => (
-                    <Card
-                      key={series.id ?? series.seriesId}
-                      className="transition-shadow hover:shadow-md"
-                    >
-                      <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="flex min-w-0 flex-1 gap-4">
-                          {series.coverUrl ? (
-                            <img
-                              src={series.coverUrl}
+            selectedMangakaGroup ? (
+              <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+                <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <span className="group/avatar inline-flex shrink-0">
+                        <Avatar
+                          className={cn(
+                            "size-9 rounded-full shadow-sm shadow-sky-900/20 ring-1 ring-border",
+                            "transition-all duration-200 ease-out",
+                            "group-hover/avatar:scale-110 group-hover/avatar:ring-2 group-hover/avatar:ring-sky-400",
+                            "group-hover/avatar:shadow-md group-hover/avatar:shadow-sky-500/25",
+                          )}
+                        >
+                          {selectedMangakaGroup.avatarUrl ? (
+                            <AvatarImage
+                              src={selectedMangakaGroup.avatarUrl}
                               alt=""
-                              className="size-16 shrink-0 rounded-lg border object-cover"
+                              className="transition-transform duration-300 group-hover/avatar:scale-110"
                             />
                           ) : null}
-                          <div className="min-w-0 space-y-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <h3 className="font-semibold">
-                                {series.name ?? series.seriesName}
-                              </h3>
-                              <Badge variant="secondary">
-                                {series.status ?? "pending_EB"}
-                              </Badge>
-                              {series.classification ? (
-                                <Badge variant="outline">
-                                  {series.classification}
-                                </Badge>
-                              ) : null}
-                            </div>
-                            <p className="text-sm text-muted-foreground">
-                              {[
-                                series.firstChapter
-                                  ? `Ch.${series.firstChapter.chapterNumber}${
-                                      series.firstChapter.title
-                                        ? ` — ${series.firstChapter.title}`
-                                        : ""
-                                    }`
-                                  : null,
-                                series.classificationText,
-                              ]
-                                .filter(Boolean)
-                                .join(" · ")}
-                            </p>
-                            {series.synopsis ? (
-                              <p className="line-clamp-2 text-xs text-muted-foreground">
-                                {series.synopsis}
-                              </p>
+                          <AvatarFallback className="rounded-full bg-sky-600 text-sm font-bold text-white">
+                            {(selectedMangakaGroup.name.length >= 2
+                              ? selectedMangakaGroup.name
+                              : `${selectedMangakaGroup.name}●`
+                            )
+                              .slice(0, 2)
+                              .toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                      </span>
+                      <h3 className="truncate text-lg font-semibold tracking-tight text-gray-900">
+                        {selectedMangakaGroup.name}
+                      </h3>
+                      <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-amber-600 px-2 text-xs font-semibold text-white">
+                        {selectedMangakaGroup.count}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-gray-500">
+                      {selectedMangakaGroup.count} series chờ duyệt từ Mangaka này.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedMangakaKey(null)}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-100"
+                  >
+                    <ArrowLeft className="size-3.5" />
+                    Tất cả Mangaka
+                  </button>
+                </div>
+
+                <div className="scrollbar-hide max-h-[min(640px,calc(100vh-260px))] overflow-y-auto">
+                  {selectedMangakaGroup.items.map((series) => (
+                    <div
+                      key={series.id ?? series.seriesId}
+                      className="mb-3 flex flex-col items-start justify-between gap-4 rounded-xl border border-gray-100 bg-white p-4 transition-all last:mb-0 hover:border-gray-200 hover:shadow-sm sm:flex-row sm:items-center"
+                    >
+                      <div className="flex min-w-0 flex-1 gap-4">
+                        {series.coverUrl ? (
+                          <img
+                            src={series.coverUrl}
+                            alt=""
+                            className="h-20 w-16 shrink-0 rounded-lg object-cover shadow-2xs"
+                          />
+                        ) : (
+                          <div className="flex h-20 w-16 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-xs font-semibold text-gray-400 shadow-2xs">
+                            N/A
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <div className="mb-0.5 flex flex-wrap items-center gap-2">
+                            <h3 className="text-base font-semibold text-gray-900">
+                              {series.name ?? series.seriesName}
+                            </h3>
+                            <span className="rounded-md bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">
+                              {series.status ?? "pending_EB"}
+                            </span>
+                            {series.classification ? (
+                              <span className="rounded-md border border-gray-200 bg-white px-2 py-0.5 text-[11px] font-medium text-gray-500">
+                                {series.classification}
+                              </span>
                             ) : null}
                           </div>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            variant="outline"
-                            onClick={() =>
-                              openSeriesReview(series.seriesId ?? series.id)
-                            }
-                          >
-                            <BookOpen className="size-4" />
-                            Xem pages
-                          </Button>
-                          {series.firstChapter?.id ? (
-                            <Button
-                              className="bg-emerald-600 text-white hover:bg-emerald-700"
-                              onClick={() =>
-                                openChapterEvaluate(series.firstChapter.id)
-                              }
-                            >
-                              <CheckCircle2 className="size-4" />
-                              Chấm điểm
-                            </Button>
+                          <p className="text-xs font-normal text-gray-500">
+                            {[
+                              series.firstChapter
+                                ? `Ch.${series.firstChapter.chapterNumber}${
+                                    series.firstChapter.title
+                                      ? ` — ${series.firstChapter.title}`
+                                      : ""
+                                  }`
+                                : null,
+                              series.classificationText,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </p>
+                          {series.synopsis ? (
+                            <p className="mt-1 line-clamp-2 text-xs font-normal text-gray-500">
+                              {series.synopsis}
+                            </p>
                           ) : null}
                         </div>
-                      </CardContent>
-                    </Card>
-                  ))
-                ) : (
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-                    {queueByMangaka.map((group) => (
-                      <EbMangakaSelectCard
-                        key={group.key}
-                        group={group}
-                        onSelect={setSelectedMangakaKey}
-                      />
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            openSeriesReview(series.seriesId ?? series.id)
+                          }
+                          className="flex items-center gap-1.5 rounded-xl border border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-100"
+                        >
+                          <BookOpen className="size-3.5" />
+                          Xem pages
+                        </button>
+                        {series.firstChapter?.id ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openChapterEvaluate(series.firstChapter.id)
+                            }
+                            className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-medium text-white shadow-xs transition-colors hover:bg-emerald-700"
+                          >
+                            <CheckCircle2 className="size-3.5" />
+                            Chấm điểm
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+                <div className="grid grid-cols-1 gap-6 p-6 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+                  {queueByMangaka.map((group) => (
+                    <EbMangakaSelectCard
+                      key={group.key}
+                      group={group}
+                      onSelect={setSelectedMangakaKey}
+                    />
+                  ))}
+                </div>
+              </div>
+            )
           )}
         </section>
         ) : null}
       </main>
 
       {isChapterDetail ? (
-        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border/70 bg-background/85 shadow-[0_-12px_40px_rgba(15,23,42,0.08)] backdrop-blur-md supports-[backdrop-filter]:bg-background/70 dark:shadow-[0_-12px_40px_rgba(0,0,0,0.35)]">
-          <div className="page-container flex flex-wrap items-center justify-between gap-3 py-3.5 pb-[max(0.875rem,env(safe-area-inset-bottom))]">
-            <p className="text-xs text-muted-foreground sm:text-sm">
+        <div className="pointer-events-none fixed bottom-4 left-1/2 z-40 flex w-[min(100%-1.5rem,720px)] min-w-0 -translate-x-1/2 justify-center sm:min-w-[500px]">
+          <div className="pointer-events-auto flex w-full flex-wrap items-center justify-between gap-4 rounded-2xl border border-gray-200 bg-white/90 px-4 py-3 shadow-lg backdrop-blur-md sm:gap-6 sm:px-6">
+            <p className="text-xs text-gray-600 sm:text-sm">
               Điểm TB cá nhân:{" "}
               <strong
                 className={cn(
                   "tabular-nums",
                   personalAvgDisplay.muted
-                    ? "text-muted-foreground/70"
-                    : "text-foreground",
+                    ? "text-gray-400"
+                    : "text-gray-900",
                 )}
               >
                 {personalAvgDisplay.text}
@@ -1971,29 +2786,41 @@ export default function Eb() {
               <Button
                 type="button"
                 variant="outline"
-                className="bg-background"
+                className="border-gray-200 bg-white shadow-none"
                 onClick={() => void handleSaveAssessment()}
               >
                 Lưu nháp
               </Button>
               <Button
                 type="button"
-                disabled={submitting || !activeChapter?.id}
-                title={
-                  canSubmitScores
-                    ? undefined
-                    : "Cần lưu nháp đủ điểm tất cả thành viên hội đồng"
+                disabled={
+                  submitting
+                  || Boolean(debutGateLock)
+                  || (!isFirstReview
+                    ? !activeSeriesId
+                    : !activeChapter?.id)
                 }
-                className="bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                title={
+                  debutGateLock
+                    ? debutGateLock.message
+                    : (!isFirstReview
+                      ? "Gửi quick decision"
+                      : (canSubmitScores
+                        ? undefined
+                        : "Cần lưu nháp đủ điểm tất cả thành viên hội đồng (3–5)"))
+                }
+                className="bg-emerald-600 text-white shadow-xs hover:bg-emerald-700 disabled:opacity-50"
                 onClick={() => {
-                  if (!canSubmitScores) {
+                  if (isFirstReview && !canSubmitScores) {
                     warnMissingCouncilDrafts();
                     return;
                   }
                   void handleSubmitScores();
                 }}
               >
-                {submitting ? "Đang nộp…" : "Nộp kết quả chấm"}
+                {submitting
+                  ? "Đang nộp…"
+                  : (isFirstReview ? "Nộp kết quả chấm" : "Gửi quick decision")}
               </Button>
             </div>
           </div>

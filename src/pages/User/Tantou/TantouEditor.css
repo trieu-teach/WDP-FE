@@ -16,6 +16,43 @@
   background: #0f1620;
 }
 
+/* Hub landing: greeting + metrics sit on the dark banner */
+.ws-hero--tantou.te-hero-slideshow.te-hero-hub {
+  min-height: 0;
+  max-height: none;
+}
+
+.ws-hero--tantou.te-hero-slideshow.te-hero-hub > .page-container {
+  min-height: 0;
+  max-height: none;
+  display: block;
+  justify-content: flex-start;
+  padding-top: 2rem;
+  padding-bottom: 1.75rem;
+}
+
+.ws-hero--tantou.te-hero-slideshow.te-hero-hub .te-hero-slides__veil {
+  display: none;
+}
+
+/* Section pages (Chưa duyệt, Đã duyệt, …): compact readable hero */
+.ws-hero--tantou.te-hero-slideshow.te-hero-section {
+  min-height: 0;
+  max-height: none;
+}
+
+.ws-hero--tantou.te-hero-slideshow.te-hero-section > .page-container {
+  min-height: 0;
+  display: block;
+  justify-content: flex-start;
+  padding-top: 2rem;
+  padding-bottom: 2.5rem;
+}
+
+.ws-hero--tantou.te-hero-slideshow.te-hero-section .te-hero-slides__veil {
+  display: none;
+}
+
 .ws-hero--tantou.te-hero-slideshow > .page-container {
   display: flex;
   min-height: inherit;
@@ -60,14 +97,33 @@
   pointer-events: none;
 }
 
-.ws-hero--tantou.te-hero-slideshow h1,
-.ws-hero--tantou.te-hero-slideshow p {
+.ws-hero--tantou.te-hero-slideshow .te-hero-greeting h1,
+.ws-hero--tantou.te-hero-slideshow .te-hero-greeting p {
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55), 0 4px 18px rgba(0, 0, 0, 0.45);
+}
+
+/* Metric cards sit in the hero band — never inherit soft text-shadow */
+.ws-hero--tantou .te-metric-card,
+.ws-hero--tantou .te-metric-card * {
+  text-shadow: none !important;
+  filter: none;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 @media (max-width: 767px) {
   .ws-hero--tantou.te-hero-slideshow {
     min-height: 16rem;
+  }
+
+  .ws-hero--tantou.te-hero-slideshow.te-hero-hub {
+    min-height: 0;
+    max-height: none;
+  }
+
+  .ws-hero--tantou.te-hero-slideshow.te-hero-section {
+    min-height: 0;
+    max-height: none;
   }
 
   .te-hero-slides__veil {
@@ -89,7 +145,7 @@
   letter-spacing: 0.12em;
 }
 
-.ws-hero--tantou h1 {
+.ws-hero--tantou .te-hero-greeting h1 {
   text-shadow: 0 2px 24px rgba(0, 0, 0, 0.35);
 }
 
@@ -456,9 +512,9 @@
 
 .te-editor__workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 320px);
+  grid-template-columns: minmax(0, 2.2fr) minmax(200px, 28%);
   align-items: stretch;
-  min-height: 520px;
+  min-height: min(72vh, 720px);
 }
 
 .te-editor__stage {
@@ -477,6 +533,46 @@
 
 .te-board {
   margin-inline: auto;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
+}
+
+/* Fit manga page inside constrained viewport without breaking % annotation coords */
+.te-canvas-viewport .te-board.manga-page--canvas,
+.te-canvas-fit .te-board.manga-page--canvas {
+  width: min(100%, var(--manga-page-width));
+  max-width: 100%;
+  max-height: min(78vh, var(--manga-page-height));
+  height: auto;
+  aspect-ratio: var(--manga-page-ratio);
+}
+
+.te-canvas-viewport {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.55) transparent;
+}
+
+.te-canvas-viewport::-webkit-scrollbar {
+  width: 8px;
+}
+
+.te-canvas-viewport::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.55);
+  border-radius: 999px;
+}
+
+.te-canvas-viewport::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.te-canvas-viewport .manga-page__media,
+.te-canvas-fit .manga-page__media {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .te-board--view {
@@ -500,8 +596,8 @@
 .te-notes-panel--simple {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  padding: 18px;
+  gap: 12px;
+  padding: 12px;
   overflow-y: auto;
 }
 

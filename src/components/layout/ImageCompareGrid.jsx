@@ -40,6 +40,37 @@ function Lightbox({ open, onOpenChange, src, title }) {
   )
 }
 
+const FLOATING_BADGE =
+  'absolute left-3 top-3 rounded-full bg-black/60 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-white backdrop-blur-md'
+
+function ComparePane({ src, emptyLabel, badge, lightboxTitle, onOpen }) {
+  if (!src) {
+    return (
+      <div className="flex min-h-[min(52vh,560px)] items-center justify-center bg-muted/40 text-sm text-muted-foreground">
+        {emptyLabel}
+      </div>
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="group relative block w-full overflow-hidden bg-zinc-950/5"
+    >
+      <img
+        src={src}
+        alt={lightboxTitle}
+        className="mx-auto block max-h-[min(70vh,720px)] w-full object-contain transition-opacity group-hover:opacity-95"
+      />
+      <span className={FLOATING_BADGE}>{badge}</span>
+      <span className="absolute right-3 top-3 rounded-full bg-black/50 p-1.5 text-white opacity-0 backdrop-blur-md transition-opacity group-hover:opacity-100">
+        <Maximize2 className="size-3.5" />
+      </span>
+    </button>
+  )
+}
+
 export function ImageCompareGrid({ originals = [], results = [], className }) {
   const [mode, setMode] = useState('side') // 'side' | 'result' | 'original'
   const [lightbox, setLightbox] = useState(null)
@@ -83,64 +114,28 @@ export function ImageCompareGrid({ originals = [], results = [], className }) {
       <div
         key={i}
         className={cn(
-          'overflow-hidden rounded-lg border bg-muted',
-          mode === 'side' && 'grid grid-cols-1 gap-px sm:grid-cols-2',
+          'overflow-hidden rounded-xl bg-muted/30',
+          mode === 'side' && 'grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3',
         )}
       >
         {mode !== 'result' ? (
-          <div className="relative">
-            {p.original ? (
-              <button
-                type="button"
-                onClick={() => setLightbox({ src: p.original, title: `Trang ${i + 1} · Ảnh gốc` })}
-                className="group block w-full"
-              >
-                <img
-                  src={p.original}
-                  alt={`Trang ${i + 1} gốc`}
-                  className="block w-full transition-opacity group-hover:opacity-90"
-                />
-                <span className="absolute left-2 top-2 rounded-md bg-background/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-foreground shadow-sm backdrop-blur">
-                  Gốc
-                </span>
-                <span className="absolute right-2 top-2 rounded-md bg-background/80 p-1 text-foreground opacity-0 shadow-sm backdrop-blur transition-opacity group-hover:opacity-100">
-                  <Maximize2 className="size-3" />
-                </span>
-              </button>
-            ) : (
-              <div className="flex aspect-[3/4] items-center justify-center text-xs text-muted-foreground">
-                Không có ảnh gốc
-              </div>
-            )}
-          </div>
+          <ComparePane
+            src={p.original}
+            emptyLabel="Không có ảnh gốc"
+            badge="Gốc"
+            lightboxTitle={`Trang ${i + 1} · Ảnh gốc`}
+            onOpen={() => setLightbox({ src: p.original, title: `Trang ${i + 1} · Ảnh gốc` })}
+          />
         ) : null}
 
         {mode !== 'original' ? (
-          <div className="relative">
-            {p.result ? (
-              <button
-                type="button"
-                onClick={() => setLightbox({ src: p.result, title: `Trang ${i + 1} · Assistant` })}
-                className="group block w-full"
-              >
-                <img
-                  src={p.result}
-                  alt={`Trang ${i + 1} Assistant`}
-                  className="block w-full transition-opacity group-hover:opacity-90"
-                />
-                <span className="absolute left-2 top-2 rounded-md bg-primary/90 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary-foreground shadow-sm">
-                  Assistant
-                </span>
-                <span className="absolute right-2 top-2 rounded-md bg-background/80 p-1 text-foreground opacity-0 shadow-sm backdrop-blur transition-opacity group-hover:opacity-100">
-                  <Maximize2 className="size-3" />
-                </span>
-              </button>
-            ) : (
-              <div className="flex aspect-[3/4] items-center justify-center text-xs text-muted-foreground">
-                Assistant chưa nộp trang này
-              </div>
-            )}
-          </div>
+          <ComparePane
+            src={p.result}
+            emptyLabel="Assistant chưa nộp trang này"
+            badge="Assistant"
+            lightboxTitle={`Trang ${i + 1} · Assistant`}
+            onOpen={() => setLightbox({ src: p.result, title: `Trang ${i + 1} · Assistant` })}
+          />
         ) : null}
       </div>
     )
@@ -148,73 +143,75 @@ export function ImageCompareGrid({ originals = [], results = [], className }) {
 
   return (
     <div className={cn('space-y-3', className)}>
-      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border bg-muted/40 p-1 text-xs">
-        <button
-          type="button"
-          onClick={() => setMode('side')}
-          className={cn(
-            'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 font-medium transition-colors',
-            mode === 'side' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
-          )}
-        >
-          <Images className="size-3.5" />
-          So sánh ({len} trang)
-        </button>
-        <button
-          type="button"
-          onClick={() => setMode('result')}
-          className={cn(
-            'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 font-medium transition-colors',
-            mode === 'result' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
-          )}
-        >
-          <Eye className="size-3.5" />
-          Chỉ ảnh Assistant ({results.length})
-        </button>
-        <button
-          type="button"
-          onClick={() => setMode('original')}
-          className={cn(
-            'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 font-medium transition-colors',
-            mode === 'original' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
-          )}
-        >
-          <Eye className="size-3.5" />
-          Chỉ ảnh gốc ({originals.length})
-        </button>
-      </div>
-
-      {len > 1 ? (
-        <div className="flex items-center justify-center gap-3">
-          <Button
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-1 rounded-full bg-muted/50 p-1 text-xs">
+          <button
             type="button"
-            variant="outline"
-            size="icon-sm"
-            disabled={pageIndex <= 0}
-            aria-label="Trang trước"
-            onClick={() => setPageIndex((i) => Math.max(0, i - 1))}
+            onClick={() => setMode('side')}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 font-medium transition-colors',
+              mode === 'side' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+            )}
           >
-            <ChevronLeft className="size-4" />
-          </Button>
-          <span className="min-w-[5.5rem] text-center text-sm font-medium tabular-nums text-foreground">
-            {pageLabel}
-          </span>
-          <Button
+            <Images className="size-3.5" />
+            So sánh ({len})
+          </button>
+          <button
             type="button"
-            variant="outline"
-            size="icon-sm"
-            disabled={pageIndex >= len - 1}
-            aria-label="Trang sau"
-            onClick={() => setPageIndex((i) => Math.min(len - 1, i + 1))}
+            onClick={() => setMode('result')}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 font-medium transition-colors',
+              mode === 'result' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+            )}
           >
-            <ChevronRight className="size-4" />
-          </Button>
+            <Eye className="size-3.5" />
+            Assistant ({results.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode('original')}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 font-medium transition-colors',
+              mode === 'original' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            <Eye className="size-3.5" />
+            Gốc ({originals.length})
+          </button>
         </div>
-      ) : null}
 
-      <div className="space-y-2">
-        {renderPage(current, pageIndex)}
+        {len > 1 ? (
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              className="size-8 rounded-full"
+              disabled={pageIndex <= 0}
+              aria-label="Trang trước"
+              onClick={() => setPageIndex((i) => Math.max(0, i - 1))}
+            >
+              <ChevronLeft className="size-4" />
+            </Button>
+            <span className="min-w-[5.5rem] text-center text-sm font-medium tabular-nums text-foreground">
+              {pageLabel}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              className="size-8 rounded-full"
+              disabled={pageIndex >= len - 1}
+              aria-label="Trang sau"
+              onClick={() => setPageIndex((i) => Math.min(len - 1, i + 1))}
+            >
+              <ChevronRight className="size-4" />
+            </Button>
+          </div>
+        ) : null}
       </div>
+
+      {renderPage(current, pageIndex)}
 
       <Lightbox
         open={Boolean(lightbox)}

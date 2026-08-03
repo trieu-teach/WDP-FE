@@ -2,7 +2,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { BookOpen } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
-import { getSession } from '@/lib/auth.js'
+import { getSession, getRolePath } from '@/lib/auth.js'
 
 const LOGIN_TOAST = {
   title: 'Vui lòng đăng nhập',
@@ -43,7 +43,13 @@ function FooterLink({ to, authGuard, onAuthRequired, className, children }) {
   )
 }
 
+const linkClass =
+  'text-muted-foreground transition-colors hover:text-foreground'
+
 export default function Footer({ authGuard = false, onAuthRequired }) {
+  const user = getSession()
+  const workspacePath = user ? getRolePath(user.role) : null
+
   return (
     <footer className="mt-auto border-t bg-muted/30">
       <div className="page-container py-10">
@@ -60,9 +66,63 @@ export default function Footer({ authGuard = false, onAuthRequired }) {
             </p>
           </div>
           <nav className="flex flex-wrap gap-x-8 gap-y-3 text-sm">
-            <FooterLink to="/" authGuard={authGuard} onAuthRequired={onAuthRequired} className="text-muted-foreground transition-colors hover:text-foreground">Trang chủ</FooterLink>
-            <FooterLink to="/login" authGuard={authGuard} onAuthRequired={onAuthRequired} className="text-muted-foreground transition-colors hover:text-foreground">Đăng nhập</FooterLink>
-            <FooterLink to="/register" authGuard={authGuard} onAuthRequired={onAuthRequired} className="text-muted-foreground transition-colors hover:text-foreground">Đăng ký</FooterLink>
+            <FooterLink
+              to="/"
+              authGuard={authGuard}
+              onAuthRequired={onAuthRequired}
+              className={linkClass}
+            >
+              Trang chủ
+            </FooterLink>
+            {user ? (
+              <>
+                {workspacePath ? (
+                  <FooterLink
+                    to={workspacePath}
+                    authGuard={authGuard}
+                    onAuthRequired={onAuthRequired}
+                    className={linkClass}
+                  >
+                    Workspace
+                  </FooterLink>
+                ) : null}
+                <FooterLink
+                  to="/#tro-giup"
+                  authGuard={authGuard}
+                  onAuthRequired={onAuthRequired}
+                  className={linkClass}
+                >
+                  Trợ giúp
+                </FooterLink>
+                <FooterLink
+                  to="/#dieu-khoan"
+                  authGuard={authGuard}
+                  onAuthRequired={onAuthRequired}
+                  className={linkClass}
+                >
+                  Điều khoản
+                </FooterLink>
+              </>
+            ) : (
+              <>
+                <FooterLink
+                  to="/login"
+                  authGuard={authGuard}
+                  onAuthRequired={onAuthRequired}
+                  className={linkClass}
+                >
+                  Đăng nhập
+                </FooterLink>
+                <FooterLink
+                  to="/register"
+                  authGuard={authGuard}
+                  onAuthRequired={onAuthRequired}
+                  className={linkClass}
+                >
+                  Đăng ký
+                </FooterLink>
+              </>
+            )}
           </nav>
         </div>
         <Separator className="my-8" />

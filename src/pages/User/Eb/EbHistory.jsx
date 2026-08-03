@@ -34,6 +34,7 @@ import {
 import { ebEvaluationsService } from "@/api/ebEvaluations.service.js";
 import { getApiErrorMessage } from "@/api/http.js";
 import { getSession, logout } from "@/lib/auth.js";
+import { EB_NAV_LINKS } from "@/constants/ebNav.js";
 import { LABEL_EDITOR_BOARD } from "@/constants/roleTerminology.js";
 import {
   ebHistoryResultLabel,
@@ -43,7 +44,7 @@ import {
 import { cn } from "@/lib/utils";
 import "./Eb.css";
 
-const NAV_LINKS = [{ to: "/", label: "Trang chủ" }];
+const NAV_LINKS = EB_NAV_LINKS;
 
 function formatDate(value) {
   if (!value) return "—";
@@ -263,12 +264,7 @@ export default function EbHistory() {
 
   return (
     <div className="eb-page flex min-h-screen flex-col bg-background">
-      <Header
-        navLinks={NAV_LINKS}
-        userName={user?.name}
-        userAvatar={user?.avatar}
-        onLogout={handleLogout}
-      />
+      <Header links={NAV_LINKS} onLogout={handleLogout} />
 
       <main className="mx-auto w-full max-w-5xl flex-1 space-y-4 px-4 py-6 sm:px-6">
         <div className="flex flex-wrap items-center justify-between gap-3">

@@ -38,7 +38,7 @@ function LayerThumb({ url, name }) {
   const [errored, setErrored] = useState(false)
   if (!url || errored) {
     return (
-      <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-white/5 to-white/10 text-white/20">
+      <div className="flex h-full w-full items-center justify-center bg-slate-800 text-slate-600">
         <ImageIcon className="h-4 w-4" />
       </div>
     )
@@ -62,9 +62,9 @@ function RowActionButton({ children, className, title, onClick, disabled }) {
       disabled={disabled}
       title={title}
       className={cn(
-        'inline-flex size-6 items-center justify-center rounded-md text-white/40 transition-colors',
-        'hover:bg-white/10 hover:text-white',
-        'disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-white/40',
+        'inline-flex size-6 items-center justify-center rounded-md text-slate-500 transition-colors',
+        'hover:bg-slate-700/80 hover:text-slate-100',
+        'disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-500',
         className,
       )}
     >
@@ -101,16 +101,16 @@ function LayerRow({
       className={cn(
         'group relative overflow-hidden rounded-xl border transition-all duration-150',
         layer.visible
-          ? 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/[0.07]'
-          : 'border-white/5 bg-white/0 opacity-50',
-        isDragOver && 'border-violet-400 ring-2 ring-violet-400/40',
+          ? 'border-slate-700/60 bg-slate-800/50 hover:border-slate-600 hover:bg-slate-800'
+          : 'border-slate-800/60 bg-slate-900/40 opacity-50',
+        isDragOver && 'border-indigo-400 ring-2 ring-indigo-400/40',
       )}
     >
       <div className="flex items-stretch gap-2.5 p-2.5">
         {/* Drag handle / Thumb */}
         <div
           className={cn(
-            'relative flex h-14 w-14 shrink-0 cursor-grab items-center justify-center overflow-hidden rounded-lg border border-white/10 bg-white/5 shadow-inner transition-transform active:cursor-grabbing',
+            'relative flex h-14 w-14 shrink-0 cursor-grab items-center justify-center overflow-hidden rounded-lg border border-slate-700/60 bg-slate-900 shadow-inner transition-transform active:cursor-grabbing',
           )}
           draggable
           onDragStart={(e) => {
@@ -130,7 +130,7 @@ function LayerRow({
             <span
               className={cn(
                 'flex size-5 shrink-0 items-center justify-center rounded-md font-mono text-[10px] font-bold',
-                'bg-gradient-to-br from-violet-500 to-indigo-600 text-white shadow-sm',
+                'bg-indigo-600 text-white shadow-sm',
               )}
             >
               {layer.index}
@@ -139,10 +139,10 @@ function LayerRow({
               value={layer.name || ''}
               onChange={(e) => onRename?.(layer.id, e.target.value)}
               placeholder={`Layer ${layer.index}`}
-              className="min-w-0 flex-1 truncate rounded-md border border-transparent bg-transparent px-1.5 py-0.5 text-xs font-semibold text-white/80 transition-colors hover:border-white/10 focus:border-violet-500/60 focus:bg-white/5 focus:outline-none focus:ring-1 focus:ring-violet-500/30"
+              className="min-w-0 flex-1 truncate rounded-md border border-transparent bg-transparent px-1.5 py-0.5 text-xs font-semibold text-slate-200 transition-colors hover:border-slate-600 focus:border-indigo-500/60 focus:bg-slate-900/80 focus:outline-none focus:ring-1 focus:ring-indigo-500/30"
             />
             {layer.currentVersionNo ? (
-              <span className="shrink-0 rounded-md bg-white/5 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-white/40">
+              <span className="shrink-0 rounded-md bg-slate-900/80 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-500">
                 v{layer.currentVersionNo}
               </span>
             ) : null}
@@ -150,16 +150,27 @@ function LayerRow({
 
           {/* Opacity row */}
           <div className="flex items-center gap-2">
+            <span className="w-7 shrink-0 text-[10px] font-medium uppercase tracking-wide text-slate-500">Op</span>
             <input
               type="range"
               min={0}
               max={100}
               value={layer.opacity}
               onChange={(e) => onOpacity?.(layer.id, Number(e.target.value))}
-              className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-white/10 accent-violet-500 [&::-webkit-slider-thumb]:size-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gradient-to-br [&::-webkit-slider-thumb]:from-violet-400 [&::-webkit-slider-thumb]:to-indigo-500 [&::-webkit-slider-thumb]:shadow-md"
+              className={cn(
+                'h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-slate-700',
+                'accent-indigo-500',
+                '[&::-webkit-slider-thumb]:size-3.5 [&::-webkit-slider-thumb]:appearance-none',
+                '[&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2',
+                '[&::-webkit-slider-thumb]:border-slate-950 [&::-webkit-slider-thumb]:bg-indigo-500',
+                '[&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-thumb]:shadow-indigo-900/40',
+                '[&::-moz-range-thumb]:size-3.5 [&::-moz-range-thumb]:rounded-full',
+                '[&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-slate-950',
+                '[&::-moz-range-thumb]:bg-indigo-500',
+              )}
               title={`Opacity ${layer.opacity}%`}
             />
-            <span className="w-8 text-right font-mono text-[10px] font-semibold tabular-nums text-white/40">
+            <span className="w-8 text-right font-mono text-[10px] font-semibold tabular-nums text-slate-400">
               {layer.opacity}%
             </span>
           </div>
@@ -169,11 +180,11 @@ function LayerRow({
             <select
               value={layer.blendMode}
               onChange={(e) => onBlend?.(layer.id, e.target.value)}
-              className="h-6 flex-1 cursor-pointer rounded-md border border-white/10 bg-zinc-900 px-1.5 text-[10px] font-medium text-zinc-100 transition-colors hover:border-white/20 hover:bg-zinc-800 focus:border-violet-500/60 focus:outline-none [color-scheme:dark]"
+              className="h-7 flex-1 cursor-pointer rounded-lg border border-slate-700/60 bg-slate-900 px-2 text-[10px] font-medium text-slate-200 transition-colors hover:border-slate-600 hover:bg-slate-800 focus:border-indigo-500/60 focus:outline-none focus:ring-1 focus:ring-indigo-500/30 [color-scheme:dark]"
               title="Blend mode"
             >
               {BLEND_MODES.map((m) => (
-                <option key={m} value={m} className="bg-zinc-900 text-zinc-100">
+                <option key={m} value={m} className="bg-slate-900 text-slate-100">
                   {BLEND_LABEL[m]}
                 </option>
               ))}
@@ -205,18 +216,18 @@ function LayerRow({
               {menuOpen && (
                 <>
                   <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-                  <div className="absolute left-0 top-7 z-20 w-44 overflow-hidden rounded-xl border border-white/10 bg-[#13132a] py-1 shadow-xl shadow-black/40">
-                    <button onClick={() => { setMenuOpen(false); fileRef.current?.click() }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-white/70 transition-colors hover:bg-white/5 hover:text-white">
-                      <Upload className="size-3 text-violet-400" /> Upload version mới
+                  <div className="absolute left-0 top-7 z-20 w-44 overflow-hidden rounded-xl border border-slate-700/60 bg-slate-900 py-1 shadow-xl shadow-black/40">
+                    <button onClick={() => { setMenuOpen(false); fileRef.current?.click() }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-slate-300 transition-colors hover:bg-slate-800 hover:text-white">
+                      <Upload className="size-3 text-indigo-400" /> Upload version mới
                     </button>
-                    <button onClick={() => { setMenuOpen(false); onOpenVersions?.(layer.id) }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-white/70 transition-colors hover:bg-white/5 hover:text-white">
-                      <RotateCcw className="size-3 text-violet-400" /> Lịch sử version
+                    <button onClick={() => { setMenuOpen(false); onOpenVersions?.(layer.id) }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-slate-300 transition-colors hover:bg-slate-800 hover:text-white">
+                      <RotateCcw className="size-3 text-indigo-400" /> Lịch sử version
                     </button>
-                    <div className="my-1 border-t border-white/5" />
-                    <button onClick={() => { setMenuOpen(false); onMoveUp?.(layer.id) }} disabled={isTop} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-white/70 transition-colors hover:bg-white/5 hover:text-white disabled:opacity-30">
+                    <div className="my-1 border-t border-slate-800" />
+                    <button onClick={() => { setMenuOpen(false); onMoveUp?.(layer.id) }} disabled={isTop} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-slate-300 transition-colors hover:bg-slate-800 hover:text-white disabled:opacity-30">
                       <ChevronDown className="size-3 -rotate-90" /> Lên trên
                     </button>
-                    <button onClick={() => { setMenuOpen(false); onMoveDown?.(layer.id) }} disabled={isBottom} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-white/70 transition-colors hover:bg-white/5 hover:text-white disabled:opacity-30">
+                    <button onClick={() => { setMenuOpen(false); onMoveDown?.(layer.id) }} disabled={isBottom} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-slate-300 transition-colors hover:bg-slate-800 hover:text-white disabled:opacity-30">
                       <ChevronDown className="size-3 rotate-90" /> Xuống dưới
                     </button>
                   </div>
@@ -245,55 +256,55 @@ function LayerRow({
 function VersionHistory({ layer, versions, onRollback, onClose }) {
   if (!layer) return null
   return (
-    <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+    <div className="rounded-xl border border-slate-700/60 bg-slate-800/50 p-3">
       <div className="mb-2 flex items-center justify-between">
         <div className="flex items-center gap-1.5">
-          <RotateCcw className="size-3.5 text-violet-400" />
-          <div className="text-xs font-semibold text-white/80">
+          <RotateCcw className="size-3.5 text-indigo-400" />
+          <div className="text-xs font-semibold text-slate-200">
             Lịch sử version — Layer #{layer.index}
           </div>
         </div>
         <button
           onClick={onClose}
-          className="inline-flex size-6 items-center justify-center rounded-md text-white/40 transition-colors hover:bg-white/10 hover:text-white"
+          className="inline-flex size-6 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-700 hover:text-slate-100"
         >
           <X className="size-3.5" />
         </button>
       </div>
       <div className="space-y-1.5">
         {versions.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-white/10 bg-white/0 py-4 text-center text-[11px] text-white/30">
+          <div className="rounded-lg border border-dashed border-slate-700/60 bg-slate-900/40 py-4 text-center text-[11px] text-slate-500">
             Chưa có version nào.
           </div>
         ) : (
           versions.map((v) => (
             <div
               key={v.id}
-              className="group flex items-center gap-2 rounded-lg border border-white/5 bg-white/0 p-1.5 transition-colors hover:border-violet-500/30 hover:bg-white/5"
+              className="group flex items-center gap-2 rounded-lg border border-slate-700/40 bg-slate-900/40 p-1.5 transition-colors hover:border-indigo-500/30 hover:bg-slate-800"
             >
-              <div className="h-10 w-10 shrink-0 overflow-hidden rounded-md border border-white/10 bg-white/5">
+              <div className="h-10 w-10 shrink-0 overflow-hidden rounded-md border border-slate-700/60 bg-slate-900">
                 <LayerThumb url={v.imageUrl} name={`v${v.versionNo}`} />
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
-                  <span className="rounded bg-violet-500/20 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-violet-300">
+                  <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-indigo-300">
                     v{v.versionNo}
                   </span>
                   {v.uploadedAt ? (
-                    <span className="text-[10px] text-white/40">
+                    <span className="text-[10px] text-slate-500">
                       {new Date(v.uploadedAt).toLocaleString('vi-VN')}
                     </span>
                   ) : null}
                 </div>
                 {v.note && (
-                  <div className="mt-0.5 truncate text-[10px] text-white/50">{v.note}</div>
+                  <div className="mt-0.5 truncate text-[10px] text-slate-400">{v.note}</div>
                 )}
               </div>
               {v.versionNo !== layer.currentVersionNo && (
                 <Button
                   size="sm"
                   variant="outline"
-                  className="h-6 border-white/10 bg-white/5 px-2 text-[10px] font-medium text-white/60 hover:bg-white/10 hover:text-white"
+                  className="h-6 border-slate-700/60 bg-slate-900/50 px-2 text-[10px] font-medium text-slate-300 hover:bg-slate-800 hover:text-white"
                   onClick={() => onRollback?.(v.id)}
                 >
                   <RotateCcw className="mr-1 size-2.5" /> Rollback
@@ -396,20 +407,20 @@ export default function LayerStackPanel({
   return (
     <div className={cn('flex flex-col gap-3', className)}>
       {/* Header */}
-      <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 p-2.5">
+      <div className="flex items-center justify-between rounded-xl border border-slate-700/60 bg-slate-800/50 p-2.5">
         <div className="flex items-center gap-2">
-          <div className="flex size-7 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 text-white shadow-sm">
+          <div className="flex size-7 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-sm">
             <LayersIcon className="size-3.5" />
           </div>
           <div>
-            <div className="text-sm font-semibold tracking-tight text-white/80">Layer</div>
-            <div className="text-[10px] text-white/40">{layers.length} mục</div>
+            <div className="text-sm font-semibold tracking-tight text-slate-200">Layer</div>
+            <div className="text-[10px] text-slate-500">{layers.length} mục</div>
           </div>
         </div>
         {canEdit && (
           <Button
             size="sm"
-            className="h-8 gap-1 bg-gradient-to-r from-violet-600 to-indigo-600 px-3 text-xs font-medium text-white shadow-sm hover:from-violet-500 hover:to-indigo-500"
+            className="h-8 gap-1 bg-indigo-600 px-3 text-xs font-medium text-white shadow-sm transition-all hover:bg-indigo-500"
             onClick={() => fileRef.current?.click()}
             disabled={uploading}
           >
@@ -424,23 +435,23 @@ export default function LayerStackPanel({
       <div className="scrollbar-hide max-h-[420px] overflow-y-auto pr-1">
         <div className="space-y-2 pb-2">
           {loading ? (
-            <div className="rounded-xl border border-white/10 bg-white/5 py-10 text-center">
-              <div className="mx-auto mb-2 size-8 animate-spin rounded-full border-2 border-white/10 border-t-violet-500" />
-              <div className="text-xs text-white/40">Đang tải layer…</div>
+            <div className="rounded-xl border border-slate-700/60 bg-slate-800/50 py-10 text-center">
+              <div className="mx-auto mb-2 size-8 animate-spin rounded-full border-2 border-slate-700 border-t-indigo-500" />
+              <div className="text-xs text-slate-500">Đang tải layer…</div>
             </div>
           ) : layers.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-white/10 bg-white/0 py-10 text-center">
-              <div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500/20 to-indigo-500/20 text-violet-400">
+            <div className="rounded-xl border border-dashed border-slate-700/60 bg-slate-800/30 py-10 text-center">
+              <div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-2xl bg-indigo-500/15 text-indigo-400">
                 <ImagePlus className="size-6" />
               </div>
-              <div className="text-sm font-semibold text-white/60">Chưa có layer nào</div>
-              <p className="mx-auto mt-1 max-w-[200px] text-[11px] text-white/30">
+              <div className="text-sm font-semibold text-slate-300">Chưa có layer nào</div>
+              <p className="mx-auto mt-1 max-w-[200px] text-[11px] text-slate-500">
                 Upload ảnh PNG trong suốt để bắt đầu ghép.
               </p>
               {canEdit && (
                 <button
                   onClick={() => fileRef.current?.click()}
-                  className="mt-3 inline-flex items-center gap-1 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-all hover:shadow-md"
+                  className="mt-3 inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-all hover:bg-indigo-500"
                 >
                   <Plus className="size-3" />
                   Upload layer đầu tiên
@@ -486,13 +497,13 @@ export default function LayerStackPanel({
       </div>
 
       {/* Finalize footer */}
-      <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+      <div className="rounded-xl border border-slate-700/60 bg-slate-800/50 p-3">
         <div className="mb-2 flex items-center justify-between">
           <div className="flex items-center gap-1.5">
-            <div className="flex size-6 items-center justify-center rounded-md bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white">
+            <div className="flex size-6 items-center justify-center rounded-md bg-indigo-600 text-white">
               <ImageIcon className="size-3" />
             </div>
-            <div className="text-xs font-semibold text-white/80">Ảnh hoàn chỉnh</div>
+            <div className="text-xs font-semibold text-slate-200">Ảnh hoàn chỉnh</div>
           </div>
           {finalImage && (
             <span className="rounded-full border border-emerald-500/30 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-400">
@@ -505,7 +516,7 @@ export default function LayerStackPanel({
             href={finalImage}
             target="_blank"
             rel="noreferrer"
-            className="group/final block overflow-hidden rounded-lg border border-white/10 bg-white/5 transition-shadow hover:shadow-md hover:shadow-violet-500/10"
+            className="group/final block overflow-hidden rounded-xl border border-slate-700/60 bg-slate-900/60 transition-all hover:border-slate-600 hover:bg-slate-900"
           >
             <img
               src={finalImage}
@@ -514,7 +525,7 @@ export default function LayerStackPanel({
             />
           </a>
         ) : (
-          <div className="rounded-lg border border-dashed border-white/10 bg-white/0 py-4 text-center text-[11px] text-white/30">
+          <div className="rounded-lg border border-dashed border-slate-700/60 bg-slate-900/40 py-4 text-center text-[11px] text-slate-500">
             Chưa có ảnh hoàn chỉnh.
           </div>
         )}
@@ -522,7 +533,7 @@ export default function LayerStackPanel({
           <Button
             size="sm"
             variant="outline"
-            className="mt-2.5 h-8 w-full gap-1.5 border-white/15 bg-white/5 text-xs font-semibold text-white/80 hover:bg-white/10 hover:text-white"
+            className="mt-2.5 h-8 w-full gap-1.5 border-slate-700/60 bg-slate-900/50 text-xs font-semibold text-slate-200 hover:bg-slate-800 hover:text-white"
             onClick={() => onViewImage?.(finalImage)}
           >
             <ImageIcon className="size-3" />

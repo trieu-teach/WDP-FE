@@ -7,6 +7,19 @@ function unwrap(res) {
   return res
 }
 
+/** Append series fields vào FormData — genre/tags → CSV (BE chấp nhận). */
+function appendSeriesPayloadToFormData(fd, payload = {}) {
+  for (const [key, value] of Object.entries(payload)) {
+    if (value == null || value === '') continue
+    if (Array.isArray(value)) {
+      if (!value.length) continue
+      fd.append(key, value.join(','))
+      continue
+    }
+    fd.append(key, String(value))
+  }
+}
+
 export const seriesService = {
   /**
    * GET /api/series
@@ -28,30 +41,23 @@ export const seriesService = {
     return http.get(`/series/${id}`).then(unwrap)
   },
 
+  /**
+   * POST /series — multipart/form-data (name, description, genre, tags,
+   * age_rating, target_audience, synopsis, cover?)
+   */
   create(payload, coverFile) {
-    if (coverFile) {
-      const fd = new FormData()
-      Object.entries(payload).forEach(([k, v]) => {
-        if (v != null && v !== '') fd.append(k, v)
-      })
-      fd.append('cover', coverFile)
-      return http.post('/series', fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      }).then(unwrap)
-    }
-    return http.post('/series', payload).then(unwrap)
+    const fd = new FormData()
+    appendSeriesPayloadToFormData(fd, payload)
+    if (coverFile) fd.append('cover', coverFile)
+    return http.post('/series', fd).then(unwrap)
   },
 
   update(id, payload, coverFile) {
     if (coverFile) {
       const fd = new FormData()
-      Object.entries(payload).forEach(([k, v]) => {
-        if (v != null && v !== '') fd.append(k, v)
-      })
+      appendSeriesPayloadToFormData(fd, payload)
       fd.append('cover', coverFile)
-      return http.patch(`/series/${id}`, fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      }).then(unwrap)
+      return http.patch(`/series/${id}`, fd).then(unwrap)
     }
     return http.patch(`/series/${id}`, payload).then(unwrap)
   },
@@ -59,9 +65,7 @@ export const seriesService = {
   uploadCover(id, coverFile) {
     const fd = new FormData()
     fd.append('cover', coverFile)
-    return http.post(`/series/${id}/cover`, fd, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    }).then(unwrap)
+    return http.post(`/series/${id}/cover`, fd).then(unwrap)
   },
 
   getChapters(seriesId) {

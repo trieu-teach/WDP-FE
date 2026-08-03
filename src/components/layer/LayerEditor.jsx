@@ -613,71 +613,66 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
 
   return (
     <div className={cn(
-      'relative flex h-full flex-col overflow-hidden rounded-2xl bg-[#0f0f1a]',
-      'border border-white/5',
-      fullscreen ? 'rounded-none border-none' : 'shadow-xl shadow-slate-900/20',
+      'relative flex h-full w-full flex-1 flex-col overflow-hidden bg-slate-950',
+      fullscreen ? 'rounded-none border-none' : 'rounded-none border-0',
     )}>
-      {/* ── TOPBAR ── */}
-      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-white/5 bg-[#0f0f1a]/95 px-4 py-2 backdrop-blur">
-        {/* Left: icon + title */}
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 text-white shadow-md shadow-violet-500/20">
-            <Sparkles className="size-4" />
+      {/* ── TOOLBAR (single header — chapter meta + tools) ── */}
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-800 bg-slate-950/95 px-3 py-2 backdrop-blur-md sm:px-4">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-sm shadow-indigo-900/40">
+            <Sparkles className="size-3.5" />
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold tracking-tight text-white/90">
-              {chapter?.seriesTitle} · Ch.{chapter?.chapterNum}
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold tracking-tight text-slate-100">
+              {chapter?.seriesTitle}
+              <span className="font-medium text-slate-400"> · Ch.{chapter?.chapterNum}</span>
             </p>
-            <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-white/40">
-              <span className="font-medium text-white/60">
-                Trang {safeIdx + 1} / {pages.length}
+            <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+              <span className="font-medium text-slate-400">
+                Trang {safeIdx + 1}/{pages.length}
               </span>
-              <span className="text-white/20">·</span>
+              <span className="text-slate-700">·</span>
               <span>
-                <span className="font-semibold text-violet-400">{layers.length}</span>{' '}
-                layer{layers.length !== 1 ? 's' : ''}
+                <span className="font-semibold text-indigo-400">{layers.length}</span> layer
               </span>
-              {finalImage && (
+              {finalImage ? (
                 <>
-                  <span className="text-white/20">·</span>
+                  <span className="text-slate-700">·</span>
                   <span className="inline-flex items-center gap-1 font-medium text-emerald-400">
                     <span className="size-1.5 animate-pulse rounded-full bg-emerald-400" />
                     đã gộp
                   </span>
                 </>
-              )}
-              {submittedPages[activePageId] && (
+              ) : null}
+              {submittedPages[activePageId] ? (
                 <>
-                  <span className="text-white/20">·</span>
-                  <span className="inline-flex items-center gap-1 font-medium text-emerald-300">
-                    ✓ đã gửi Mangaka
-                  </span>
+                  <span className="text-slate-700">·</span>
+                  <span className="font-medium text-emerald-300">✓ đã gửi</span>
                 </>
-              )}
+              ) : null}
             </div>
           </div>
         </div>
 
-        {/* Center: page nav */}
-        <div className="flex shrink-0 items-center gap-1.5">
-          <div className="flex items-center rounded-xl border border-white/10 bg-white/5 p-0.5 backdrop-blur">
+        <div className="flex shrink-0 flex-wrap items-center gap-1">
+          <div className="flex items-center rounded-lg border border-slate-700/80 bg-slate-900 p-0.5">
             <Button
               size="icon-sm"
               variant="ghost"
-              className="size-7 rounded-lg text-white/60 hover:bg-white/10 hover:text-white"
+              className="size-7 rounded-md text-slate-400 hover:bg-slate-800 hover:text-slate-100"
               disabled={safeIdx <= 0}
               onClick={() => setPageIdx(i => Math.max(0, i - 1))}
               title="Trang trước"
             >
               <ChevronLeft className="size-4" />
             </Button>
-            <span className="min-w-[3.5rem] px-2 text-center text-xs font-bold tabular-nums text-white/80">
+            <span className="min-w-[3.25rem] px-1.5 text-center text-xs font-bold tabular-nums text-slate-200">
               {safeIdx + 1} / {pages.length}
             </span>
             <Button
               size="icon-sm"
               variant="ghost"
-              className="size-7 rounded-lg text-white/60 hover:bg-white/10 hover:text-white"
+              className="size-7 rounded-md text-slate-400 hover:bg-slate-800 hover:text-slate-100"
               disabled={safeIdx >= pages.length - 1}
               onClick={() => setPageIdx(i => Math.min(pages.length - 1, i + 1))}
               title="Trang sau"
@@ -686,7 +681,7 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
             </Button>
           </div>
 
-          <div className="mx-1 h-6 w-px bg-white/10" />
+          <div className="mx-0.5 hidden h-6 w-px bg-slate-700 sm:block" />
 
           <Button
             size="sm"
@@ -694,8 +689,8 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
             className={cn(
               'h-8 gap-1.5 px-2.5 text-xs font-medium',
               showOriginal
-                ? 'border border-violet-500/40 bg-violet-500/20 text-violet-300 hover:bg-violet-500/30'
-                : 'text-white/50 hover:bg-white/10 hover:text-white/80',
+                ? 'border border-indigo-500/40 bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30'
+                : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200',
             )}
             onClick={() => setShowOriginal(v => !v)}
           >
@@ -710,12 +705,12 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
               className={cn(
                 'h-8 gap-1.5 px-2.5 text-xs font-medium',
                 showRegionOverlay
-                  ? 'border border-violet-500/40 bg-violet-500/20 text-violet-300 hover:bg-violet-500/30'
-                  : 'text-white/50 hover:bg-white/10 hover:text-white/80',
+                  ? 'border border-indigo-500/40 bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30'
+                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200',
               )}
               onClick={() => setShowRegionOverlay(v => !v)}
             >
-              <span className="inline-block size-2 rounded-sm bg-violet-500" />
+              <span className="inline-block size-2 rounded-sm bg-indigo-500" />
               Vùng
             </Button>
           )}
@@ -727,7 +722,7 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
               'h-8 gap-1.5 px-2.5 text-xs font-medium',
               showNoteOverlay
                 ? 'border border-amber-500/40 bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
-                : 'text-white/50 hover:bg-white/10 hover:text-white/80',
+                : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200',
             )}
             onClick={() => setShowNoteOverlay(v => !v)}
           >
@@ -735,12 +730,12 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
             {showNoteOverlay ? 'Ẩn Note' : 'Hiện Note'}
           </Button>
 
-          <div className="mx-1 h-6 w-px bg-white/10" />
+          <div className="mx-0.5 hidden h-6 w-px bg-slate-700 sm:block" />
 
           <Button
             size="icon-sm"
             variant="ghost"
-            className="size-8 text-white/50 transition-all hover:bg-white/10 hover:text-white active:scale-95"
+            className="size-8 text-slate-400 transition-all hover:bg-slate-800 hover:text-slate-100 active:scale-95"
             onClick={() => void handleDownloadImage('original')}
             disabled={!activePageId || downloadingImage === 'original'}
             title="Tải ảnh gốc"
@@ -756,7 +751,7 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
             <Button
               size="icon-sm"
               variant="ghost"
-              className="size-8 text-white/50 transition-all hover:bg-white/10 hover:text-white active:scale-95"
+              className="size-8 text-slate-400 transition-all hover:bg-slate-800 hover:text-slate-100 active:scale-95"
               onClick={() => void handleDownloadImage('merged')}
               disabled={downloadingImage === 'merged'}
               title="Tải ảnh gộp"
@@ -773,7 +768,7 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
             size="icon-sm"
             variant="ghost"
             className={cn(
-              'size-8 text-white/50 hover:bg-white/10 hover:text-white',
+              'size-8 text-slate-400 hover:bg-slate-800 hover:text-slate-100',
               loading && 'animate-spin',
             )}
             onClick={() => { refresh(); loadNotes() }}
@@ -786,7 +781,7 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
             <Button
               size="icon-sm"
               variant="ghost"
-              className="size-8 text-white/50 hover:bg-white/10 hover:text-white"
+              className="size-8 text-slate-400 hover:bg-slate-800 hover:text-slate-100"
               onClick={onEnterFullscreen}
               title="Toàn màn hình"
             >
@@ -797,7 +792,7 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
           <Button
             size="icon-sm"
             variant="ghost"
-            className="size-8 text-white/50 hover:bg-white/10 hover:text-white"
+            className="size-8 text-slate-400 hover:bg-slate-800 hover:text-slate-100"
             onClick={() => {
               setLightboxImage(finalImage || baseImage)
               setLightboxTitle(`Trang ${safeIdx + 1} · ${layers.length} layer`)
@@ -830,14 +825,14 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
       {/* ── MAIN AREA: canvas + sidebar ── */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Canvas side — scrollable if canvas is taller than available space */}
-        <div className="scrollbar-hide flex min-h-0 flex-1 flex-col overflow-auto bg-[#0f0f0f]">
+        <div className="scrollbar-hide relative flex min-h-0 flex-1 flex-col overflow-auto bg-slate-900/80">
           {/* Canvas container — fills available space, canvas scales to fit */}
           <div
-            className="scrollbar-hide relative flex min-h-0 flex-1 items-center justify-center overflow-auto p-3"
+            className="scrollbar-hide relative flex min-h-0 flex-1 items-center justify-center overflow-auto p-3 pb-20"
           >
             {/* Aspect-ratio box so canvas keeps 960×1360 ratio when scaled */}
             <div
-              className="relative w-full overflow-hidden rounded-sm shadow-2xl shadow-black/60 ring-1 ring-white/10"
+              className="relative w-full overflow-hidden rounded-lg shadow-2xl shadow-black/50 ring-1 ring-slate-700/70"
               style={{ aspectRatio: `${CANVAS_W} / ${CANVAS_H}` }}
             >
               {/* Layer canvas — ảnh gốc được vẽ làm nền, layers xếp đè lên */}
@@ -861,30 +856,31 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
           </div>
 
           {/* Bottom toolbar */}
-          <div className="flex shrink-0 items-center justify-between gap-3 border-t border-white/5 bg-[#0f0f1a]/95 px-4 py-2 backdrop-blur">
-            <div className="flex items-center gap-3">
-              {(uploading || notesLoading || finalizing) && (
-                <div className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-medium text-white/60 backdrop-blur">
-                  <Loader2 className="h-3 w-3 animate-spin text-violet-400" />
-                  {uploading ? 'Đang upload layer…' : finalizing ? 'Đang gộp ảnh…' : 'Đang tải ghi chú…'}
-                </div>
-              )}
-              {pages.length > 1 && (
-                <span className="text-[11px] text-white/30">
-                  {pages.length} trang trong chapter
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
+          <div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center px-4">
+            <div className="pointer-events-auto flex max-w-full flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-700 bg-slate-900/90 p-3 shadow-xl backdrop-blur-md">
+              <div className="flex min-w-0 items-center gap-3">
+                {(uploading || notesLoading || finalizing) && (
+                  <div className="inline-flex items-center gap-1.5 rounded-full border border-slate-600 bg-slate-800/80 px-3 py-1 text-[11px] font-medium text-slate-300">
+                    <Loader2 className="h-3 w-3 animate-spin text-indigo-400" />
+                    {uploading ? 'Đang upload layer…' : finalizing ? 'Đang gộp ảnh…' : 'Đang tải ghi chú…'}
+                  </div>
+                )}
+                {pages.length > 1 && (
+                  <span className="hidden text-[11px] text-slate-500 sm:inline">
+                    {pages.length} trang trong chapter
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
                 {layers.length > 0 && (
                   <Button
                     size="sm"
                     variant="outline"
                     className={cn(
-                      'h-8 gap-1.5 border px-3 text-xs font-medium',
+                      'h-9 gap-1.5 rounded-lg border px-3 text-xs font-medium',
                       finalImage
-                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20'
-                        : 'border-violet-500/30 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20 hover:border-violet-500/50',
+                        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20'
+                        : 'border-slate-600 bg-slate-800 text-slate-200 hover:bg-slate-700',
                     )}
                     onClick={handleFinalize}
                     disabled={finalizing || submittedPages[activePageId]}
@@ -903,8 +899,8 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
                 <Button
                   size="sm"
                   className={cn(
-                    'h-8 gap-1.5 px-4 text-xs font-semibold shadow-lg',
-                    'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-violet-500/20 hover:from-violet-500 hover:to-indigo-500',
+                    'h-9 gap-1.5 rounded-lg bg-indigo-600 px-5 text-xs font-medium text-white shadow-lg shadow-indigo-900/30',
+                    'transition-all hover:bg-indigo-500',
                   )}
                   disabled={submittingAll || finalizing || pages.length === 0 || submittedPages[activePageId]}
                   onClick={() => void handleSubmitChapter()}
@@ -916,13 +912,14 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
                     <><Send className="size-3.5" /> Gửi Mangaka</>
                   )}
                 </Button>
+              </div>
             </div>
           </div>
         </div>
 
         {/* Sidebar */}
-        <div className="flex w-96 shrink-0 flex-col border-l border-white/5 bg-[#0f0f1a]">
-          <div className="scrollbar-hide flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <div className="flex w-96 shrink-0 flex-col border-l border-slate-700/60 bg-slate-950">
+          <div className="scrollbar-hide flex min-h-0 max-h-[calc(100vh-140px)] flex-1 flex-col overflow-y-auto">
             {/* Ghi chú Mangaka — chỉ UI đọc, dùng cùng overlayNotes (không đổi 3 nguồn load) */}
             <MangakaNotesPanel
               notes={visibleOverlayNotes}
@@ -934,13 +931,13 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
 
             {/* Final image preview — dùng URL cache theo pageId, fallback sang finalImage */}
             {(finalImagesByPage[activePageId] || finalImage) && (
-              <div className="border-b border-white/5 p-3">
+              <div className="border-b border-slate-700/60 p-3">
                 <div className="mb-2 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div className="flex size-6 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 text-white">
                       <ImageIcon className="size-3" />
                     </div>
-                    <span className="text-xs font-semibold text-white/80">Ảnh gộp</span>
+                    <span className="text-xs font-semibold text-slate-200">Ảnh gộp</span>
                   </div>
                   <span className="rounded-full border border-emerald-500/30 bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">
                     sẵn sàng
@@ -948,7 +945,7 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
                 </div>
                 <button
                   type="button"
-                  className="group/final relative w-full cursor-pointer overflow-hidden rounded-xl border border-white/10 bg-white/5 text-left transition-shadow hover:shadow-lg hover:shadow-violet-500/10"
+                  className="group/final relative w-full cursor-pointer overflow-hidden rounded-xl border border-slate-700/60 bg-slate-800/50 text-left transition-all hover:border-slate-600 hover:bg-slate-800"
                   onClick={() => {
                     setLightboxImage(finalImagesByPage[activePageId] || finalImage)
                     setLightboxTitle(`Ảnh gộp trang ${safeIdx + 1}`)

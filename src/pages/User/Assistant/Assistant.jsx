@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate, Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
   ArrowLeft,
@@ -12,7 +12,6 @@ import {
   Layers as LayersIcon,
   RefreshCw,
   Sparkles,
-  TrendingUp,
   X,
 } from 'lucide-react'
 import Header from '@/components/User/Header/Header.jsx'
@@ -37,9 +36,10 @@ import { isMeetingPhase, isPendingRequest, requestStatusLabel } from '@/utils/co
 import LayerEditor from '@/components/layer/LayerEditor.jsx'
 import { AssistantMangakaBoard, AssistantMangakaPicker } from './AssistantMangakaHub.jsx'
 import { buildMangakaOptions, enrichAssignments } from './assistantMangakaHub.js'
+import { ASSISTANT_NAV_LINKS } from '@/constants/assistantNav.js'
 import './Assistant.css'
 
-const NAV_LINKS = [{ to: '/', label: 'Trang chủ' }]
+const NAV_LINKS = ASSISTANT_NAV_LINKS
 
 const HERO_IMAGES = [
   '/images/assistant1.png',
@@ -73,6 +73,15 @@ const TASK_STATUS_LABEL = {
 export default function Assistant() {
   const user = getSession()
   const navigate = useNavigate()
+  const location = useLocation()
+
+  const viewParam = useMemo(() => {
+    const raw = new URLSearchParams(location.search).get('view')
+    if (raw === 'board' || raw === 'editor' || raw === 'coop' || raw === 'pick') {
+      return raw
+    }
+    return 'pick'
+  }, [location.search])
 
   const { assignments, loading, error, refresh, loadChapterPages } = useAssistantAssignments()
   const { allTasks, loading: tasksLoading, refresh: refreshTasks } = useAssistantTasks()
@@ -93,9 +102,14 @@ export default function Assistant() {
   const [hireBusyId, setHireBusyId] = useState(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showTaskDetail, setShowTaskDetail] = useState(false)
-  const [hubView, setHubView] = useState('pick')
+  const [hubView, setHubView] = useState(viewParam === 'coop' ? 'pick' : viewParam)
   const [selectedMangakaId, setSelectedMangakaId] = useState(null)
   const [heroSlide, setHeroSlide] = useState(0)
+
+  function goAssistantView(view, { replace = true } = {}) {
+    const next = view && view !== 'pick' ? `/assistant?view=${view}` : '/assistant?view=pick'
+    navigate(next, { replace })
+  }
 
   useNotifications({
     enabled: Boolean(user),
@@ -157,6 +171,44 @@ export default function Assistant() {
     () => mangakaOptions.find(m => m.id === selectedMangakaId) ?? null,
     [mangakaOptions, selectedMangakaId],
   )
+
+  // Đồng bộ navbar ?view= với hub (không đổi API / task handlers).
+  useEffect(() => {
+    if (viewParam === 'coop') {
+      setHubView('pick')
+      const timer = window.setTimeout(() => {
+        document.getElementById('as-coop')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }, 50)
+      return () => window.clearTimeout(timer)
+    }
+
+    if (viewParam === 'board') {
+      if (selectedMangakaId) {
+        setHubView('board')
+      } else {
+        setHubView('pick')
+        if (location.search.includes('view=board')) {
+          navigate('/assistant?view=pick', { replace: true })
+        }
+      }
+      return undefined
+    }
+
+    if (viewParam === 'editor') {
+      if (selectedMangakaId) {
+        setHubView('editor')
+      } else {
+        setHubView('pick')
+        if (location.search.includes('view=editor')) {
+          navigate('/assistant?view=pick', { replace: true })
+        }
+      }
+      return undefined
+    }
+
+    setHubView('pick')
+    return undefined
+  }, [viewParam, selectedMangakaId, location.search, navigate])
 
   const mangakaAssignments = useMemo(() => {
     if (!selectedMangakaId) return enrichedAssignments
@@ -263,6 +315,7 @@ export default function Assistant() {
   async function handleOpenChapter(chapter) {
     await handleSelectChapter(chapter)
     setHubView('editor')
+    goAssistantView('editor')
   }
 
   function handlePickMangaka(mangakaId) {
@@ -271,6 +324,7 @@ export default function Assistant() {
     setSelectedChapterId(null)
     setSelectedChapterPages([])
     setSelectedChapterDetail(null)
+    goAssistantView('board')
   }
 
   function handleBackToMangakaPicker() {
@@ -279,6 +333,7 @@ export default function Assistant() {
     setSelectedChapterId(null)
     setSelectedChapterPages([])
     setSelectedChapterDetail(null)
+    goAssistantView('pick')
   }
 
   function handleBackToMangakaBoard() {
@@ -286,6 +341,7 @@ export default function Assistant() {
     setSelectedChapterId(null)
     setSelectedChapterPages([])
     setSelectedChapterDetail(null)
+    goAssistantView('board')
   }
 
   async function handleCooperationAction(req, action) {
@@ -319,6 +375,7 @@ export default function Assistant() {
     <div className="ws-page--assistant flex min-h-screen flex-col bg-background">
       <Header links={NAV_LINKS} onLogout={user ? handleLogout : undefined} />
 
+      {hubView !== 'board' && hubView !== 'editor' ? (
       <section className="ws-hero--assistant relative overflow-hidden border-b border-white/5 text-white">
         <div className="as-hero-slides" aria-hidden>
           {HERO_IMAGES.map((src, index) => (
@@ -334,29 +391,46 @@ export default function Assistant() {
           ))}
         </div>
         <div className="as-hero-slides__veil" aria-hidden />
-        <div className="page-container relative py-10 md:py-14">
-          <div className="max-w-2xl space-y-3">
-            <Badge variant="secondary" className="bg-white/10 text-white hover:bg-white/15">
+        <div className="page-container relative flex h-full items-center py-5 md:py-6">
+          <div className="max-w-2xl space-y-2">
+            <Badge
+              variant="secondary"
+              className="bg-white/15 text-white hover:bg-white/20"
+            >
               Không gian Assistant
             </Badge>
-            <h1 className="text-3xl font-bold tracking-tight md:text-4xl">
+            <h1 className="text-2xl font-bold tracking-tight text-white md:text-3xl">
               {`Xin chào${user?.name ? `, ${user.name.split(' ')[0]}` : ''}`}
             </h1>
-          </div>
-          <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-zinc-300">
-            <Badge variant="secondary" className="bg-white/10 text-white hover:bg-white/15">
-              <LayersIcon className="size-3" />
-              Layer Editor
-            </Badge>
-            <Badge variant="secondary" className="bg-white/10 text-white hover:bg-white/15">
-              <Sparkles className="size-3" />
-              1 chapter = 1 task
-            </Badge>
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <Badge
+                variant="secondary"
+                className="bg-white/15 text-white hover:bg-white/20"
+              >
+                <LayersIcon className="size-3" />
+                Layer Editor
+              </Badge>
+              <Badge
+                variant="secondary"
+                className="bg-white/15 text-white hover:bg-white/20"
+              >
+                <Sparkles className="size-3" />
+                1 chapter = 1 task
+              </Badge>
+            </div>
           </div>
         </div>
       </section>
+      ) : null}
 
-      <main className="page-container ws-main--assistant flex-1 py-6">
+      <main
+        className={cn(
+          'page-container ws-main--assistant flex-1 pb-8',
+          hubView === 'board' || hubView === 'editor'
+            ? 'pt-6'
+            : 'mt-6 pt-2 md:mt-8',
+        )}
+      >
         {error ? (
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3">
             <p className="text-sm text-destructive">{getApiErrorMessage(error, 'Không tải được danh sách chapter.')}</p>
@@ -368,13 +442,13 @@ export default function Assistant() {
         ) : null}
 
         {cooperationLoading ? (
-          <Card className="mb-4 border-violet-200/60 dark:border-violet-500/20">
+          <Card id="as-coop" className="mb-4 border-violet-200/60 dark:border-violet-500/20">
             <CardContent className="py-5 text-center text-sm text-muted-foreground">
               Đang tải yêu cầu hợp tác...
             </CardContent>
           </Card>
         ) : cooperationRequests.length > 0 ? (
-          <Card className="mb-4 overflow-hidden border-violet-200 bg-violet-500/5 dark:border-violet-500/30">
+          <Card id="as-coop" className="mb-4 overflow-hidden border-violet-200 bg-violet-500/5 dark:border-violet-500/30">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-base">
                 <Handshake className="size-4 text-violet-600 dark:text-violet-400" />
@@ -444,15 +518,59 @@ export default function Assistant() {
               ))}
             </CardContent>
           </Card>
+        ) : viewParam === 'coop' ? (
+          <Card
+            id="as-coop"
+            className="mb-0 overflow-hidden rounded-2xl border border-gray-100 bg-gray-50/60 shadow-none dark:border-zinc-800 dark:bg-zinc-900/40"
+          >
+            <CardContent className="flex flex-col items-center px-6 py-7 text-center">
+              <span className="mb-3 flex size-12 items-center justify-center rounded-full bg-white p-3 text-gray-400 shadow-sm dark:bg-zinc-800 dark:text-zinc-500">
+                <Handshake className="size-5" />
+              </span>
+              <p className="text-sm font-semibold text-gray-900 dark:text-zinc-50">
+                Chưa có yêu cầu hợp tác mới
+              </p>
+              <p className="mt-1 max-w-sm text-xs text-gray-500 dark:text-zinc-400">
+                Khi Mangaka gửi lời mời, bạn sẽ thấy tại đây.
+              </p>
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 rounded-lg border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+                  asChild
+                >
+                  <Link to="/profile">Cập nhật hồ sơ</Link>
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 rounded-lg text-gray-600 hover:text-gray-900 dark:text-zinc-400"
+                  asChild
+                >
+                  <Link to="/assistant?view=pick">Xem Chọn Mangaka</Link>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         ) : null}
 
         {hubView === 'pick' ? (
-          <AssistantMangakaPicker
-            mangakas={mangakaOptions}
-            assignmentsByMangaka={assignmentsByMangaka}
-            loading={loading || cooperationLoading}
-            onSelect={handlePickMangaka}
-          />
+          <div
+            className={cn(
+              (viewParam === 'coop'
+                || cooperationLoading
+                || cooperationRequests.length > 0)
+                && 'mt-8',
+            )}
+          >
+            <AssistantMangakaPicker
+              mangakas={mangakaOptions}
+              assignmentsByMangaka={assignmentsByMangaka}
+              loading={loading || cooperationLoading}
+              onSelect={handlePickMangaka}
+            />
+          </div>
         ) : null}
 
         {hubView === 'board' && selectedMangaka ? (
@@ -465,68 +583,43 @@ export default function Assistant() {
         ) : null}
 
         {hubView === 'editor' && selectedMangaka ? (
-        <div className="as-workspace grid min-h-[min(640px,calc(100vh-260px))] grid-cols-1 gap-4 lg:grid-cols-[minmax(260px,300px)_minmax(0,1fr)]">
-          <div className="flex flex-wrap items-center gap-2 lg:col-span-2">
-            <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={handleBackToMangakaBoard}>
+        <div className="as-workspace flex min-h-[min(820px,calc(100vh-100px))] w-full flex-1 flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/90 p-2.5 shadow-lg shadow-slate-950/20">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-9 gap-1.5 rounded-lg border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800 hover:text-white"
+              onClick={handleBackToMangakaBoard}
+            >
               <ArrowLeft className="size-3.5" />
               {selectedMangaka.name}
             </Button>
-            <span className="text-xs text-muted-foreground">· Layer Editor</span>
+            <div className="hidden h-7 w-px bg-slate-700 sm:block" aria-hidden />
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+              {statsDisplayed.map((s, i) => {
+                const Icon = s.icon
+                return (
+                  <div
+                    key={i}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700/80 bg-slate-900/80 px-2.5 py-1.5"
+                    title={s.label}
+                  >
+                    <Icon className={cn('size-3', STAT_ICON_CLASS[s.color])} />
+                    <span className="text-[10px] font-medium text-slate-400">{s.label}</span>
+                    <span className="text-xs font-bold tabular-nums text-slate-100">{s.value}</span>
+                  </div>
+                )
+              })}
+              {tasksLoading ? (
+                <span className="text-[10px] text-slate-500">đang tải…</span>
+              ) : null}
+            </div>
           </div>
-          <aside className="flex min-h-0 flex-col gap-3 overflow-y-auto overflow-x-hidden">
-            <Card className="shrink-0 gap-0 py-0 shadow-sm">
-              <CardHeader className="px-4 py-4 pb-2">
-                <CardTitle className="flex items-center gap-2 text-sm">
-                  <TrendingUp className="size-4 text-primary" />
-                  Tóm tắt
-                  {tasksLoading ? (
-                    <span className="text-[10px] font-normal text-muted-foreground">(đang tải…)</span>
-                  ) : null}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="px-4 pb-4 pt-0">
-                <div className="grid grid-cols-2 gap-2">
-                  {statsDisplayed.map((s, i) => {
-                    const Icon = s.icon
-                    return (
-                      <div key={i} className="rounded-lg border bg-muted/20 px-2.5 py-2">
-                        <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                          <Icon className={cn('size-3', STAT_ICON_CLASS[s.color])} />
-                          {s.label}
-                        </div>
-                        <p className="mt-0.5 text-lg font-bold tabular-nums leading-none">{s.value}</p>
-                      </div>
-                    )
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-          </aside>
 
-          <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border bg-card shadow-sm">
+          <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 shadow-xl shadow-black/30">
             {selectedWithTask ? (
               <>
-                <div className="flex shrink-0 flex-wrap items-center gap-3 border-b bg-muted/20 px-4 py-3">
-                  <div className="min-w-0">
-                    <p className="truncate font-semibold">
-                      {selectedWithTask.seriesTitle || 'Chapter'}
-                      {' · '}
-                      Ch.{selectedWithTask.chapterNum}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {(selectedWithTask.pages ?? []).length} trang
-                      {selectedWithTask._task?.status ? (
-                        <>
-                          {' · '}
-                          <span className="font-medium text-foreground">
-                            {TASK_STATUS_LABEL[selectedWithTask._task.status] ?? selectedWithTask._task.status}
-                          </span>
-                        </>
-                      ) : null}
-                    </p>
-                  </div>
-                </div>
-
                 <div
                   className={cn(
                     'min-h-0 flex-1 overflow-hidden',
@@ -593,19 +686,19 @@ export default function Assistant() {
                 </div>
 
                 {selectedTask ? (
-                  <div className="shrink-0 border-t">
+                  <div className="shrink-0 border-t border-slate-800 bg-slate-950">
                     <button
                       type="button"
-                      className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-medium hover:bg-muted/30"
+                      className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-medium text-slate-200 hover:bg-slate-900"
                       onClick={() => setShowTaskDetail(v => !v)}
                     >
                       <span>Chi tiết task &amp; ghi chú Mangaka</span>
-                      <ChevronDown className={cn('size-4 text-muted-foreground transition-transform', showTaskDetail && 'rotate-180')} />
+                      <ChevronDown className={cn('size-4 text-slate-500 transition-transform', showTaskDetail && 'rotate-180')} />
                     </button>
                     {showTaskDetail ? (
-                      <div className="space-y-2 border-t bg-muted/10 px-4 py-3 text-xs text-muted-foreground">
+                      <div className="space-y-2 border-t border-slate-800 bg-slate-900/50 px-4 py-3 text-xs text-slate-400">
                         <div className="flex items-center justify-between">
-                          <span className="font-medium text-foreground">
+                          <span className="font-medium text-slate-100">
                             {TASK_STATUS_LABEL[selectedTask.status] ?? selectedTask.status}
                           </span>
                           {isRevisionTask ? (
@@ -613,36 +706,36 @@ export default function Assistant() {
                           ) : null}
                         </div>
                         {selectedTask.description ? (
-                          <p className="whitespace-pre-line text-foreground/80">{selectedTask.description}</p>
+                          <p className="whitespace-pre-line text-slate-300">{selectedTask.description}</p>
                         ) : (
                           <p>(Không có mô tả.)</p>
                         )}
                         {isRevisionTask && selectedTask.revisionNote ? (
-                          <div className="rounded-md border border-amber-300 bg-amber-50 p-2 dark:border-amber-500/30 dark:bg-amber-500/10">
-                            <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-400">
+                          <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-400">
                               Yêu cầu chỉnh sửa gần nhất
                             </p>
-                            <p className="mt-0.5 text-foreground/80">{selectedTask.revisionNote}</p>
+                            <p className="mt-0.5 text-slate-200">{selectedTask.revisionNote}</p>
                           </div>
                         ) : null}
                       </div>
                     ) : null}
                   </div>
                 ) : (
-                  <div className="shrink-0 border-t px-4 py-2 text-xs text-muted-foreground">
+                  <div className="shrink-0 border-t border-slate-800 px-4 py-2 text-xs text-slate-500">
                     Chưa có task — chờ Mangaka gửi chapter.
                   </div>
                 )}
               </>
             ) : (
               <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
-                <div className="flex size-14 items-center justify-center rounded-2xl bg-muted">
-                  <ImageIcon className="size-7 text-muted-foreground/50" />
+                <div className="flex size-14 items-center justify-center rounded-2xl bg-slate-900">
+                  <ImageIcon className="size-7 text-slate-600" />
                 </div>
-                <p className="text-sm font-medium text-muted-foreground">
-                  Chọn một chapter bên trái để bắt đầu
+                <p className="text-sm font-medium text-slate-400">
+                  Chọn một chapter để bắt đầu
                 </p>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-slate-500">
                   Upload layer → Gộp → Gửi Mangaka
                 </p>
               </div>

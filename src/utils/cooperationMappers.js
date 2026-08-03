@@ -47,6 +47,9 @@ export function apiAssistantToCatalog(user) {
     responseTime: u.response_time ?? u.responseTime ?? '—',
     languages: Array.isArray(u.languages) && u.languages.length ? u.languages : ['VI'],
     timezone: u.timezone ?? 'GMT+7',
+    rateLabel: u.rate_label ?? u.rateLabel ?? null,
+    ratePerChapter: u.rate_per_chapter ?? u.ratePerChapter ?? null,
+    hourlyRate: u.hourly_rate ?? u.hourlyRate ?? null,
   }
 }
 

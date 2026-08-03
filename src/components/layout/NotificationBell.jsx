@@ -116,15 +116,20 @@ export function NotificationBell({ className }) {
       <DropdownMenu onOpenChange={(open) => { if (open) void refresh() }}>
         <DropdownMenuTrigger asChild>
           <Button
-            variant="outline"
+            variant="ghost"
             size="icon-sm"
-            className={cn('relative shrink-0', className)}
+            className={cn(
+              'relative size-9 shrink-0 cursor-pointer rounded-full p-2 text-gray-600',
+              'hover:bg-gray-100 hover:text-gray-900',
+              'dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-50',
+              className,
+            )}
             aria-label={unreadCount > 0 ? `${unreadCount} thông báo chưa đọc` : 'Thông báo'}
           >
             <Bell className="size-4" />
             {unreadCount > 0 ? (
               <span
-                className="pointer-events-none absolute right-0 top-0 z-10 flex h-[18px] min-w-[18px] -translate-y-1/2 translate-x-1/2 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold leading-none text-destructive-foreground shadow-sm ring-2 ring-background"
+                className="pointer-events-none absolute -right-1 -top-1 z-10 flex min-h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-600 px-1.5 py-0.5 text-center text-[10px] font-bold leading-none text-white shadow-sm"
                 aria-hidden
               >
                 {unreadCount > 99 ? '99+' : unreadCount}

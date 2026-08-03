@@ -5,6 +5,7 @@ import {
   BookOpen,
   ChevronRight,
   ClipboardCheck,
+  ImageIcon,
 } from "lucide-react";
 import Header from "@/components/User/Header/Header.jsx";
 import Footer from "@/components/User/Footer/Footer.jsx";
@@ -25,9 +26,6 @@ import { cn } from "@/lib/utils";
 import { MANGAKA_NAV_LINKS } from "@/constants/mangakaNav.js";
 
 const NAV_LINKS = MANGAKA_NAV_LINKS;
-
-const REVIEW_BADGE_CLASS =
-  "bg-amber-100 text-amber-700 hover:bg-amber-100 dark:bg-amber-500/15 dark:text-amber-400";
 
 function chapterNumSort(a, b) {
   const na =
@@ -60,67 +58,135 @@ function ChapterReviewItem({ review, annotatorChapters }) {
   return (
     <Link
       to={`/mangaka/review/chapter/${chapterId}`}
-      className="group flex min-w-0 items-stretch gap-3 rounded-xl border bg-card p-2.5 transition-all hover:border-primary/40 hover:bg-muted/30 hover:shadow-sm"
+      className={cn(
+        "group flex w-full min-w-0 cursor-pointer items-center gap-4 rounded-xl border border-border/80 bg-white p-3.5",
+        "transition-all duration-150 hover:border-amber-300 hover:bg-amber-50/30 hover:shadow-sm",
+        "dark:bg-card dark:hover:border-amber-500/40 dark:hover:bg-amber-500/5",
+      )}
     >
-      <div className="relative size-14 shrink-0 overflow-hidden rounded-lg bg-muted sm:size-16">
+      <div className="relative h-20 w-16 shrink-0 overflow-hidden rounded-lg bg-gray-100 dark:bg-zinc-800">
         {thumbUrl ? (
           <img
             src={thumbUrl}
             alt=""
-            className="size-full object-cover transition-transform group-hover:scale-105"
+            className="size-full object-cover transition-transform duration-200 group-hover:scale-105"
           />
         ) : (
-          <div className="flex size-full items-center justify-center text-muted-foreground">
-            <BookOpen className="size-5 opacity-40" />
+          <div className="flex size-full items-center justify-center text-gray-400">
+            <BookOpen className="size-6 opacity-50" />
           </div>
         )}
       </div>
 
-      <div className="min-w-0 flex-1 space-y-1 py-0.5">
-        <div className="flex items-start justify-between gap-2">
-          <p className="truncate text-sm font-semibold leading-tight">
-            Ch. {chapter?.num}
-            {chapter?.title ? (
-              <span className="ml-1 font-normal text-muted-foreground">
-                · {chapter.title}
-              </span>
-            ) : null}
-          </p>
-          <Badge
-            className={cn(
-              "shrink-0",
-              awaitingTe
-                ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400"
-                : REVIEW_BADGE_CLASS,
-            )}
-            variant="secondary"
-          >
-            {awaitingTe ? "Chờ gửi TE" : "Chờ duyệt"}
-          </Badge>
-        </div>
-        <p className="truncate text-xs text-muted-foreground">
+      <div className="min-w-0 flex-1 space-y-1">
+        <p className="truncate text-base font-bold leading-snug text-gray-900 dark:text-zinc-50">
+          Ch. {chapter?.num}
+          {chapter?.title ? (
+            <span className="font-semibold text-gray-800 dark:text-zinc-200">
+              {" "}· {chapter.title}
+            </span>
+          ) : null}
+        </p>
+        <p className="truncate text-sm text-gray-600 dark:text-zinc-400">
           {chapter?.assistantName
             ? `Assistant: ${chapter.assistantName}`
             : "Đã nộp từ Assistant"}
           {tasks.length > 0 ? ` · ${approvedTasks}/${tasks.length} task` : ""}
         </p>
         {awaitingTe ? (
-          <p className="text-[11px] font-medium text-emerald-600">
+          <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400">
             Đã duyệt — chọn TE và gửi
           </p>
         ) : unapproved > 0 ? (
-          <p className="text-[11px] font-medium text-amber-600">
+          <p className="text-sm font-medium text-amber-600 dark:text-amber-400">
             Còn {unapproved} task cần nhận/duyệt
           </p>
         ) : tasks.length > 0 ? (
-          <p className="text-[11px] font-medium text-emerald-600">
+          <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400">
             Đủ điều kiện phê duyệt chapter
           </p>
         ) : null}
       </div>
 
-      <ChevronRight className="size-4 shrink-0 self-center text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+      <div className="flex shrink-0 items-center gap-2.5 sm:gap-3">
+        <Badge
+          className={cn(
+            "hidden rounded-full px-2.5 py-1 text-xs font-semibold sm:inline-flex",
+            awaitingTe
+              ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300"
+              : "bg-amber-100 text-amber-800 hover:bg-amber-100 dark:bg-amber-500/15 dark:text-amber-300",
+          )}
+          variant="secondary"
+        >
+          {awaitingTe ? "Chờ gửi TE" : "Chờ duyệt"}
+        </Badge>
+        <span
+          className={cn(
+            "inline-flex size-9 items-center justify-center rounded-full border border-gray-200 bg-gray-50 text-gray-500",
+            "transition-all duration-150 group-hover:border-amber-300 group-hover:bg-amber-50 group-hover:text-amber-700",
+            "dark:border-zinc-700 dark:bg-zinc-800 dark:group-hover:border-amber-500/40 dark:group-hover:bg-amber-500/10 dark:group-hover:text-amber-300",
+          )}
+          aria-hidden
+        >
+          <ChevronRight className="size-4 transition-transform duration-150 group-hover:translate-x-0.5" />
+        </span>
+      </div>
     </Link>
+  );
+}
+
+function SeriesReviewCard({ series, seriesMeta, reviews, onSelect }) {
+  const coverUrl = seriesMeta?.coverImage
+    ? resolveMediaUrl(seriesMeta.coverImage)
+    : null;
+  const pendingCount = reviews.length;
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className="group cursor-pointer text-left"
+    >
+      <Card
+        className={cn(
+          "gap-0 overflow-hidden rounded-xl border-border/70 bg-white py-0 shadow-sm",
+          "transition-transform duration-200 hover:scale-[1.02] hover:shadow-md",
+          "dark:bg-card",
+        )}
+      >
+        <div className="relative aspect-[3/4] w-full overflow-hidden bg-gray-100 dark:bg-zinc-800">
+          {coverUrl ? (
+            <img
+              src={coverUrl}
+              alt=""
+              className="size-full object-cover transition-transform duration-300 group-hover:scale-105"
+            />
+          ) : (
+            <div className="flex size-full flex-col items-center justify-center gap-2 bg-gradient-to-b from-gray-50 to-gray-100 text-gray-400 dark:from-zinc-800 dark:to-zinc-900 dark:text-zinc-500">
+              <span className="flex size-12 items-center justify-center rounded-2xl bg-white shadow-sm ring-1 ring-gray-200/80 dark:bg-zinc-800 dark:ring-zinc-700">
+                <ImageIcon className="size-6" strokeWidth={1.5} />
+              </span>
+              <span className="text-[11px] font-medium tracking-wide">Chưa có cover</span>
+            </div>
+          )}
+          <span className="absolute right-2 top-2 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 shadow-sm dark:bg-amber-500/20 dark:text-amber-200">
+            {pendingCount} chapter chờ duyệt
+          </span>
+        </div>
+
+        <div className="space-y-1 border-t border-border/60 bg-white px-3 py-3 dark:bg-card">
+          <p
+            className="truncate text-sm font-bold text-gray-900 dark:text-zinc-50"
+            title={series}
+          >
+            {series}
+          </p>
+          <p className="text-xs font-medium text-gray-500 dark:text-zinc-400">
+            Nhấn để xem chapter
+          </p>
+        </div>
+      </Card>
+    </button>
   );
 }
 
@@ -234,36 +300,60 @@ export default function MangakaAssistantReview() {
     <div className="flex min-h-screen flex-col bg-background">
       <Header links={NAV_LINKS} onLogout={user ? handleLogout : undefined} />
 
-      <main className="page-container flex min-h-0 flex-1 flex-col gap-6 py-6 lg:py-8">
-        <header className="flex flex-wrap items-center gap-3 border-b border-border/60 pb-4">
-          {selectedGroup ? (
-            <Button type="button" variant="ghost" size="sm" onClick={() => setSelectedSeries(null)}>
-              <ArrowLeft className="size-4" />
-              Tất cả series
-            </Button>
-          ) : (
-            <Button type="button" variant="ghost" size="sm" asChild>
-              <Link to="/mangaka">
+      <main
+        className={cn(
+          "mx-auto flex w-full min-h-[60vh] min-w-0 flex-1 flex-col gap-6 px-6 py-8",
+          selectedGroup ? "max-w-5xl" : "page-container max-w-7xl",
+        )}
+      >
+        <header className="flex flex-col gap-3 border-b border-border/60 pb-5">
+          <div className="flex flex-wrap items-center gap-2">
+            {selectedGroup ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 -ml-2 gap-1.5 rounded-lg px-2 text-gray-600 hover:text-gray-900"
+                onClick={() => setSelectedSeries(null)}
+              >
                 <ArrowLeft className="size-4" />
-                Quay lại workspace
-              </Link>
-            </Button>
-          )}
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium uppercase tracking-widest text-amber-600">
+                Tất cả series
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 -ml-2 gap-1.5 rounded-lg px-2 text-gray-600 hover:text-gray-900"
+                asChild
+              >
+                <Link to="/mangaka">
+                  <ArrowLeft className="size-4" />
+                  Quay lại workspace
+                </Link>
+              </Button>
+            )}
+            <span
+              className="inline-flex items-center rounded-full border border-amber-200/80 bg-amber-50 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300"
+            >
               Mangaka · Duyệt bản Assistant
-            </p>
-            <h1 className="flex flex-wrap items-center gap-2 text-xl font-semibold tracking-tight sm:text-2xl">
-              <ClipboardCheck className="size-5 shrink-0 text-amber-600" />
-              {selectedGroup ? selectedGroup.series : "Series chờ duyệt"}
-              {reviewQueue.length > 0 ? (
-                <Badge variant="secondary" className="text-sm font-normal">
-                  {selectedGroup
-                    ? `${selectedGroup.reviews.length} chapter`
-                    : `${reviewsBySeries.length} series · ${reviewQueue.length} chapter`}
-                </Badge>
-              ) : null}
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <h1 className="flex min-w-0 flex-wrap items-center gap-2.5 text-2xl font-bold tracking-tight text-gray-900 dark:text-zinc-50">
+              <ClipboardCheck className="size-6 shrink-0 text-amber-600" />
+              <span className="min-w-0 truncate">
+                {selectedGroup ? selectedGroup.series : "Series chờ duyệt"}
+              </span>
             </h1>
+            {reviewQueue.length > 0 ? (
+              <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                {selectedGroup
+                  ? `${selectedGroup.reviews.length} chapter`
+                  : `${reviewsBySeries.length} series · ${reviewQueue.length} chapter`}
+              </span>
+            ) : null}
           </div>
         </header>
 
@@ -288,66 +378,36 @@ export default function MangakaAssistantReview() {
             </CardContent>
           </Card>
         ) : selectedGroup ? (
-          <div className="mx-auto w-full max-w-2xl space-y-2">
-            {selectedGroup.reviews.map((review) => (
-              <ChapterReviewItem
-                key={review.chapter?.id ?? review.submission?.id}
-                review={review}
-                annotatorChapters={annotatorChapters}
+          <section className="flex flex-1 flex-col gap-4">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-medium text-gray-600 dark:text-zinc-400">
+                Chapter cần xử lý
+              </p>
+              <p className="text-xs text-gray-500 dark:text-zinc-500">
+                Chọn một chapter để duyệt chi tiết
+              </p>
+            </div>
+            <div className="flex w-full flex-col gap-3">
+              {selectedGroup.reviews.map((review) => (
+                <ChapterReviewItem
+                  key={review.chapter?.id ?? review.submission?.id}
+                  review={review}
+                  annotatorChapters={annotatorChapters}
+                />
+              ))}
+            </div>
+          </section>
+        ) : (
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+            {reviewsBySeries.map(({ series, seriesMeta, reviews }) => (
+              <SeriesReviewCard
+                key={series}
+                series={series}
+                seriesMeta={seriesMeta}
+                reviews={reviews}
+                onSelect={() => setSelectedSeries(series)}
               />
             ))}
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-            {reviewsBySeries.map(({ series, seriesMeta, reviews }) => {
-              const color = seriesMeta?.color ?? "#e11d48";
-              const coverUrl = seriesMeta?.coverImage
-                ? resolveMediaUrl(seriesMeta.coverImage)
-                : null;
-              const initials = (series.length >= 2 ? series : `${series}●`).slice(0, 2);
-
-              return (
-                <button
-                  key={series}
-                  type="button"
-                  onClick={() => setSelectedSeries(series)}
-                  className="group text-left"
-                >
-                  <Card className="gap-0 overflow-hidden py-0 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
-                    <div
-                      className="relative aspect-[3/4] w-full overflow-hidden bg-muted"
-                      style={
-                        coverUrl
-                          ? undefined
-                          : {
-                              background: `linear-gradient(145deg, ${color}, ${color}99)`,
-                            }
-                      }
-                    >
-                      {coverUrl ? (
-                        <img
-                          src={coverUrl}
-                          alt=""
-                          className="size-full object-cover transition-transform duration-300 group-hover:scale-105"
-                        />
-                      ) : (
-                        <div className="flex size-full items-center justify-center text-2xl font-bold text-white/90">
-                          {initials}
-                        </div>
-                      )}
-                      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 via-black/35 to-transparent px-2.5 pb-2.5 pt-10">
-                        <p className="line-clamp-2 text-sm font-semibold leading-snug text-white">
-                          {series}
-                        </p>
-                        <p className="mt-1 text-xs font-medium text-amber-200">
-                          {reviews.length} chapter chờ duyệt
-                        </p>
-                      </div>
-                    </div>
-                  </Card>
-                </button>
-              );
-            })}
           </div>
         )}
       </main>

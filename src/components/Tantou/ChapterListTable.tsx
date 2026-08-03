@@ -17,7 +17,7 @@ function ChapterStatusBadge({ status }: { status: string }) {
     return (
       <Badge
         variant="outline"
-        className="border-sky-200 bg-sky-500/10 font-medium text-sky-800 dark:border-sky-500/30 dark:text-sky-200"
+        className="h-5 border-sky-200 bg-sky-50 px-1.5 text-[10px] font-medium text-sky-800"
       >
         Đã lên lịch
       </Badge>
@@ -27,7 +27,7 @@ function ChapterStatusBadge({ status }: { status: string }) {
     return (
       <Badge
         variant="outline"
-        className="border-violet-200 bg-violet-500/10 font-medium text-violet-800 dark:border-violet-500/30 dark:text-violet-200"
+        className="h-5 border-violet-200 bg-violet-50 px-1.5 text-[10px] font-medium text-violet-800"
       >
         Chờ phát hành
       </Badge>
@@ -38,10 +38,10 @@ function ChapterStatusBadge({ status }: { status: string }) {
     <Badge
       variant="outline"
       className={cn(
-        "font-medium",
+        "h-5 px-1.5 text-[10px] font-medium",
         approved
-          ? "border-emerald-200 bg-emerald-500/10 text-emerald-700 dark:border-emerald-500/30 dark:text-emerald-300"
-          : "border-amber-200 bg-amber-500/10 text-amber-800 dark:border-amber-500/30 dark:text-amber-200",
+          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+          : "border-amber-200 bg-amber-50 text-amber-800",
       )}
     >
       {approved ? "Đã duyệt" : "Chờ duyệt"}
@@ -57,34 +57,36 @@ export function ChapterListTable({
   onOpen,
 }: ChapterListTableProps) {
   return (
-    <div className="space-y-3 rounded-2xl border border-border/80 bg-card/40 p-4 dark:bg-zinc-900/40">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <BookOpen className="size-4 text-sky-600 dark:text-sky-400" />
-          <h3 className="font-semibold text-foreground">Danh sách chương</h3>
+    <div className="rounded-xl border border-gray-100 bg-white p-2.5 shadow-sm">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          <BookOpen className="size-3.5 text-sky-600" />
+          <h3 className="text-xs font-semibold text-gray-900">Danh sách chương</h3>
         </div>
-        <Badge variant="outline">{rows.length}</Badge>
+        <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+          {rows.length}
+        </Badge>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-border/60">
-        <table className="min-w-full divide-y divide-border text-sm">
-          <thead className="bg-muted/50 text-left text-muted-foreground">
+      <div className="max-h-[120px] overflow-auto rounded-lg border border-gray-100 scrollbar-thin">
+        <table className="min-w-full divide-y divide-gray-100 text-sm">
+          <thead className="sticky top-0 z-[1] bg-gray-50 text-left text-[10px] text-gray-500">
             <tr>
-              <th className="px-3 py-2.5 font-medium">#</th>
-              <th className="px-3 py-2.5 font-medium">Chương</th>
-              <th className="hidden px-3 py-2.5 font-medium sm:table-cell">
+              <th className="px-2.5 py-1.5 font-medium">#</th>
+              <th className="px-2.5 py-1.5 font-medium">Chương</th>
+              <th className="hidden px-2.5 py-1.5 font-medium sm:table-cell">
                 Ngày gửi
               </th>
-              <th className="px-3 py-2.5 font-medium">Trạng thái</th>
-              <th className="px-3 py-2.5 text-right font-medium">Thao tác</th>
+              <th className="px-2.5 py-1.5 font-medium">Trạng thái</th>
+              <th className="px-2.5 py-1.5 text-right font-medium">Thao tác</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-border bg-background/60">
+          <tbody className="divide-y divide-gray-50 bg-white">
             {loading ? (
               <tr>
                 <td
                   colSpan={5}
-                  className="px-3 py-8 text-center text-muted-foreground"
+                  className="px-2.5 py-4 text-center text-xs text-gray-500"
                 >
                   Đang tải chapter của truyện…
                 </td>
@@ -93,7 +95,7 @@ export function ChapterListTable({
               <tr>
                 <td
                   colSpan={5}
-                  className="px-3 py-8 text-center text-muted-foreground"
+                  className="px-2.5 py-4 text-center text-xs text-gray-500"
                 >
                   Chưa có chapter trong series này.
                 </td>
@@ -108,25 +110,25 @@ export function ChapterListTable({
                     className={cn(
                       "transition-colors",
                       isViewing &&
-                        "bg-sky-500/10 ring-1 ring-inset ring-sky-400/30",
-                      !isViewing && isReviewTarget && "bg-muted/30",
-                      !isViewing && "hover:bg-muted/40",
+                        "border-l-4 border-blue-600 bg-blue-50/70 font-medium text-blue-900",
+                      !isViewing && isReviewTarget && "bg-gray-50",
+                      !isViewing && "hover:bg-gray-50",
                     )}
                   >
-                    <td className="px-3 py-2.5 font-medium">{row.index}</td>
-                    <td className="max-w-[140px] truncate px-3 py-2.5 sm:max-w-none">
+                    <td className="px-2.5 py-1.5 text-xs">{row.index}</td>
+                    <td className="max-w-[140px] truncate px-2.5 py-1.5 text-xs sm:max-w-none">
                       {row.name}
                     </td>
-                    <td className="hidden px-3 py-2.5 text-muted-foreground sm:table-cell">
+                    <td className="hidden px-2.5 py-1.5 text-xs text-gray-500 sm:table-cell">
                       {row.releaseDate}
                     </td>
-                    <td className="px-3 py-2.5">
+                    <td className="px-2.5 py-1.5">
                       <ChapterStatusBadge status={row.status} />
                     </td>
-                    <td className="px-3 py-2.5 text-right">
+                    <td className="px-2.5 py-1.5 text-right">
                       {isViewing ? (
-                        <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-300/70 bg-sky-500/10 px-2.5 py-1 text-xs font-medium text-sky-800 dark:border-sky-500/40 dark:text-sky-200">
-                          <Eye className="size-3.5" />
+                        <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-800">
+                          <Eye className="size-3" />
                           Đang chọn
                         </span>
                       ) : (
@@ -134,7 +136,7 @@ export function ChapterListTable({
                           type="button"
                           size="sm"
                           variant="outline"
-                          className="h-8"
+                          className="h-6 px-2 text-[10px]"
                           onClick={() => onOpen(row.id)}
                         >
                           Mở

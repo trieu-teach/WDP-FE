@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   ChevronLeft,
   ChevronRight,
@@ -285,17 +286,23 @@ export const TantouPageAnnotator = forwardRef<
     return (
       <div
         className={cn(
-          "te-page-nav shrink-0 flex items-center justify-center gap-4 border-t px-4 py-3",
+          "te-page-nav flex shrink-0 items-center justify-center gap-3 border-t px-4 py-2.5",
           darkToolbar
             ? "border-white/10 bg-zinc-900/95"
-            : "border-border/50 bg-muted/20",
+            : "border-slate-100 bg-slate-50/80",
         )}
       >
         <Button
           type="button"
           size="sm"
           variant="outline"
-          className={cn("min-w-[7.5rem]", darkToolbar && outlineOnDark)}
+          className={cn(
+            "h-9 min-w-[7.5rem] items-center justify-center gap-1.5 rounded-lg text-xs font-medium transition-colors",
+            "disabled:pointer-events-none disabled:opacity-40",
+            darkToolbar
+              ? outlineOnDark
+              : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100 hover:text-slate-900",
+          )}
           disabled={!canGoPrev}
           onClick={() => goToPage(-1)}
           aria-label="Trang trước"
@@ -305,12 +312,12 @@ export const TantouPageAnnotator = forwardRef<
         </Button>
         <span
           className={cn(
-            "min-w-[6.5rem] text-center text-sm tabular-nums",
-            darkToolbar ? "text-zinc-300" : "text-muted-foreground",
+            "min-w-[6.5rem] text-center text-xs tabular-nums",
+            darkToolbar ? "text-zinc-300" : "text-slate-500",
           )}
         >
           Trang{" "}
-          <strong className={darkToolbar ? "text-white" : "text-foreground"}>
+          <strong className={darkToolbar ? "text-white" : "text-slate-800"}>
             {currentPageIndex + 1}
           </strong>
           {" / "}
@@ -320,7 +327,13 @@ export const TantouPageAnnotator = forwardRef<
           type="button"
           size="sm"
           variant="outline"
-          className={cn("min-w-[7.5rem]", darkToolbar && outlineOnDark)}
+          className={cn(
+            "h-9 min-w-[7.5rem] items-center justify-center gap-1.5 rounded-lg text-xs font-medium transition-colors",
+            "disabled:pointer-events-none disabled:opacity-40",
+            darkToolbar
+              ? outlineOnDark
+              : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100 hover:text-slate-900",
+          )}
           disabled={!canGoNext}
           onClick={() => goToPage(1)}
           aria-label="Trang sau"
@@ -339,8 +352,22 @@ export const TantouPageAnnotator = forwardRef<
   ) {
     return (
       <div className="te-editor__stage-wrap flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="te-editor__stage flex min-h-0 flex-1 items-start justify-center overflow-auto p-2 sm:p-3 md:items-center">
-          {renderPageBoard(boardRefEl, fullscreen)}
+        <div
+          className={cn(
+            "te-editor__stage te-canvas-viewport relative z-0 flex min-h-0 flex-1 items-start justify-center overflow-y-auto p-3 sm:items-center sm:p-4",
+            !fullscreen &&
+              "min-h-[min(68vh,640px)] max-h-[min(78vh,820px)] rounded-xl border border-slate-200 bg-gray-900 shadow-inner",
+            fullscreen && "bg-zinc-950",
+          )}
+        >
+          <div
+            className={cn(
+              "te-canvas-fit w-full",
+              !fullscreen && "flex max-h-full items-center justify-center",
+            )}
+          >
+            {renderPageBoard(boardRefEl, fullscreen)}
+          </div>
         </div>
         {renderPageNavBottom(darkToolbar)}
       </div>
@@ -352,22 +379,30 @@ export const TantouPageAnnotator = forwardRef<
     tone: "neutral" | "danger" = "neutral",
     darkToolbar = false,
   ) {
+    const base =
+      "inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs font-medium transition-all duration-150";
     if (darkToolbar) {
       if (active && tone === "danger") {
-        return "border-rose-400/50 bg-rose-500/20 text-rose-50 hover:bg-rose-500/30 hover:text-white";
+        return cn(base, "border border-rose-400/40 bg-rose-500/15 text-rose-100 hover:bg-rose-500/25");
       }
       if (active) {
-        return "border-indigo-400/60 bg-indigo-500/25 text-white hover:bg-indigo-500/35 hover:text-white";
+        return cn(base, "border border-slate-400/40 bg-white/15 text-white hover:bg-white/20");
       }
-      return "border-white/25 bg-white/5 text-white shadow-none hover:bg-white/12 hover:text-white";
+      return cn(base, "border border-white/20 bg-transparent text-zinc-200 hover:bg-white/10");
     }
     if (active && tone === "danger") {
-      return "border-rose-300 bg-rose-600 text-white hover:bg-rose-600 hover:text-white";
+      return cn(base, "border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100");
     }
     if (active) {
-      return "border-indigo-500 bg-indigo-600 text-white hover:bg-indigo-600 hover:text-white";
+      return cn(
+        base,
+        "border border-slate-300 bg-slate-100 text-slate-900 shadow-none hover:bg-slate-200/80",
+      );
     }
-    return "border-border/80 bg-background text-foreground hover:bg-muted";
+    return cn(
+      base,
+      "border border-transparent bg-transparent text-slate-600 hover:bg-slate-100 hover:text-slate-900",
+    );
   }
 
   function renderToolButtons({
@@ -382,7 +417,7 @@ export const TantouPageAnnotator = forwardRef<
               type="button"
               size="sm"
               variant="outline"
-              className={cn("h-8 gap-1.5", toolButtonClass(tool === "draw", "neutral", darkToolbar))}
+              className={cn(toolButtonClass(tool === "draw", "neutral", darkToolbar))}
               onClick={() => setTool("draw")}
             >
               <Square className="size-3.5" />
@@ -392,7 +427,7 @@ export const TantouPageAnnotator = forwardRef<
               type="button"
               size="sm"
               variant="outline"
-              className={cn("h-8 gap-1.5", toolButtonClass(tool === "select", "neutral", darkToolbar))}
+              className={cn(toolButtonClass(tool === "select", "neutral", darkToolbar))}
               onClick={() => setTool("select")}
             >
               <MousePointer2 className="size-3.5" />
@@ -402,7 +437,7 @@ export const TantouPageAnnotator = forwardRef<
               type="button"
               size="sm"
               variant="outline"
-              className={cn("h-8 gap-1.5", toolButtonClass(tool === "delete", "danger", darkToolbar))}
+              className={cn(toolButtonClass(tool === "delete", "danger", darkToolbar))}
               onClick={() => setTool("delete")}
             >
               <Eraser className="size-3.5" />
@@ -416,15 +451,13 @@ export const TantouPageAnnotator = forwardRef<
             size="sm"
             variant="outline"
             className={cn(
-              "h-8 gap-1.5",
-              darkToolbar
-                ? "border-white/25 bg-white/5 text-white shadow-none hover:bg-white/12 hover:text-white"
-                : "border-border/80 bg-background",
+              toolButtonClass(false, "neutral", darkToolbar),
             )}
             onClick={() => setIsFullscreen(true)}
+            title="Phóng to vừa màn hình"
           >
             <Maximize2 className="size-3.5" />
-            Phóng to
+            Vừa khung
           </Button>
         ) : null}
       </>
@@ -554,7 +587,7 @@ export const TantouPageAnnotator = forwardRef<
     return (
       <aside
         className={cn(
-          "te-notes-panel te-notes-panel--simple min-h-0 border-l border-border/60",
+          "te-notes-panel te-notes-panel--simple min-h-0 border-l border-slate-100 bg-slate-50/40",
           extraClassName,
         )}
       >
@@ -600,16 +633,15 @@ export const TantouPageAnnotator = forwardRef<
             </h3>
 
             {editorialNotes.length === 0 ? (
-              <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border/70 bg-muted/20 px-3 py-6 text-center">
-                <MessageSquareText className="size-7 text-muted-foreground/50" />
-                <p className="text-xs leading-relaxed text-muted-foreground">
+              <div className="flex flex-col items-center gap-1.5 rounded-lg border border-dashed border-slate-200 bg-white px-3 py-5 text-center">
+                <MessageSquareText className="size-5 text-slate-300" />
+                <p className="text-[11px] leading-relaxed text-slate-400">
                   {readOnly
                     ? "TE chưa để lại ô nhận xét trên trang này."
                     : (
                       <>
                         Chưa có nhận xét. Chọn{" "}
-                        <strong className="text-foreground">Tạo ô</strong>, kéo
-                        vùng trên trang rồi ghi nội dung chỉnh sửa.
+                        <strong className="font-medium text-slate-500">Tạo ô</strong> rồi kéo vùng trên ảnh.
                       </>
                     )}
                 </p>
@@ -669,7 +701,7 @@ export const TantouPageAnnotator = forwardRef<
                 </div>
               ) : (
                 <div className="te-selected-note-editor mt-3">
-                  <Label className="te-selected-note-editor__label">
+                  <Label className="te-selected-note-editor__label text-slate-600">
                     Loại nhận xét
                     <Select
                       value={selectedNote.taskType}
@@ -677,7 +709,7 @@ export const TantouPageAnnotator = forwardRef<
                         updateNoteField(selectedNote.id, "taskType", v)
                       }
                     >
-                      <SelectTrigger className="h-8">
+                      <SelectTrigger className="h-8 bg-white text-slate-800">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -696,7 +728,7 @@ export const TantouPageAnnotator = forwardRef<
                     }
                     placeholder="Mô tả chi tiết vùng cần chỉnh (VD: font thoại quá nhỏ, cần chỉnh khung 3)..."
                     rows={4}
-                    className="text-sm"
+                    className="bg-white text-sm text-slate-800 placeholder:text-slate-400"
                   />
                 </div>
               )
@@ -710,27 +742,32 @@ export const TantouPageAnnotator = forwardRef<
   return (
     <div
       ref={ref}
-      className="te-editor flex h-full min-h-0 flex-col scroll-mt-24 overflow-hidden rounded-2xl border border-border/70 bg-card shadow-lg"
+      className="te-editor relative z-0 flex h-full min-h-0 max-h-[min(82vh,900px)] flex-col scroll-mt-20 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
     >
-      <div className="te-editor__toolbar shrink-0 px-4 py-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-semibold text-foreground">
+      <div className="te-editor__toolbar shrink-0 border-b border-slate-100 bg-white px-3 py-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="min-w-0 space-y-0">
+            <p className="text-xs font-semibold text-slate-900 sm:text-sm">
               Khoanh vùng & nhận xét
             </p>
-            <p className="text-xs text-muted-foreground">
+            <p className="truncate text-[11px] text-slate-400">
               {submission.seriesTitle} · Ch. {submission.chapterNum} ·{" "}
               {activePageLabel}
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline">728×1030</Badge>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Badge
+              variant="outline"
+              className="h-6 rounded-md border-slate-200 bg-slate-50 px-1.5 text-[10px] font-medium text-slate-500"
+            >
+              728×1030
+            </Badge>
             {onClose ? (
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="size-8"
+                className="size-8 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-800"
                 onClick={onClose}
                 aria-label="Đóng"
               >
@@ -739,7 +776,7 @@ export const TantouPageAnnotator = forwardRef<
             ) : null}
           </div>
         </div>
-        <div className="mt-3 flex flex-wrap gap-1.5">{renderToolButtons()}</div>
+        <div className="mt-2 flex flex-wrap gap-1">{renderToolButtons()}</div>
       </div>
 
       <div className="te-editor__workspace te-editor__workspace--simple min-h-0 flex-1">
@@ -747,41 +784,46 @@ export const TantouPageAnnotator = forwardRef<
         {renderNotesPanel()}
       </div>
 
-      {isFullscreen ? (
-        <div
-          className="fixed inset-0 z-50 flex flex-col bg-zinc-950"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Phóng to trang truyện"
-        >
-          <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-zinc-900 px-4 py-3 text-white sm:px-5">
-            <div>
-              <p className="text-sm font-semibold">
-                {submission.seriesTitle} · Ch. {submission.chapterNum}
-              </p>
-              <p className="text-xs text-zinc-400">{activePageLabel}</p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {renderToolButtons({ darkToolbar: true, showZoom: false })}
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="border-white/25 bg-white/5 text-white shadow-none hover:bg-white/12 hover:text-white"
-                onClick={() => setIsFullscreen(false)}
-              >
-                <X className="size-4" />
-                Thu nhỏ
-              </Button>
-            </div>
-          </header>
+      {isFullscreen && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[200] flex flex-col bg-zinc-950"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Phóng to trang truyện"
+            >
+              <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-zinc-900 px-4 py-3 text-white sm:px-5">
+                <div>
+                  <p className="text-sm font-semibold">
+                    {submission.seriesTitle} · Ch. {submission.chapterNum}
+                  </p>
+                  <p className="text-xs text-zinc-400">{activePageLabel}</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {renderToolButtons({ darkToolbar: true, showZoom: false })}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="border-white/25 bg-white/5 text-white shadow-none hover:bg-white/12 hover:text-white"
+                    onClick={() => setIsFullscreen(false)}
+                  >
+                    <X className="size-4" />
+                    Thu nhỏ
+                  </Button>
+                </div>
+              </header>
 
-          <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[1fr_minmax(300px,360px)]">
-            {renderStageColumn(fsBoardRef, true, true)}
-            {renderNotesPanel("h-full max-h-none border-l border-white/10 bg-card")}
-          </div>
-        </div>
-      ) : null}
+              <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(260px,320px)]">
+                {renderStageColumn(fsBoardRef, true, true)}
+                {renderNotesPanel(
+                  "h-full max-h-none border-l border-slate-200 bg-white text-slate-800",
+                )}
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 });
