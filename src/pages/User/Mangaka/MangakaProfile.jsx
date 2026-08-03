@@ -37,14 +37,12 @@ import {
 import { getSession, logout, updateSession, ROLES } from '@/lib/auth.js'
 import { cn } from '@/lib/utils'
 import { slugifySeriesTitle } from '@/utils/seriesModel.js'
+import { MANGAKA_NAV_LINKS } from '@/constants/mangakaNav.js'
 import './MangakaProfile.css'
 
 const BIO_MAX = 500
 
-const NAV_LINKS = [
-  { to: '/', label: 'Trang chủ' },
-  { to: '/mangaka', label: 'Workspace' },
-]
+const NAV_LINKS = MANGAKA_NAV_LINKS
 
 function emptySocialLinks() {
   return { facebook: '', twitter: '', website: '' }

@@ -22,11 +22,9 @@ import {
 } from "@/utils/chapterTaskFlow.js";
 import { resolveAnnotatorChapter } from "@/utils/mangakaWorkspaceReader.js";
 import { cn } from "@/lib/utils";
+import { MANGAKA_NAV_LINKS } from "@/constants/mangakaNav.js";
 
-const NAV_LINKS = [
-  { to: "/", label: "Trang chủ" },
-  { to: "/mangaka", label: "Mangaka" },
-];
+const NAV_LINKS = MANGAKA_NAV_LINKS;
 
 const REVIEW_BADGE_CLASS =
   "bg-amber-100 text-amber-700 hover:bg-amber-100 dark:bg-amber-500/15 dark:text-amber-400";

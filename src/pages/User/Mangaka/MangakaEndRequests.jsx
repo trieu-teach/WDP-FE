@@ -31,11 +31,9 @@ import {
   mapSeriesEndRequestListResponse,
 } from '@/utils/seriesEndRequestMappers.js'
 import { cn } from '@/lib/utils'
+import { MANGAKA_NAV_LINKS } from '@/constants/mangakaNav.js'
 
-const NAV_LINKS = [
-  { to: '/', label: 'Trang chủ' },
-  { to: '/mangaka', label: 'Mangaka' },
-]
+const NAV_LINKS = MANGAKA_NAV_LINKS
 
 export default function MangakaEndRequests() {
   const navigate = useNavigate()
