@@ -24,7 +24,7 @@ import {
   seriesToForm,
   validateSeriesForm,
   SERIES_GENRES,
-  SERIES_FORMATS,
+  SERIES_AGE_RATINGS,
   SERIES_TAGS,
 } from '@/utils/seriesModel.js'
 import './AddSeriesModal.css'
@@ -37,12 +37,17 @@ const TARGET_AUDIENCES = [
   { value: 'all', label: 'Mọi lứa tuổi', hint: 'All ages' },
 ]
 
-const AGE_RATINGS = [
-  { value: 'All ages', label: 'Mọi lứa tuổi', icon: '🌱' },
-  { value: 'Teens 13+', label: 'Tuổi teen', icon: '🎒' },
-  { value: 'Mature 17+', label: 'Người lớn', icon: '🔞' },
-  { value: 'Adults Only 18+', label: 'Chỉ 18+', icon: '⛔' },
-]
+const AGE_RATINGS = SERIES_AGE_RATINGS.map((a) => ({
+  ...a,
+  icon:
+    a.value === 'All ages'
+      ? '🌱'
+      : a.value === 'Teens 13+'
+        ? '🎒'
+        : a.value === 'Mature 17+'
+          ? '🔞'
+          : '⛔',
+}))
 
 export default function AddSeriesModal({
   open,
@@ -353,6 +358,9 @@ export default function AddSeriesModal({
                     )
                   })}
                 </div>
+                {showErr('age_rating') && (
+                  <p className="series-modal__error">{showErr('age_rating')}</p>
+                )}
               </div>
 
               <div className="series-modal__field">

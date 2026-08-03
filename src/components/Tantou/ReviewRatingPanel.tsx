@@ -2,12 +2,6 @@ import { ClipboardCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import type { ReviewDraft, ReviewStatus } from "./reviewTypes";
 import { cn } from "@/lib/utils";
 
@@ -58,6 +52,9 @@ type ReviewRatingPanelProps = {
   saving?: boolean;
 };
 
+const textareaClass =
+  "min-h-[4.75rem] resize-y rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-none transition-colors placeholder:text-slate-400 focus-visible:border-emerald-500 focus-visible:ring-2 focus-visible:ring-emerald-500/30";
+
 export function ReviewRatingPanel({
   draft,
   requiresEbSubmit = true,
@@ -80,19 +77,19 @@ export function ReviewRatingPanel({
   const canPublish = typeof onPublish === "function" && publishEnabled;
 
   return (
-    <Card className="flex w-full flex-col gap-0 overflow-visible border-border/70 py-0 shadow-sm dark:border-zinc-700/80 dark:bg-zinc-950/80">
-      <CardHeader className="shrink-0 gap-1 border-b border-border/60 bg-muted/30 px-4 py-3 sm:px-5 [.border-b]:pb-3">
-        <CardTitle className="flex items-center gap-2 text-base font-semibold leading-tight text-foreground sm:text-lg">
-          <ClipboardCheck className="size-5 shrink-0 text-sky-600 dark:text-sky-400" />
+    <div className="flex w-full flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="shrink-0 border-b border-slate-100 bg-slate-50/90 px-3.5 py-2.5 sm:px-4">
+        <h2 className="flex items-center gap-2 text-sm font-semibold leading-tight text-slate-900">
+          <ClipboardCheck className="size-4 shrink-0 text-emerald-600" />
           Đánh giá & Phê duyệt
-        </CardTitle>
-      </CardHeader>
+        </h2>
+      </div>
 
-      <CardContent className="space-y-3 p-4 lg:p-5">
+      <div className="space-y-3 p-3.5 lg:p-4">
         {requiresEbSubmit ? (
           <>
-            <div className="space-y-1.5">
-              <Label htmlFor="tantou-feedback" className="text-sm font-medium">
+            <div className="space-y-1">
+              <Label htmlFor="tantou-feedback" className="text-xs font-medium text-slate-700">
                 Đánh giá tổng thể
               </Label>
               <Textarea
@@ -100,11 +97,12 @@ export function ReviewRatingPanel({
                 value={draft.reviewText}
                 onChange={(e) => onReviewTextChange(e.target.value)}
                 placeholder="Đánh giá tổng thể series, cốt truyện, nghệ thuật…"
-                className="min-h-16 resize-y border-border/80 bg-background/80 dark:bg-zinc-900/80"
+                rows={3}
+                className={textareaClass}
               />
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="tantou-quick-notes" className="text-sm font-medium">
+            <div className="space-y-1">
+              <Label htmlFor="tantou-quick-notes" className="text-xs font-medium text-slate-700">
                 Ghi chú nhanh
               </Label>
               <Textarea
@@ -112,14 +110,15 @@ export function ReviewRatingPanel({
                 value={draft.quickNotes ?? ""}
                 onChange={(e) => onQuickNotesChange?.(e.target.value)}
                 placeholder="Ưu / nhược điểm ngắn gọn…"
-                className="min-h-14 resize-y border-border/80 bg-background/80 dark:bg-zinc-900/80"
+                rows={3}
+                className={textareaClass}
               />
             </div>
             {isReject ? (
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <Label
                   htmlFor="tantou-revision-feedback"
-                  className="text-sm font-medium"
+                  className="text-xs font-medium text-slate-700"
                 >
                   Phản hồi chỉnh sửa (gửi Mangaka)
                 </Label>
@@ -128,14 +127,15 @@ export function ReviewRatingPanel({
                   value={draft.revisionFeedback ?? ""}
                   onChange={(e) => onRevisionFeedbackChange?.(e.target.value)}
                   placeholder="Hướng dẫn cụ thể để Mangaka cải thiện series…"
-                  className="min-h-14 resize-y border-border/80 bg-background/80 dark:bg-zinc-900/80"
+                  rows={3}
+                  className={textareaClass}
                 />
               </div>
             ) : null}
           </>
         ) : (
-          <div className="space-y-1.5">
-            <Label htmlFor="tantou-review-notes" className="text-sm font-medium">
+          <div className="space-y-1">
+            <Label htmlFor="tantou-review-notes" className="text-xs font-medium text-slate-700">
               Ghi chú / Nhận xét
             </Label>
             <Textarea
@@ -143,13 +143,14 @@ export function ReviewRatingPanel({
               value={draft.reviewText}
               onChange={(e) => onReviewTextChange(e.target.value)}
               placeholder='VD: "Trang 4 lỗi ảnh", "Cần chỉnh font thoại"…'
-              className="min-h-20 resize-y border-border/80 bg-background/80 dark:bg-zinc-900/80"
+              rows={3}
+              className={textareaClass}
             />
           </div>
         )}
 
         {publishOnlyMode && (publishHint || scheduledPublishAt) ? (
-          <div className="space-y-1.5 rounded-xl border border-amber-200/80 bg-amber-50/80 p-2.5 text-xs leading-relaxed text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+          <div className="space-y-1 rounded-lg border border-amber-200/80 bg-amber-50/80 p-2 text-[11px] leading-relaxed text-amber-950">
             {scheduledPublishAt ? (
               <p>
                 Đã lên lịch:{" "}
@@ -162,8 +163,8 @@ export function ReviewRatingPanel({
         ) : null}
 
         {!publishOnlyMode ? (
-          <div className="space-y-2 rounded-xl border border-border/80 bg-card/40 p-2.5 dark:bg-zinc-900/40">
-            <p className="text-sm font-semibold">Hành động</p>
+          <div className="space-y-1.5 rounded-lg border border-slate-100 bg-slate-50/60 p-2">
+            <p className="text-xs font-semibold text-slate-900">Hành động</p>
             <div className="space-y-1.5">
               {STATUS_OPTIONS.map((option) => {
                 const checked = draft.reviewStatus === option.value;
@@ -179,12 +180,12 @@ export function ReviewRatingPanel({
                   <label
                     key={option.value}
                     className={cn(
-                      "flex cursor-pointer items-start gap-2.5 rounded-lg border p-2.5 transition-colors",
+                      "flex cursor-pointer items-start gap-2 rounded-lg border p-2.5 transition-all duration-150",
                       checked && option.tone === "approve"
-                        ? "border-emerald-500/50 bg-emerald-500/10 dark:bg-emerald-500/15"
+                        ? "border-emerald-500 bg-emerald-50/60 shadow-sm"
                         : checked && option.tone === "reject"
-                          ? "border-rose-400/50 bg-rose-500/10 dark:bg-rose-500/15"
-                          : "border-border/60 hover:bg-muted/40",
+                          ? "border-rose-500 bg-rose-50/60 shadow-sm"
+                          : "border-slate-200 bg-white hover:bg-slate-50",
                     )}
                   >
                     <input
@@ -194,7 +195,7 @@ export function ReviewRatingPanel({
                       checked={checked}
                       onChange={() => onStatusChange(option.value)}
                       className={cn(
-                        "mt-0.5 size-4 shrink-0",
+                        "mt-0.5 size-3.5 shrink-0",
                         option.tone === "approve"
                           ? "accent-emerald-600"
                           : "accent-rose-600",
@@ -203,17 +204,17 @@ export function ReviewRatingPanel({
                     <span className="min-w-0 flex-1">
                       <span
                         className={cn(
-                          "block text-sm font-medium",
+                          "block text-xs font-medium sm:text-sm",
                           checked && option.tone === "approve"
-                            ? "text-emerald-800 dark:text-emerald-200"
+                            ? "text-emerald-800"
                             : checked && option.tone === "reject"
-                              ? "text-rose-800 dark:text-rose-200"
-                              : undefined,
+                              ? "text-rose-800"
+                              : "text-slate-900",
                         )}
                       >
                         {option.label}
                       </span>
-                      <span className="block text-xs leading-snug text-muted-foreground">
+                      <span className="mt-0.5 block text-[11px] leading-snug text-slate-500">
                         {description}
                       </span>
                     </span>
@@ -223,9 +224,9 @@ export function ReviewRatingPanel({
             </div>
           </div>
         ) : null}
-      </CardContent>
+      </div>
 
-      <div className="shrink-0 border-t border-border/60 bg-muted/20 p-3 sm:p-4 dark:bg-zinc-900/50">
+      <div className="shrink-0 border-t border-slate-100 bg-slate-50/70 p-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
           {requiresEbSubmit && onSaveDraft ? (
             <Button
@@ -233,7 +234,7 @@ export function ReviewRatingPanel({
               variant="outline"
               disabled={saving}
               onClick={onSaveDraft}
-              className="border-border bg-background"
+              className="h-10 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100"
             >
               Lưu tạm
             </Button>
@@ -250,12 +251,12 @@ export function ReviewRatingPanel({
                       || "Chỉ TE đã phê duyệt mới phát hành được khi chapter ở approved_by_EB.")
                 }
                 onClick={onPublish}
-                className="bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                className="h-11 rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:opacity-50"
               >
                 Phát hành
               </Button>
               {!canPublish && publishDisabledReason ? (
-                <p className="text-xs text-muted-foreground sm:text-right">
+                <p className="text-xs text-slate-500 sm:text-right">
                   {publishDisabledReason}
                 </p>
               ) : null}
@@ -265,7 +266,7 @@ export function ReviewRatingPanel({
               type="button"
               disabled={saving}
               onClick={onSendToMangaka}
-              className="bg-rose-600 text-white hover:bg-rose-700"
+              className="h-11 rounded-xl bg-rose-600 px-5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-rose-700"
             >
               Gửi yêu cầu chỉnh sửa
             </Button>
@@ -274,7 +275,7 @@ export function ReviewRatingPanel({
               type="button"
               disabled={saving}
               onClick={onSendToEb}
-              className="bg-emerald-600 text-white hover:bg-emerald-700"
+              className="h-11 rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700"
             >
               Phê duyệt & Gửi EB
             </Button>
@@ -284,7 +285,7 @@ export function ReviewRatingPanel({
                 type="button"
                 disabled={saving}
                 onClick={onSendToEb}
-                className="bg-emerald-600 text-white hover:bg-emerald-700"
+                className="h-11 rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700"
               >
                 Phê duyệt
               </Button>
@@ -299,7 +300,7 @@ export function ReviewRatingPanel({
                   }
                   onClick={onPublish}
                   variant="outline"
-                  className="border-emerald-500/40 disabled:opacity-50"
+                  className="h-10 rounded-xl border-emerald-500/40 disabled:opacity-50"
                 >
                   Phát hành
                 </Button>
@@ -308,6 +309,6 @@ export function ReviewRatingPanel({
           )}
         </div>
       </div>
-    </Card>
+    </div>
   );
 }

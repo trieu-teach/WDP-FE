@@ -17,6 +17,7 @@ import { ebEvaluationsService } from "@/api/ebEvaluations.service.js";
 import { ebScoresService } from "@/api/ebScores.service.js";
 import { getApiErrorMessage } from "@/api/http.js";
 import { placeholderPageDataUrl } from "@/utils/placeholderPageDataUrl.js";
+import { EB_NAV_LINKS } from "@/constants/ebNav.js";
 import { LABEL_EDITOR_BOARD } from "@/constants/roleTerminology.js";
 import {
   mapEbChapterPreviewResponse,
@@ -24,9 +25,7 @@ import {
 } from "@/utils/ebEvaluationMappers.js";
 import "./Eb.css";
 
-const NAV_LINKS = [
-  { to: "/", label: "Trang chủ" },
-];
+const NAV_LINKS = EB_NAV_LINKS;
 
 export default function EbSeriesDetail() {
   const navigate = useNavigate();

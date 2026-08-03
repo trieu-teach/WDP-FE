@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ImageIcon } from "lucide-react";
 import { resolveMediaUrl } from "@/api/http.js";
 import { seriesService } from "@/api/series.service.js";
@@ -21,14 +21,7 @@ import {
   isTeSeriesLevelSubmission,
   submissionTeTabType,
 } from "@/utils/teReviewPending.js";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { ChapterListTable } from "./ChapterListTable";
 import { TantouPageAnnotator } from "./TantouPageAnnotator";
@@ -169,23 +162,6 @@ type TantouChapterReviewDashboardProps = {
   saving?: boolean;
 };
 
-function MetaField({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="min-w-0 space-y-1">
-      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-        {label}
-      </p>
-      <div className="text-sm text-foreground">{children}</div>
-    </div>
-  );
-}
-
 function ChipList({
   items,
   emptyLabel = "—",
@@ -196,19 +172,19 @@ function ChipList({
   prefix?: string;
 }) {
   if (!items.length) {
-    return <span className="text-muted-foreground">{emptyLabel}</span>;
+    if (!emptyLabel) return null;
+    return <span className="text-xs text-gray-400">{emptyLabel}</span>;
   }
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <div className="flex flex-wrap items-center gap-1.5">
       {items.map((item) => (
-        <Badge
+        <span
           key={item}
-          variant="secondary"
-          className="rounded-full border border-border/60 bg-muted/50 px-2.5 py-0.5 font-normal text-foreground"
+          className="rounded-full border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-[10px] font-medium text-gray-600"
         >
           {prefix}
           {String(item).replace(/^#/, "")}
-        </Badge>
+        </span>
       ))}
     </div>
   );
@@ -827,174 +803,160 @@ export function TantouChapterReviewDashboard({
     || "—";
 
   return (
-    <div className="space-y-5 dark:text-zinc-100">
-      <header className="flex flex-wrap items-center gap-3 border-b border-border/60 pb-4">
-        <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
-          <ArrowLeft className="size-4" />
+    <div className="space-y-3 text-gray-900">
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1 px-1.5 text-xs text-gray-500 hover:text-gray-900"
+          onClick={onCancel}
+        >
+          <ArrowLeft className="size-3.5" />
           Quay lại
         </Button>
-        <div className="min-w-0 flex-1">
-          <h1 className="truncate text-xl font-bold tracking-tight sm:text-2xl">
-            {seriesTitle}
-          </h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            Tập {viewingSubmissionWithPages.chapterNum || "?"} ·{" "}
-            {viewingSubmissionWithPages.pageLabel || "Trang 1"} · Tác giả:{" "}
-            {authorName}
-          </p>
-        </div>
-        <Badge
-          className={cn(
-            "rounded-full px-3 py-1 text-xs font-medium",
-            requiresEbSubmit
-              ? "border border-amber-200 bg-amber-500/10 text-amber-900 hover:bg-amber-500/10 dark:border-amber-500/30 dark:text-amber-200"
-              : "border border-sky-200 bg-sky-500/10 text-sky-900 hover:bg-sky-500/10 dark:border-sky-500/30 dark:text-sky-200",
-          )}
-        >
-          {tePhaseLabel(submissionTeTabType(submission))}
-        </Badge>
-      </header>
+      </div>
 
-      <div className="space-y-5">
-        <div className="flex flex-col gap-4">
-          <Card className="border-border/70 shadow-sm dark:bg-zinc-950/60">
-            <CardHeader className="pb-2 pt-4">
-              <CardTitle className="text-base">Thông tin truyện</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-5 pb-5 md:flex-row md:items-start md:gap-6">
-              <div className="mx-auto w-full max-w-[140px] shrink-0 md:mx-0 md:w-[148px]">
-                <div className="aspect-[3/4] w-full overflow-hidden rounded-lg border border-border/70 bg-muted/30 shadow-sm">
-                  {coverPreviewUrl ? (
-                    <img
-                      src={coverPreviewUrl}
-                      alt=""
-                      className="size-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex size-full flex-col items-center justify-center gap-2 p-3 text-center text-muted-foreground">
-                      <ImageIcon className="size-8 opacity-35" />
-                      <span className="text-xs leading-snug">Chưa có ảnh bìa</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="grid min-w-0 flex-1 gap-x-6 gap-y-3 sm:grid-cols-2">
-                <MetaField label="Series">
-                  <p className="font-semibold leading-snug">{seriesTitle || "—"}</p>
-                </MetaField>
-                <MetaField label="Tác giả">
-                  <p className="font-medium leading-snug">{authorName}</p>
-                </MetaField>
-                <MetaField label="Thể loại">
-                  <ChipList items={draft.series_genre} emptyLabel="Chưa có" />
-                </MetaField>
-                <MetaField label="Tag">
-                  <ChipList items={draft.series_tags} emptyLabel="Chưa có" />
-                </MetaField>
-                <div className="sm:col-span-2">
-                  <MetaField label="Mô tả">
-                    <p className="max-h-24 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
-                      {draft.series_synopsis?.trim() || "Chưa có mô tả."}
-                    </p>
-                  </MetaField>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <ChapterListTable
-            rows={chapterRows}
-            activeId={activeChapterId}
-            viewingId={viewingChapterId ?? activeChapterId}
-            loading={false}
-            onOpen={handleOpenChapter}
-          />
-        </div>
-
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(300px,360px)] xl:items-stretch xl:gap-5">
-          <div className="flex min-h-[560px] min-w-0 flex-col xl:min-h-[640px]">
-            {viewingSubmissionWithPages ? (
-              <TantouPageAnnotator
-                ref={readerRef}
-                submission={viewingSubmissionWithPages}
-                storyPages={storyPages}
-                currentPageIndex={viewingPageIndex}
-                onPageIndexChange={handlePageIndexChange}
-                pageLabel={currentStoryPage?.pageLabel}
-                pageImageUrl={currentStoryPage?.imageUrl}
-                mangakaNotes={getMangakaNotesForStoryPage(
-                  viewingSubmissionWithPages,
-                  viewingPageIndex,
-                )}
-                editorialNotes={notesByPage[viewingPageIndex] ?? []}
-                readOnly={!canEditNotes || loadingPage}
-                onEditorialNotesChange={
-                  canEditNotes ? handleEditorialNotesChange : undefined
-                }
-                onClose={() => setViewingChapterId(null)}
+      <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-white px-3 py-2.5 shadow-sm">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <div className="h-14 w-11 shrink-0 overflow-hidden rounded-md border border-gray-100 bg-gray-50">
+            {coverPreviewUrl ? (
+              <img
+                src={coverPreviewUrl}
+                alt=""
+                className="size-full object-cover"
               />
             ) : (
-              <div className="flex min-h-[420px] flex-1 items-center justify-center rounded-2xl border border-dashed border-border/80 bg-muted/20 px-4 py-10 text-center text-sm text-muted-foreground">
-                Chọn <strong>Mở</strong> trong danh sách chapter để xem trang
-                truyện cần nhận xét.
+              <div className="flex size-full items-center justify-center text-gray-400">
+                <ImageIcon className="size-4 opacity-60" />
               </div>
             )}
           </div>
-
-          <div className="flex flex-col xl:sticky xl:top-4 xl:self-start">
-            <ReviewRatingPanel
-              draft={draft}
-              requiresEbSubmit={requiresEbSubmit}
-              publishOnlyMode={publishOnlyMode}
-              publishEnabled={publishEnabled}
-              publishDisabledReason={publishDisabledReason}
-              publishHint={
-                publishOnlyMode
-                  ? (needsManualSchedule
-                    ? TE_PUBLISH_BUFFER_HINT
-                    : "Chapter tiếp theo sẽ lên lịch theo chu kỳ series (publication_schedule). Job tự publish khi đủ buffer.")
-                  : undefined
-              }
-              scheduledPublishAt={
-                publishOnlyMode && scheduledPublishLabel
-                  ? scheduledPublishLabel
-                  : null
-              }
-              saving={saving}
-              onReviewTextChange={(text) =>
-                setDraft((c) => ({ ...c, reviewText: text }))
-              }
-              onQuickNotesChange={(text) =>
-                setDraft((c) => ({ ...c, quickNotes: text }))
-              }
-              onRevisionFeedbackChange={(text) =>
-                setDraft((c) => ({ ...c, revisionFeedback: text }))
-              }
-              onStatusChange={(reviewStatus) =>
-                setDraft((c) => ({ ...c, reviewStatus }))
-              }
-              onSaveDraft={
-                requiresEbSubmit
-                  ? () => onSaveReview(buildPayload(), { saveDraftOnly: true })
-                  : undefined
-              }
-              onSendToMangaka={() =>
-                onSaveReview(buildPayload(), { submitAction: "reject" })
-              }
-              onSendToEb={() =>
-                onSaveReview(buildPayload(), { submitAction: "publish" })
-              }
-              onPublish={() => {
-                if (!publishEnabled) return;
-                if (needsManualSchedule) {
-                  setPublishScheduleOpen(true);
-                  return;
-                }
-                onSaveReview(buildPayload(), { submitAction: "release" });
-              }}
-            />
+          <div className="min-w-0 space-y-0.5">
+            <h1 className="truncate text-base font-semibold tracking-tight text-gray-900 sm:text-lg">
+              {seriesTitle || "—"}
+            </h1>
+            <div className="flex flex-wrap items-center gap-1.5 text-xs text-gray-500">
+              <span className="font-medium text-gray-700">{authorName}</span>
+              <span className="text-gray-300">·</span>
+              <span>
+                Tập {viewingSubmissionWithPages.chapterNum || "?"} ·{" "}
+                {viewingSubmissionWithPages.pageLabel || "Trang 1"}
+              </span>
+              {(draft.series_genre?.length || draft.series_tags?.length) ? (
+                <>
+                  <span className="text-gray-300">·</span>
+                  <div className="inline-flex flex-wrap items-center gap-1">
+                    <ChipList items={draft.series_genre} emptyLabel="" />
+                    <ChipList items={draft.series_tags} emptyLabel="" />
+                  </div>
+                </>
+              ) : null}
+            </div>
           </div>
+        </div>
+        <span
+          className={cn(
+            "shrink-0 rounded-full border px-2.5 py-0.5 text-[10px] font-medium",
+            requiresEbSubmit
+              ? "border-amber-200 bg-amber-50 text-amber-700"
+              : "border-sky-200 bg-sky-50 text-sky-700",
+          )}
+        >
+          {tePhaseLabel(submissionTeTabType(submission))}
+        </span>
+      </div>
+
+      <ChapterListTable
+        rows={chapterRows}
+        activeId={activeChapterId}
+        viewingId={viewingChapterId ?? activeChapterId}
+        loading={false}
+        onOpen={handleOpenChapter}
+      />
+
+      <div className="mt-1 grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,320px)] lg:gap-5">
+        <div className="relative z-0 min-w-0">
+          {viewingSubmissionWithPages ? (
+            <TantouPageAnnotator
+              ref={readerRef}
+              submission={viewingSubmissionWithPages}
+              storyPages={storyPages}
+              currentPageIndex={viewingPageIndex}
+              onPageIndexChange={handlePageIndexChange}
+              pageLabel={currentStoryPage?.pageLabel}
+              pageImageUrl={currentStoryPage?.imageUrl}
+              mangakaNotes={getMangakaNotesForStoryPage(
+                viewingSubmissionWithPages,
+                viewingPageIndex,
+              )}
+              editorialNotes={notesByPage[viewingPageIndex] ?? []}
+              readOnly={!canEditNotes || loadingPage}
+              onEditorialNotesChange={
+                canEditNotes ? handleEditorialNotesChange : undefined
+              }
+              onClose={() => setViewingChapterId(null)}
+            />
+          ) : (
+            <div className="flex min-h-[240px] items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500 shadow-sm">
+              Chọn <strong>Mở</strong> trong danh sách chapter để xem trang
+              truyện cần nhận xét.
+            </div>
+          )}
+        </div>
+
+        <div className="sticky top-20 z-10 h-fit self-start">
+          <ReviewRatingPanel
+            draft={draft}
+            requiresEbSubmit={requiresEbSubmit}
+            publishOnlyMode={publishOnlyMode}
+            publishEnabled={publishEnabled}
+            publishDisabledReason={publishDisabledReason}
+            publishHint={
+              publishOnlyMode
+                ? (needsManualSchedule
+                  ? TE_PUBLISH_BUFFER_HINT
+                  : "Chapter tiếp theo sẽ lên lịch theo chu kỳ series (publication_schedule). Job tự publish khi đủ buffer.")
+                : undefined
+            }
+            scheduledPublishAt={
+              publishOnlyMode && scheduledPublishLabel
+                ? scheduledPublishLabel
+                : null
+            }
+            saving={saving}
+            onReviewTextChange={(text) =>
+              setDraft((c) => ({ ...c, reviewText: text }))
+            }
+            onQuickNotesChange={(text) =>
+              setDraft((c) => ({ ...c, quickNotes: text }))
+            }
+            onRevisionFeedbackChange={(text) =>
+              setDraft((c) => ({ ...c, revisionFeedback: text }))
+            }
+            onStatusChange={(reviewStatus) =>
+              setDraft((c) => ({ ...c, reviewStatus }))
+            }
+            onSaveDraft={
+              requiresEbSubmit
+                ? () => onSaveReview(buildPayload(), { saveDraftOnly: true })
+                : undefined
+            }
+            onSendToMangaka={() =>
+              onSaveReview(buildPayload(), { submitAction: "reject" })
+            }
+            onSendToEb={() =>
+              onSaveReview(buildPayload(), { submitAction: "publish" })
+            }
+            onPublish={() => {
+              if (!publishEnabled) return;
+              if (needsManualSchedule) {
+                setPublishScheduleOpen(true);
+                return;
+              }
+              onSaveReview(buildPayload(), { submitAction: "release" });
+            }}
+          />
         </div>
       </div>
 

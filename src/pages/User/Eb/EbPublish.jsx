@@ -32,6 +32,7 @@ import {
 import { getSession, logout } from "@/lib/auth.js";
 import { ebEvaluationsService } from "@/api/ebEvaluations.service.js";
 import { getApiErrorMessage } from "@/api/http.js";
+import { EB_NAV_LINKS } from "@/constants/ebNav.js";
 import { LABEL_EDITOR_BOARD } from "@/constants/roleTerminology.js";
 import {
   EB_PUBLICATION_SCHEDULES,
@@ -53,9 +54,7 @@ import {
 import { cn } from "@/lib/utils";
 import "./Eb.css";
 
-const NAV_LINKS = [
-  { to: "/", label: "Trang chủ" },
-];
+const NAV_LINKS = EB_NAV_LINKS;
 
 const HOUR_OPTIONS = Array.from({ length: 24 }, (_, i) =>
   String(i).padStart(2, "0"),
@@ -426,13 +425,12 @@ export default function EbPublish() {
         : "";
       toast.success(
         whenLabel
-          ? `Series đã được duyệt · chuẩn bị phát hành. Tự động chuyển sang đang phát hành vào ${whenLabel}.`
+          ? `Confirm-publish OK · Series → approved_by_EB / upcoming. Job sẽ set published vào ${whenLabel}. Chapter 1 → pending_assistant (Mangaka/Assistant), không phải EB publish.`
           : (res?.message
-            || `Series "${seriesName}" đã duyệt phát hành${res?.council_average != null ? ` · ĐTB ${Number(res.council_average).toFixed(1)}` : ""}${
-              res?.series?.publication_status
-                ? ` · ${res.series.publication_status}`
-                : ""
-            }.`),
+            || `Series "${seriesName}" đã confirm-publish (approved_by_EB)${res?.council_average != null ? ` · ĐTB ${Number(res.council_average).toFixed(1)}` : ""}. Chapter đầu chuyển pending_assistant — TE publish chapter sau.`),
+      );
+      toast.message(
+        "Series chưa hiện với Reader ngay. Chờ scheduled_publish_at; lịch chapter đầu do TE xử lý sau khi Mangaka/Assistant hoàn tất.",
       );
       navigate("/eb");
     } catch (err) {
@@ -554,7 +552,10 @@ export default function EbPublish() {
                   Lịch phát hành series
                 </CardTitle>
                 <CardDescription>
-                  Chọn tần suất và/hoặc thời điểm phát hành cụ thể (giờ Việt Nam).
+                  Confirm-publish mở debut gate: series → approved_by_EB / upcoming;
+                  chapter 1 → pending_assistant. Series chưa published ngay — job chạy
+                  theo scheduled_publish_at. Lịch chapter do TE sau khi Mangaka/Assistant
+                  hoàn tất (không phải EB publish chapter).
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-1 flex-col gap-5 pb-5">

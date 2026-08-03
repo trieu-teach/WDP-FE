@@ -24,10 +24,11 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { getRolePath, logout, ROLES } from '@/lib/auth.js'
+import { getRolePath, logout, ROLES, ROLE_LABELS } from '@/lib/auth.js'
 import { useLoginRequired } from '@/hooks/useLoginRequired.js'
 import {
   LABEL_EDITOR_BOARD,
@@ -191,6 +192,10 @@ export default function Home() {
     }
     return String(displayName).slice(0, 2).toUpperCase() || 'U'
   }, [displayName])
+  const roleLabel = user?.role
+    ? (ROLE_LABELS[user.role] ?? String(user.role))
+    : null
+  const identitySubline = user?.email || roleLabel || user?.username || null
   const [heroIndex, setHeroIndex] = useState(0)
 
   function handleLogout() {
@@ -264,43 +269,82 @@ export default function Home() {
                     className="home-header__avatar-btn"
                     aria-label={`Tài khoản ${displayName}`}
                   >
-                    <Avatar className="home-header__avatar size-10">
+                    <Avatar className="home-header__avatar size-10 ring-2 ring-gray-100 transition hover:ring-red-400">
                       {user.avatarUrl ? (
                         <AvatarImage src={user.avatarUrl} alt="" />
                       ) : null}
-                      <AvatarFallback className="bg-[var(--home-green)] text-sm font-semibold text-white">
+                      <AvatarFallback className="bg-red-600 text-sm font-semibold text-white">
                         {avatarInitials}
                       </AvatarFallback>
                     </Avatar>
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-48">
-                  <DropdownMenuItem asChild>
+                <DropdownMenuContent
+                  align="end"
+                  sideOffset={8}
+                  className={cn(
+                    'w-64 rounded-xl border border-gray-100 bg-white p-1.5 shadow-lg',
+                    'focus:outline-none transition-all duration-150',
+                  )}
+                >
+                  <DropdownMenuLabel className="p-0 font-normal">
+                    <div className="flex items-center gap-3 px-2.5 py-2.5">
+                      <Avatar className="size-9 shrink-0 ring-2 ring-gray-100">
+                        {user.avatarUrl ? (
+                          <AvatarImage src={user.avatarUrl} alt="" />
+                        ) : null}
+                        <AvatarFallback className="bg-red-600 text-[11px] font-semibold text-white">
+                          {avatarInitials}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-gray-900">
+                          {displayName}
+                        </p>
+                        {identitySubline ? (
+                          <p className="truncate text-xs text-gray-500">
+                            {identitySubline}
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator className="my-1 bg-gray-100" />
+                  <DropdownMenuItem
+                    asChild
+                    className="cursor-pointer gap-3 rounded-lg px-3 py-2.5 text-sm text-gray-700 focus:bg-gray-50"
+                  >
                     <Link to="/">
-                      <HomeIcon className="size-4" />
-                      Home
+                      <HomeIcon className="size-4 text-gray-500" />
+                      Trang chủ
                     </Link>
                   </DropdownMenuItem>
                   {workspacePath ? (
-                    <DropdownMenuItem asChild>
+                    <DropdownMenuItem
+                      asChild
+                      className="cursor-pointer gap-3 rounded-lg px-3 py-2.5 text-sm text-gray-700 focus:bg-gray-50"
+                    >
                       <Link to={workspacePath}>
-                        <LayoutDashboard className="size-4" />
-                        Workspace
+                        <LayoutDashboard className="size-4 text-gray-500" />
+                        Không gian làm việc
                       </Link>
                     </DropdownMenuItem>
                   ) : null}
                   {canOpenProfile ? (
-                    <DropdownMenuItem asChild>
+                    <DropdownMenuItem
+                      asChild
+                      className="cursor-pointer gap-3 rounded-lg px-3 py-2.5 text-sm text-gray-700 focus:bg-gray-50"
+                    >
                       <Link to={profilePath}>
-                        <User className="size-4" />
-                        Profile
+                        <User className="size-4 text-gray-500" />
+                        Hồ sơ cá nhân
                       </Link>
                     </DropdownMenuItem>
                   ) : null}
-                  <DropdownMenuSeparator />
+                  <DropdownMenuSeparator className="my-1 bg-gray-100" />
                   <DropdownMenuItem
                     onClick={handleLogout}
-                    className="text-destructive focus:text-destructive"
+                    className="cursor-pointer gap-3 rounded-lg px-3 py-2.5 text-sm text-red-600 focus:bg-red-50 focus:text-red-700"
                   >
                     <LogOut className="size-4" />
                     Đăng xuất

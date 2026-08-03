@@ -11,6 +11,16 @@ export const MANGAKA_NAV_LINKS = [
   { to: '/mangaka?tab=series', label: 'Series' },
   { to: '/mangaka?tab=chapters', label: 'Chapter' },
   { to: '/mangaka?tab=assistants', label: 'Thuê Assistant' },
-  { to: '/mangaka?tab=annotate', label: 'Upload & ghi chú' },
-  { to: '/mangaka/review', label: 'Duyệt Assistant' },
+  {
+    to: '/mangaka?tab=annotate',
+    label: 'Upload & ghi chú',
+    shortLabel: '+ Upload',
+    intent: 'action',
+  },
+  {
+    to: '/mangaka/review',
+    label: 'Duyệt Assistant',
+    shortLabel: 'Duyệt',
+    intent: 'action',
+  },
 ]

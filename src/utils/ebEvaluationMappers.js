@@ -4,8 +4,79 @@ import { EB_COUNCIL_MEMBERS } from '@/utils/ebCouncilStorage.js'
 
 export const EB_SCORE_MAX = 5
 export const EB_COUNCIL_SIZE = 5
-/** Số thành viên HĐ tối thiểu để vào trang xác nhận lịch phát hành. */
+/** Số thành viên HĐ tối thiểu để nộp đánh giá / confirm-publish (BE: [3, 5]). */
 export const EB_COUNCIL_MIN_FOR_PUBLISH = 3
+export const EB_COUNCIL_MAX_FOR_EVALUATE = 5
+
+export const EB_EVALUATION_RESULTS = [
+  { value: 'approved', label: 'Duyệt (approved)' },
+  { value: 'revision', label: 'Yêu cầu chỉnh (revision)' },
+  { value: 'rejected', label: 'Từ chối (rejected)' },
+]
+
+export const EB_CLASSIFICATION_STYLES = {
+  khong_dat: {
+    label: 'KHÔNG ĐẠT',
+    note: 'Series chưa đạt chất lượng, cần chỉnh sửa lớn trước khi xét lại.',
+    className:
+      'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/15 dark:text-rose-200',
+  },
+  dat: {
+    label: 'ĐẠT',
+    note: 'Series có thể thông qua, nhưng cần cải thiện theo ghi chú.',
+    className:
+      'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200',
+  },
+  tot: {
+    label: 'TỐT',
+    note: 'Chất lượng series ổn định, phù hợp duyệt nhanh.',
+    className:
+      'border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-500/30 dark:bg-sky-500/15 dark:text-sky-200',
+  },
+  xuat_sac: {
+    label: 'XUẤT SẮC',
+    note: 'Series chất lượng cao, phù hợp đẩy nổi bật/banner.',
+    className:
+      'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200',
+  },
+}
+
+/** Map classification BE → style FE. */
+export function getEbClassificationStyle(classification, { scored = true, average = null } = {}) {
+  if (!scored) {
+    return {
+      code: null,
+      label: 'CHƯA CHẤM',
+      note: 'Chưa có điểm Hội đồng để phân loại.',
+      className:
+        'border-amber-300/80 bg-amber-500/15 text-amber-900 dark:border-amber-500/40 dark:text-amber-200',
+    }
+  }
+  const code = String(classification ?? '').toLowerCase()
+  if (EB_CLASSIFICATION_STYLES[code]) {
+    return { code, ...EB_CLASSIFICATION_STYLES[code] }
+  }
+  // Fallback theo điểm khi chưa có classification từ BE
+  if (average != null && Number.isFinite(Number(average))) {
+    const n = Number(average)
+    if (n < 2.5) return { code: 'khong_dat', ...EB_CLASSIFICATION_STYLES.khong_dat }
+    if (n < 3.5) return { code: 'dat', ...EB_CLASSIFICATION_STYLES.dat }
+    if (n < 4.25) return { code: 'tot', ...EB_CLASSIFICATION_STYLES.tot }
+    return { code: 'xuat_sac', ...EB_CLASSIFICATION_STYLES.xuat_sac }
+  }
+  return {
+    code: null,
+    label: '—',
+    note: '',
+    className: 'border-border bg-muted/40 text-muted-foreground',
+  }
+}
+
+/** Series còn ở bước first review (draft | submitted). */
+export function isEbFirstReviewSeriesStatus(status) {
+  const s = String(status ?? '').toLowerCase()
+  return s === 'draft' || s === 'submitted' || s === ''
+}
 
 /** Tiêu chí chấm điểm — khớp BE EB_CRITERIA_KEYS */
 export const EB_SCORE_CRITERIA = [
@@ -104,6 +175,8 @@ export function mapEbSeriesPendingItem(raw) {
     synopsis: String(raw.synopsis ?? '').trim(),
     genre: Array.isArray(raw.genre) ? raw.genre.filter(Boolean) : [],
     tags: Array.isArray(raw.tags) ? raw.tags.filter(Boolean) : [],
+    ageRating: raw.age_rating ?? raw.ageRating ?? raw.content_rating ?? null,
+    targetAudience: raw.target_audience ?? raw.targetAudience ?? null,
     status: raw.status ?? 'pending_EB',
     publicationSchedule: raw.publication_schedule ?? null,
     mangakaUserId: mangakaUserId || null,
@@ -400,31 +473,33 @@ export function formatEbScheduledPublishDisplay(isoValue) {
   }).format(date)
 }
 
-export function buildEmptyEbScores() {
-  return Object.fromEntries(EB_SCORE_KEYS.map((key) => [key, '']))
+export function buildEmptyEbScores(scoreKeys = EB_SCORE_KEYS) {
+  return Object.fromEntries(scoreKeys.map((key) => [key, '']))
 }
 
-export function buildEmptyEbComments() {
-  return Object.fromEntries(EB_SCORE_KEYS.map((key) => [key, '']))
+export function buildEmptyEbComments(scoreKeys = EB_SCORE_KEYS) {
+  return Object.fromEntries(scoreKeys.map((key) => [key, '']))
 }
 
 /** Chuẩn hóa scores từ localStorage cũ hoặc BE → key BE */
-export function normalizeMemberScoreMap(scores = {}) {
+export function normalizeMemberScoreMap(scores = {}, allowedKeys = EB_SCORE_KEYS) {
+  const allowed = new Set(allowedKeys)
   const normalized = {}
   for (const [key, value] of Object.entries(scores ?? {})) {
     const apiKey = LEGACY_SCORE_KEYS[key] ?? key
-    if (EB_SCORE_KEYS.includes(apiKey) && value != null && String(value).trim() !== '') {
+    if (allowed.has(apiKey) && value != null && String(value).trim() !== '') {
       normalized[apiKey] = value
     }
   }
   return normalized
 }
 
-export function normalizeMemberCommentsMap(comments = {}) {
+export function normalizeMemberCommentsMap(comments = {}, allowedKeys = EB_SCORE_KEYS) {
+  const allowed = new Set(allowedKeys)
   const normalized = {}
   for (const [key, value] of Object.entries(comments ?? {})) {
     const apiKey = LEGACY_SCORE_KEYS[key] ?? key
-    if (EB_SCORE_KEYS.includes(apiKey)) {
+    if (allowed.has(apiKey)) {
       normalized[apiKey] = String(value ?? '')
     }
   }
@@ -432,47 +507,83 @@ export function normalizeMemberCommentsMap(comments = {}) {
 }
 
 /** Map scores form → object BE (không gửi average/total_score — BE tự tính) */
-export function mapFeScoresToApiScores(feScores = {}) {
-  const normalized = normalizeMemberScoreMap(feScores)
+export function mapFeScoresToApiScores(feScores = {}, scoreKeys = EB_SCORE_KEYS) {
+  const normalized = normalizeMemberScoreMap(feScores, scoreKeys)
   return Object.fromEntries(
-    EB_SCORE_KEYS.map((key) => [key, clampEbScore(normalized[key])]),
+    scoreKeys.map((key) => [key, clampEbScore(normalized[key])]),
   )
 }
 
-export function mapFeCommentsToApiComments(feComments = {}) {
-  const normalized = normalizeMemberCommentsMap(feComments)
+export function mapFeCommentsToApiComments(feComments = {}, scoreKeys = EB_SCORE_KEYS) {
+  const normalized = normalizeMemberCommentsMap(feComments, scoreKeys)
   return Object.fromEntries(
-    EB_SCORE_KEYS.map((key) => [key, String(normalized[key] ?? '').trim()]),
+    scoreKeys.map((key) => [key, String(normalized[key] ?? '').trim()]),
   )
 }
 
-function memberEntryToApiRow(member, entry) {
+function memberEntryToApiRow(member, entry, {
+  scoreKeys = EB_SCORE_KEYS,
+  extensionKeys = [],
+  mapExtensionScoresToApi,
+} = {}) {
   if (!entry?.scores) return null
-  const scores = mapFeScoresToApiScores(entry.scores)
-  if (EB_SCORE_KEYS.some((key) => validateEbScore(scores[key]) !== '')) {
+  const scores = mapFeScoresToApiScores(entry.scores, scoreKeys)
+  if (scoreKeys.some((key) => validateEbScore(scores[key]) !== '')) {
     return null
   }
 
   const memberName = String(member?.name ?? member?.member_name ?? '').trim()
   if (!memberName) return null
 
-  return {
-    member_id: member.id,
+  const comments = mapFeCommentsToApiComments(
+    entry.criterionNotes ?? entry.comments ?? {},
+    scoreKeys,
+  )
+
+  const row = {
+    member_id: member.id ?? null,
     member_name: memberName,
     scores,
+    comments,
+    overall_comment: String(entry.overallComment ?? entry.overall_comment ?? '').trim(),
+    notes: String(entry.notes ?? '').trim(),
   }
+
+  if (extensionKeys.length && typeof mapExtensionScoresToApi === 'function') {
+    const fromDedicated = entry.extensionScores ?? entry.extension_scores ?? {}
+    const fromScores = Object.fromEntries(
+      extensionKeys
+        .map((key) => [key, entry.scores?.[key]])
+        .filter(([, value]) => value != null && String(value).trim() !== ''),
+    )
+    const extensionComments = entry.extensionComments ?? {}
+    const extensionScores = mapExtensionScoresToApi(
+      { ...fromScores, ...fromDedicated },
+      extensionKeys,
+      extensionComments,
+    )
+    const invalidExt = extensionKeys.some((key) => {
+      const found = extensionScores.find((item) => item.key === key)
+      return validateEbScore(found?.value ?? found?.score) !== ''
+    })
+    if (invalidExt) return null
+    row.extension_scores = extensionScores
+  }
+
+  return row
 }
 
 /**
  * Gộp draft thành viên đang nhập vào council record (localStorage).
  */
-export function mergeCouncilDraft(councilRecord, activeMemberId, draft) {
+export function mergeCouncilDraft(councilRecord, activeMemberId, draft, scoreKeys = EB_SCORE_KEYS) {
   const members = { ...(councilRecord?.members ?? {}) }
   if (activeMemberId && draft?.scores) {
     members[activeMemberId] = {
       ...(members[activeMemberId] ?? {}),
-      scores: mapFeScoresToApiScores(draft.scores),
-      criterionNotes: mapFeCommentsToApiComments(draft.criterionNotes),
+      scores: mapFeScoresToApiScores(draft.scores, scoreKeys),
+      criterionNotes: mapFeCommentsToApiComments(draft.criterionNotes, scoreKeys),
+      extensionScores: draft.extensionScores ?? members[activeMemberId]?.extensionScores ?? {},
       overallComment: String(draft.overallComment ?? '').trim(),
       notes: String(draft.notes ?? '').trim(),
       assessedAt: new Date().toISOString(),
@@ -490,38 +601,81 @@ export function buildMemberScoresPayload({
   members = EB_COUNCIL_MEMBERS,
   activeMemberId,
   draft,
+  scoreKeys = EB_SCORE_KEYS,
+  extensionKeys = [],
+  mapExtensionScoresToApi,
 }) {
-  const merged = mergeCouncilDraft(councilRecord, activeMemberId, draft)
+  const merged = mergeCouncilDraft(councilRecord, activeMemberId, draft, scoreKeys)
   const rows = []
 
   for (const member of members) {
     const entry = merged.members?.[member.id]
-    const row = memberEntryToApiRow(member, entry)
+    const row = memberEntryToApiRow(member, entry, {
+      scoreKeys,
+      extensionKeys,
+      mapExtensionScoresToApi,
+    })
     if (row) rows.push(row)
   }
 
   return rows
 }
 
-export function validateMemberScoresPayload(memberScores, requiredCount = EB_COUNCIL_SIZE) {
-  const minCount = Math.max(1, Number(requiredCount) || EB_COUNCIL_SIZE)
-  if (!Array.isArray(memberScores) || memberScores.length < minCount) {
-    return `Cần đủ ${minCount} thành viên Hội đồng trước khi gửi đánh giá.`
+export function validateMemberScoresPayload(
+  memberScores,
+  requiredCount = EB_COUNCIL_SIZE,
+  {
+    scoreKeys = EB_SCORE_KEYS,
+    criteria = EB_SCORE_CRITERIA,
+    extensionKeys = [],
+    minCount = EB_COUNCIL_MIN_FOR_PUBLISH,
+    maxCount = EB_COUNCIL_MAX_FOR_EVALUATE,
+  } = {},
+) {
+  const min = Math.max(1, Number(minCount) || EB_COUNCIL_MIN_FOR_PUBLISH)
+  const max = Math.max(min, Number(maxCount) || EB_COUNCIL_MAX_FOR_EVALUATE)
+  const expected = Math.max(min, Number(requiredCount) || min)
+
+  if (!Array.isArray(memberScores) || memberScores.length < min) {
+    return `Cần từ ${min} đến ${max} thành viên Hội đồng trước khi gửi đánh giá (hiện ${memberScores?.length ?? 0}).`
   }
+  if (memberScores.length > max) {
+    return `Tối đa ${max} thành viên Hội đồng mỗi lần chấm (hiện ${memberScores.length}).`
+  }
+  if (memberScores.length < expected) {
+    return `Cần đủ ${expected} thành viên đã lưu điểm trước khi gửi đánh giá.`
+  }
+
+  const labelOf = (key) =>
+    criteria.find((c) => c.key === key)?.label
+    ?? EB_SCORE_CRITERIA.find((c) => c.key === key)?.label
+    ?? key
 
   for (const row of memberScores) {
     const name = String(row.member_name ?? '').trim()
     if (!name) {
-      return 'Mỗi thành viên cần có member_name (tên hiển thị).'
+      return 'Mỗi thành viên cần có member_name (tên hiển thị thật).'
     }
     if (/^member-\d+-[a-z0-9]+$/i.test(name)) {
-      return `${name}: member_name không hợp lệ (đang trùng member_id).`
+      return `${name}: member_name không hợp lệ (không dùng id local roster làm tên).`
     }
     const scores = row.scores ?? {}
-    for (const key of EB_SCORE_KEYS) {
+    for (const key of scoreKeys) {
       const err = validateEbScore(scores[key])
       if (err) {
-        return `${name}: ${EB_SCORE_CRITERIA.find((c) => c.key === key)?.label ?? key} — ${err}`
+        return `${name}: ${labelOf(key)} — ${err}`
+      }
+    }
+    if (extensionKeys.length) {
+      const extList = Array.isArray(row.extension_scores) ? row.extension_scores : []
+      const extMap = Object.fromEntries(
+        extList.map((item) => [item.key, item.value ?? item.score]),
+      )
+      for (const key of extensionKeys) {
+        const err = validateEbScore(extMap[key])
+        if (err) {
+          return `${name}: ${labelOf(key)} — ${err}`
+        }
       }
     }
   }
@@ -544,17 +698,33 @@ export function areAllCouncilMembersFullyScored({
   councilRecord = null,
   activeMemberId = null,
   draftScores = null,
+  draftExtensionScores = null,
   scoreKeys = EB_SCORE_KEYS,
+  extensionKeys = [],
 } = {}) {
   if (!Array.isArray(roster) || roster.length === 0) return false
 
+  const allKeys = [...scoreKeys, ...extensionKeys]
   const merged = activeMemberId && draftScores
-    ? mergeCouncilDraft(councilRecord, activeMemberId, { scores: draftScores })
+    ? mergeCouncilDraft(
+      councilRecord,
+      activeMemberId,
+      {
+        scores: draftScores,
+        extensionScores: draftExtensionScores ?? {},
+      },
+      scoreKeys,
+    )
     : councilRecord
 
-  return roster.every((member) =>
-    isCouncilMemberFullyScored(merged?.members?.[member.id]?.scores, scoreKeys),
-  )
+  return roster.every((member) => {
+    const entry = merged?.members?.[member.id]
+    const combined = {
+      ...(entry?.scores ?? {}),
+      ...(entry?.extensionScores ?? {}),
+    }
+    return isCouncilMemberFullyScored(combined, allKeys)
+  })
 }
 
 export const EB_PUBLICATION_SCHEDULES = [
@@ -666,20 +836,98 @@ export function normalizeEbEvaluateResponse(res) {
       classification: null,
       classificationText: '',
       message: '',
+      rubric: null,
+      ageSafety: null,
+      contentLevels: null,
     }
   }
   const evaluation = res.evaluation ?? null
+  const ageSafetyRaw = res.age_safety ?? evaluation?.age_safety ?? null
   return {
     evaluation,
     councilAverage:
-      res.council_average ?? evaluation?.council_average ?? null,
+      res.council_average
+      ?? res.weighted_council_average
+      ?? evaluation?.council_average
+      ?? null,
     classification: res.classification ?? evaluation?.classification ?? null,
     classificationText:
       res.classification_text
       ?? evaluation?.classification_text
       ?? '',
     message: res.message ?? '',
+    rubric: res.rubric ?? evaluation?.applied_rubric_id ?? null,
+    ageSafety: ageSafetyRaw
+      ? {
+          passed: Boolean(ageSafetyRaw.passed),
+          severity: ageSafetyRaw.severity ?? null,
+          violations: Array.isArray(ageSafetyRaw.violations)
+            ? ageSafetyRaw.violations
+            : [],
+          rulesNote: ageSafetyRaw.rules_note ?? ageSafetyRaw.rulesNote ?? '',
+        }
+      : null,
+    contentLevels:
+      res.content_levels
+      ?? evaluation?.content_levels
+      ?? null,
   }
+}
+
+/** Preview POST /preview-council-average */
+export function mapEbPreviewCouncilAverageResponse(body) {
+  const data = body?.data ?? body ?? {}
+  return {
+    rubric: data.rubric ?? null,
+    weightedCouncilAverage:
+      data.weighted_council_average != null
+        ? Number(data.weighted_council_average)
+        : (data.council_average != null ? Number(data.council_average) : null),
+    perCriteriaAverages:
+      data.per_criteria_averages ?? data.perCriteriaAverages ?? {},
+    classification: data.classification ?? null,
+    classificationText:
+      data.classification_text ?? data.classificationText ?? '',
+    passThreshold:
+      data.pass_threshold != null ? Number(data.pass_threshold) : 2.5,
+    isPass: Boolean(data.is_pass ?? data.isPass),
+    raw: data,
+  }
+}
+
+/** Detect AGE_SAFETY_FAIL từ error response. */
+export function getEbAgeSafetyFailFromError(err) {
+  const body = err?.response?.data
+  const errorCode = body?.error ?? body?.data?.error ?? body?.code
+  const ageSafety = body?.age_safety ?? body?.data?.age_safety ?? body?.data
+  if (String(errorCode ?? '').toUpperCase() === 'AGE_SAFETY_FAIL') {
+    return ageSafety ?? { passed: false, violations: [] }
+  }
+  if (ageSafety && ageSafety.passed === false) return ageSafety
+  return null
+}
+
+/** Detect debut-gate 409 từ chapter evaluate. */
+export function getEbDebutGateLockFromError(err) {
+  if (err?.response?.status !== 409) return null
+  const body = err?.response?.data
+  const data = body?.data ?? body ?? {}
+  const unlock = data.unlock_requirements ?? data.unlockRequirements ?? null
+  if (
+    data.already_evaluated_chapters
+    || data.alreadyEvaluatedChapters
+    || unlock?.missing_step
+    || /confirm-publish|debut/i.test(String(body?.message ?? ''))
+  ) {
+    return {
+      message: body?.message
+        || 'Series đang bị khóa ở bước confirm-publish. Cần EB confirm-publish series trước khi chấm chapter khác.',
+      alreadyEvaluatedChapters:
+        data.already_evaluated_chapters ?? data.alreadyEvaluatedChapters ?? [],
+      unlockRequirements: unlock,
+    }
+  }
+  return null
 }
 
 /** Gộp preview + series detail — thay GET /eb-evaluations/chapter/:id (404). */
@@ -762,6 +1010,16 @@ export function mapEbChapterDetailResponse(data) {
   if (!chapter) return null
   return {
     ...chapter,
+    seriesId:
+      chapter.seriesId
+      || resolveEntityId(seriesRaw._id ?? seriesRaw.id)
+      || '',
+    ageRating:
+      seriesRaw.age_rating
+      ?? seriesRaw.ageRating
+      ?? seriesRaw.content_rating
+      ?? null,
+    genre: Array.isArray(seriesRaw.genre) ? seriesRaw.genre : [],
     seriesDetail: seriesRaw,
     evaluationHistory,
   }
@@ -902,7 +1160,24 @@ export function mapEbHistoryDetailResponse(body) {
       panel_camera: breakdown.panel_camera ?? breakdown.panelCamera ?? null,
       pacing_climax: breakdown.pacing_climax ?? breakdown.pacingClimax ?? null,
       color: breakdown.color ?? null,
+      ...Object.fromEntries(
+        Object.entries(breakdown)
+          .filter(([key]) => !['storyDialogue', 'artDesign', 'panelCamera', 'pacingClimax'].includes(key))
+          .map(([key, value]) => [key, value]),
+      ),
     },
+    appliedRubricId:
+      raw.applied_rubric_id ?? raw.appliedRubricId ?? null,
+    appliedRubricWeights:
+      raw.applied_rubric_weights ?? raw.appliedRubricWeights ?? null,
+    appliedRubricTotalWeight:
+      raw.applied_rubric_total_weight != null
+        ? Number(raw.applied_rubric_total_weight)
+        : (raw.appliedRubricTotalWeight != null
+          ? Number(raw.appliedRubricTotalWeight)
+          : null),
+    ageSafety: raw.age_safety ?? raw.ageSafety ?? null,
+    contentLevels: raw.content_levels ?? raw.contentLevels ?? null,
     classification: raw.classification ?? null,
     classificationText:
       raw.classification_text
@@ -949,6 +1224,9 @@ export function mapEbHistoryDetailResponse(body) {
           m.is_eb_representative ?? m.isEbRepresentative,
         ),
         scores,
+        extensionScores: Array.isArray(m.extension_scores)
+          ? m.extension_scores
+          : (Array.isArray(m.extensionScores) ? m.extensionScores : []),
         average,
         totalScore: m.total_score != null ? Number(m.total_score) : null,
         comments: m.comments && typeof m.comments === 'object' ? m.comments : {},

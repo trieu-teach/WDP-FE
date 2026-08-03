@@ -2,12 +2,12 @@
 
 import { LABEL_EDITOR_BOARD, LABEL_TANTOU_EDITOR } from '../constants/roleTerminology.js'
 
-// 45 thể loại — khớp với BE (models/Series.js GENRES constant)
+// Thể loại — khớp BE Series GENRES (42+ giá trị; "Slice of life" đúng casing BE)
 export const SERIES_GENRES = [
   // Demographics / Format
   'Anime', 'Drama', 'Josei', 'Manhwa', 'One Shot', 'Shounen', 'Webtoons', 'Shoujo',
   // Content themes
-  'Harem', 'Ecchi', 'Mature', 'Slice of Life', 'Isekai', 'Manga', 'Manhua',
+  'Harem', 'Ecchi', 'Mature', 'Slice of life', 'Isekai', 'Manga', 'Manhua',
   // Genre (action/battle)
   'Hành Động', 'Võ Thuật', 'Huyền Bí', 'Thể Thao', 'Học Đường', 'Lịch Sử',
   // Genre (other)
@@ -21,6 +21,16 @@ export const SERIES_GENRES = [
   // Special
   'Nữ Cường', 'Gender Bender', 'Murim', 'Leo Tháp', 'Nấu Ăn',
 ]
+
+/** Giá trị age_rating hợp lệ — khớp BE. */
+export const SERIES_AGE_RATINGS = [
+  { value: 'All ages', label: 'Mọi lứa tuổi' },
+  { value: 'Teens 13+', label: 'Tuổi teen' },
+  { value: 'Mature 17+', label: 'Người lớn' },
+  { value: 'Adults Only 18+', label: 'Chỉ 18+' },
+]
+
+export const SERIES_AGE_RATING_VALUES = SERIES_AGE_RATINGS.map((r) => r.value)
 
 export const SERIES_DEMOGRAPHICS = [
   { value: 'shonen', label: 'Shōnen' },
@@ -45,12 +55,7 @@ export const SERIES_LANGUAGES = [
   { value: 'zh', label: '中文' },
 ]
 
-export const SERIES_CONTENT_RATINGS = [
-  { value: 'All ages', label: 'Mọi lứa tuổi' },
-  { value: 'Teens 13+', label: 'Tuổi teen' },
-  { value: 'Mature 17+', label: 'Người lớn' },
-  { value: 'Adults Only 18+', label: 'Chỉ 18+' },
-]
+export const SERIES_CONTENT_RATINGS = SERIES_AGE_RATINGS
 
 export const SERIES_TAGS = [
   'Isekai', 'Action', 'Adventure', 'Comedy', 'Drama', 'Fantasy',
@@ -124,7 +129,7 @@ export function slugifySeriesTitle(title) {
   return base || `series-${Date.now()}`
 }
 
-export function createEmptySeriesForm(authorName = '') {
+export function createEmptySeriesForm(_authorName = '') {
   return {
     name: '',
     description: '',
@@ -278,7 +283,18 @@ export function validateSeriesForm(form, existingTitles = [], options = {}) {
     errors.name = 'Đã có series trùng tên.'
   }
   if (!String(form.description ?? '').trim()) errors.description = 'Vui lòng nhập mô tả.'
-  if (!Array.isArray(form.genre) || form.genre.length === 0) errors.genre = 'Vui lòng chọn ít nhất 1 thể loại.'
+  if (!Array.isArray(form.genre) || form.genre.length === 0) {
+    errors.genre = 'Vui lòng chọn ít nhất 1 thể loại.'
+  } else {
+    const invalid = form.genre.filter((g) => !SERIES_GENRES.includes(g))
+    if (invalid.length) {
+      errors.genre = `Thể loại không hợp lệ: ${invalid.join(', ')}`
+    }
+  }
+  const age = String(form.age_rating ?? '').trim() || 'All ages'
+  if (!SERIES_AGE_RATING_VALUES.includes(age)) {
+    errors.age_rating = 'Độ tuổi không hợp lệ.'
+  }
   if (!String(form.target_audience ?? '').trim()) errors.target_audience = 'Vui lòng chọn đối tượng.'
   return { ok: Object.keys(errors).length === 0, errors }
 }

@@ -334,24 +334,30 @@ export default function MangakaAssistantReviewDetail() {
     <div className="flex min-h-screen flex-col bg-background">
       <Header links={NAV_LINKS} onLogout={user ? handleLogout : undefined} />
 
-      <main className="page-container flex min-h-0 flex-1 flex-col gap-6 py-6 lg:py-8">
-        <header className="flex flex-wrap items-center gap-3 border-b border-border/60 pb-4">
-          <Button type="button" variant="ghost" size="sm" asChild>
+      <main className="mx-auto flex w-full max-w-6xl min-h-[60vh] min-w-0 flex-1 flex-col gap-6 px-6 py-8">
+        <header className="flex flex-col gap-3 border-b border-border/60 pb-5">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 w-fit -ml-2 gap-1.5 rounded-lg px-2 text-gray-600 hover:text-gray-900"
+            asChild
+          >
             <Link to="/mangaka/review">
               <ArrowLeft className="size-4" />
               Danh sách chờ duyệt
             </Link>
           </Button>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium uppercase tracking-widest text-amber-600">
+          <div className="min-w-0">
+            <p className="inline-flex items-center rounded-full border border-amber-200/80 bg-amber-50 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
               Duyệt bản Assistant
             </p>
-            <h1 className="flex flex-wrap items-center gap-2 text-xl font-semibold tracking-tight sm:text-2xl">
-              <ClipboardCheck className="size-5 shrink-0 text-amber-600" />
+            <h1 className="mt-2 flex flex-wrap items-center gap-2 text-2xl font-bold tracking-tight text-gray-900 dark:text-zinc-50">
+              <ClipboardCheck className="size-6 shrink-0 text-amber-600" />
               {chapterLabel ?? "Chi tiết chapter"}
             </h1>
-            <p className="text-sm text-muted-foreground">
-              So sánh ảnh gốc và ảnh Assistant, nhận từng task rồi gửi
+            <p className="mt-1 text-sm text-gray-600 dark:text-zinc-400">
+              So sánh ảnh gốc và ảnh Assistant, nhận từng task rồi gửi{" "}
               {LABEL_TANTOU_EDITOR}.
             </p>
           </div>

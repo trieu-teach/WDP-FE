@@ -25,15 +25,15 @@ export default function MangakaNotesPanel({
   const list = Array.isArray(notes) ? notes : []
 
   return (
-    <div className={cn('border-b border-white/5 p-3', className)}>
+    <div className={cn('border-b border-slate-700/60 p-3', className)}>
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
-          <div className="flex size-6 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 text-white">
+          <div className="flex size-6 shrink-0 items-center justify-center rounded-lg bg-amber-500 text-white">
             <MessageSquareText className="size-3" />
           </div>
           <div className="min-w-0">
-            <p className="text-xs font-semibold text-white/80">Ghi chú Mangaka</p>
-            <p className="text-[10px] text-white/40">
+            <p className="text-xs font-semibold text-slate-200">Ghi chú Mangaka</p>
+            <p className="text-[10px] text-slate-500">
               {loading
                 ? 'Đang tải…'
                 : list.length
@@ -50,7 +50,7 @@ export default function MangakaNotesPanel({
             type="button"
             onClick={onRestoreDone}
             title="Hiện lại các ô đã đánh dấu xong"
-            className="inline-flex h-7 items-center gap-1 rounded-md border border-white/10 bg-white/5 px-2 text-[10px] font-medium text-white/55 transition-colors hover:bg-white/10 hover:text-white/80"
+            className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-700/60 bg-slate-800/50 px-2 text-[10px] font-medium text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200"
           >
             <RotateCcw className="size-3" />
             Hiện lại
@@ -59,7 +59,7 @@ export default function MangakaNotesPanel({
       </div>
 
       {list.length === 0 && !loading ? (
-        <p className="rounded-lg border border-dashed border-white/10 bg-white/[0.03] px-3 py-4 text-center text-[11px] text-white/35">
+        <p className="rounded-xl border border-dashed border-slate-700/60 bg-slate-800/30 px-3 py-4 text-center text-[11px] text-slate-500">
           {doneCount > 0
             ? 'Đã đánh dấu xong mọi ghi chú trên trang này.'
             : 'Mangaka chưa gắn ghi chú vùng cho trang này.'}
@@ -74,7 +74,7 @@ export default function MangakaNotesPanel({
             return (
               <li
                 key={key}
-                className="rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-2"
+                className="rounded-xl border border-slate-700/60 bg-slate-800/50 px-2.5 py-2 transition-colors hover:border-slate-600 hover:bg-slate-800"
               >
                 <div className="mb-1 flex items-center gap-2">
                   <span
@@ -104,9 +104,9 @@ export default function MangakaNotesPanel({
                     </button>
                   ) : null}
                 </div>
-                <p className="whitespace-pre-wrap break-words text-[11px] leading-relaxed text-white/75">
+                <p className="whitespace-pre-wrap break-words text-[11px] leading-relaxed text-slate-300">
                   {text || (
-                    <span className="italic text-white/35">(Không có nội dung chữ)</span>
+                    <span className="italic text-slate-500">(Không có nội dung chữ)</span>
                   )}
                 </p>
               </li>

@@ -11,9 +11,11 @@ import {
   ClipboardCheck,
   FileText,
   Flag,
+  Layers,
   Lightbulb,
   ListChecks,
   MoreHorizontal,
+  Pencil,
   PenSquare,
   Plus,
   Send,
@@ -21,7 +23,6 @@ import {
   Trash2,
   TrendingUp,
   Upload,
-  UserPlus,
   Users,
 } from "lucide-react";
 import Header from "@/components/User/Header/Header.jsx";
@@ -51,6 +52,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -284,16 +286,15 @@ function WorkspaceActionBar({
   incompleteSeriesCount,
   onOpenChaptersTab,
   onOpenSeriesTab,
-  onOpenAssistantsTab,
   onOpenRevisionInbox,
 }) {
-  const hasItems =
+  const hasStatusItems =
     pendingReviewCount > 0
     || teReadyCount > 0
     || tantouRevisionCount > 0
     || incompleteSeriesCount > 0;
 
-  if (!hasItems) return null;
+  if (!hasStatusItems) return null;
 
   return (
     <div className="mk-action-bar mb-6 flex flex-wrap items-center gap-2 rounded-xl border bg-card p-3 shadow-sm">
@@ -341,16 +342,23 @@ function WorkspaceActionBar({
           {incompleteSeriesCount} series thiếu hồ sơ
         </Button>
       ) : null}
-      <Button
-        size="sm"
-        variant="ghost"
-        className="ml-auto h-8 text-muted-foreground"
-        onClick={onOpenAssistantsTab}
-      >
-        <UserPlus className="size-3.5" />
-        Thuê Assistant
-      </Button>
     </div>
+  );
+}
+
+/** Tooltip that still works when the child button is disabled. */
+function HoverHint({ hint, disabled = false, children, className }) {
+  if (!disabled || !hint) return children;
+  return (
+    <span className={cn("group/hint relative inline-flex", className)}>
+      {children}
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute bottom-[calc(100%+6px)] left-1/2 z-30 w-max max-w-[14rem] -translate-x-1/2 rounded-md border border-border bg-popover px-2.5 py-1.5 text-left text-[11px] leading-snug text-popover-foreground opacity-0 shadow-md transition-opacity group-hover/hint:opacity-100"
+      >
+        {hint}
+      </span>
+    </span>
   );
 }
 
@@ -372,11 +380,19 @@ function SeriesCard({
     series.title.length >= 2 ? series.title : `${series.title}●`
   ).slice(0, 2);
   const isAdminHidden = Boolean(series.deletedAt);
+  const metaLine = formatSeriesCardLine(series);
+
+  const coverStyle = {
+    background: series.coverImage
+      ? `url(${resolveMediaUrl(series.coverImage)}) center / cover no-repeat`
+      : `linear-gradient(145deg, ${series.color}, ${series.color}99)`,
+  };
 
   return (
     <Card
       className={cn(
-        "group relative gap-0 overflow-hidden p-0 transition-all hover:-translate-y-0.5 hover:shadow-lg",
+        "group relative gap-0 overflow-hidden rounded-xl border-border/70 p-0 shadow-sm",
+        "transition-all duration-200 hover:-translate-y-0.5 hover:border-border hover:shadow-md",
         isAdminHidden && "opacity-90",
       )}
       title={
@@ -391,37 +407,33 @@ function SeriesCard({
       {isAdminHidden ? (
         <div className="relative block overflow-hidden">
           <div
-            className="aspect-[3/4] flex items-center justify-center bg-muted text-3xl font-extrabold tracking-tight text-white grayscale opacity-50"
-            style={{
-              background: series.coverImage
-                ? `url(${resolveMediaUrl(series.coverImage)}) center / cover no-repeat`
-                : `linear-gradient(145deg, ${series.color}, ${series.color}99)`,
-            }}
+            className="flex aspect-video items-center justify-center bg-muted text-2xl font-extrabold tracking-tight text-white opacity-50 grayscale"
+            style={coverStyle}
           >
             {!series.coverImage ? (
               <span className="drop-shadow-lg">{initials}</span>
             ) : null}
           </div>
-          <Badge className="absolute left-3 top-3 border-0 bg-red-600 text-white shadow-sm hover:bg-red-600">
+          <Badge className="absolute left-2.5 top-2.5 z-10 border-0 bg-red-600 text-white shadow-sm hover:bg-red-600">
             Đã bị Admin ẩn
           </Badge>
         </div>
       ) : (
-        <Link to={toSeries} className="relative block overflow-hidden">
+        <Link
+          to={toSeries}
+          className="relative block cursor-pointer overflow-hidden"
+          aria-label={`Mở ${series.title}`}
+        >
           <div
-            className="aspect-[3/4] flex items-center justify-center bg-muted text-3xl font-extrabold tracking-tight text-white transition-transform duration-300 group-hover:scale-[1.02]"
-            style={{
-              background: series.coverImage
-                ? `url(${resolveMediaUrl(series.coverImage)}) center / cover no-repeat`
-                : `linear-gradient(145deg, ${series.color}, ${series.color}99)`,
-            }}
+            className="flex aspect-video items-center justify-center bg-muted text-2xl font-extrabold tracking-tight text-white transition-transform duration-300 ease-out group-hover:scale-105"
+            style={coverStyle}
           >
             {!series.coverImage ? (
               <span className="drop-shadow-lg">{initials}</span>
             ) : null}
           </div>
           {series.needsFullDebutPipeline ? (
-            <Badge className="absolute left-3 top-3 bg-amber-500 text-white shadow-sm hover:bg-amber-500">
+            <Badge className="absolute left-2.5 top-2.5 z-10 gap-1 bg-amber-500 text-white shadow-sm hover:bg-amber-500">
               <Sparkles className="size-3" />
               Lần đầu
             </Badge>
@@ -429,11 +441,11 @@ function SeriesCard({
         </Link>
       )}
 
-      <CardContent className="space-y-2.5 p-4">
+      <CardContent className="space-y-2 p-3.5 pb-3">
         <div className="flex items-start justify-between gap-2">
           {isAdminHidden ? (
             <span
-              className="line-clamp-2 font-semibold leading-snug text-muted-foreground"
+              className="line-clamp-2 text-[0.95rem] font-bold leading-snug tracking-tight text-zinc-500"
               title={series.title}
             >
               {series.title}
@@ -441,7 +453,7 @@ function SeriesCard({
           ) : (
             <Link
               to={toSeries}
-              className="line-clamp-2 font-semibold leading-snug hover:underline"
+              className="line-clamp-2 text-[0.95rem] font-bold leading-snug tracking-tight text-foreground transition-colors hover:text-rose-700 dark:hover:text-rose-300"
               title={series.title}
             >
               {series.title}
@@ -449,24 +461,33 @@ function SeriesCard({
           )}
           {isAdminHidden ? (
             <Badge
-              className="shrink-0 border-red-200 bg-red-50 text-red-700"
+              className="h-6 shrink-0 rounded-md border-red-200 bg-red-50 px-2 text-[11px] font-medium text-red-700"
               variant="outline"
             >
-              Đã bị Admin ẩn
+              Ẩn
             </Badge>
           ) : (
-            <Badge className={cn("shrink-0", statusBadge.className)} variant="secondary">
+            <Badge
+              className={cn(
+                "h-6 shrink-0 rounded-md px-2 text-[11px] font-medium",
+                statusBadge.className,
+              )}
+              variant="secondary"
+            >
               {series.statusLabel ?? statusBadge.label}
             </Badge>
           )}
         </div>
 
-        <p className="line-clamp-1 text-xs text-muted-foreground">
-          {formatSeriesCardLine(series)}
+        <p
+          className="line-clamp-1 text-xs font-medium text-zinc-600 dark:text-zinc-300"
+          title={metaLine}
+        >
+          {metaLine}
         </p>
 
         {series.ebAssessment ? (
-          <p className="truncate text-xs font-medium text-emerald-700 dark:text-emerald-400">
+          <p className="truncate text-xs font-semibold text-emerald-700 dark:text-emerald-400">
             EB · DTB {Number(series.ebAssessment.average ?? 0).toFixed(1)}
             {series.ebAssessment.classification
               ? ` · ${series.ebAssessment.classification}`
@@ -475,73 +496,121 @@ function SeriesCard({
         ) : null}
 
         {!series.metadataComplete && !isAdminHidden ? (
-          <p className="flex items-center gap-1 text-xs text-amber-600">
+          <p className="flex items-center gap-1 text-xs font-medium text-amber-700 dark:text-amber-400">
             <AlertTriangle className="size-3 shrink-0" />
             Thiếu mô tả hồ sơ
           </p>
         ) : null}
 
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs font-medium tabular-nums text-zinc-600 dark:text-zinc-300">
           <span>{series.chapters} chapter</span>
-          <span aria-hidden>·</span>
+          <span className="text-zinc-300 dark:text-zinc-600" aria-hidden>
+            ·
+          </span>
           <span>{series.marks} ghi chú</span>
+          {series.updated ? (
+            <>
+              <span className="text-zinc-300 dark:text-zinc-600" aria-hidden>
+                ·
+              </span>
+              <span className="font-normal text-zinc-500 dark:text-zinc-400">
+                {series.updated}
+              </span>
+            </>
+          ) : null}
         </div>
-
-        <p className="text-[11px] text-muted-foreground">{series.updated}</p>
       </CardContent>
 
-      <CardFooter className="flex items-center gap-2 border-t bg-muted/20 p-3">
+      <CardFooter className="flex items-center gap-2 border-t border-border/70 bg-muted/15 p-3 pt-2.5">
         {isAdminHidden ? (
-          <p className="w-full text-center text-xs text-muted-foreground">
+          <p className="w-full text-center text-xs text-zinc-500">
             Series đã bị Admin ẩn — không thể chỉnh sửa / đăng chapter.
           </p>
         ) : (
           <>
-            <Button asChild size="sm" className="min-w-0 flex-1">
+            <Button
+              asChild
+              size="sm"
+              variant="outline"
+              className="h-8 min-w-0 flex-1 rounded-lg border-zinc-200 bg-background text-zinc-800 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-800 dark:border-zinc-600 dark:text-zinc-200 dark:hover:border-rose-500/40 dark:hover:bg-rose-500/10 dark:hover:text-rose-200"
+            >
               <Link to={toSeries}>Vào series</Link>
             </Button>
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button size="sm" variant="outline" className="size-8 shrink-0 p-0">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="size-8 shrink-0 rounded-lg border-zinc-200 p-0 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800/60"
+                >
                   <MoreHorizontal className="size-4" />
                   <span className="sr-only">Tùy chọn series</span>
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuItem onClick={onOpenEdit}>Chỉnh sửa hồ sơ</DropdownMenuItem>
+              <DropdownMenuContent align="end" className="w-56 rounded-xl p-1.5">
+                <DropdownMenuLabel className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+                  Thao tác nhanh
+                </DropdownMenuLabel>
+                <DropdownMenuItem
+                  className="gap-2 rounded-lg"
+                  onClick={onOpenEdit}
+                >
+                  <Pencil className="size-3.5 text-zinc-500" />
+                  Chỉnh sửa hồ sơ
+                </DropdownMenuItem>
+                <DropdownMenuItem className="gap-2 rounded-lg" asChild>
+                  <Link to={toSeries}>
+                    <Layers className="size-3.5 text-zinc-500" />
+                    Quản lý chapter
+                  </Link>
+                </DropdownMenuItem>
                 {series.status === "draft" ? (
-                  <DropdownMenuItem onClick={onOpenAnnotate}>Đánh dấu vùng</DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="gap-2 rounded-lg"
+                    onClick={onOpenAnnotate}
+                  >
+                    <PenSquare className="size-3.5 text-zinc-500" />
+                    Đánh dấu vùng
+                  </DropdownMenuItem>
                 ) : null}
                 {series.needsFullDebutPipeline && !ebApproved ? (
-                  <DropdownMenuItem asChild>
+                  <DropdownMenuItem className="gap-2 rounded-lg" asChild>
                     <Link to={PATH_EDITOR_BOARD}>
+                      <ClipboardCheck className="size-3.5 text-zinc-500" />
                       Chờ {LABEL_EDITOR_BOARD} duyệt
                     </Link>
                   </DropdownMenuItem>
                 ) : null}
                 {series.needsFullDebutPipeline && ebApproved ? (
-                  <DropdownMenuItem onClick={onCompleteDebut}>
+                  <DropdownMenuItem
+                    className="gap-2 rounded-lg"
+                    onClick={onCompleteDebut}
+                  >
+                    <Sparkles className="size-3.5 text-zinc-500" />
                     Hoàn tất vòng đầu
                   </DropdownMenuItem>
                 ) : null}
                 {canRequestSeriesEnd(series.publicationStatus)
                   && !hasBlockingEndRequest
                   && !hasPendingEndRequest ? (
-                  <DropdownMenuItem onClick={onRequestEnd}>
-                    <Flag className="size-3.5" />
+                  <DropdownMenuItem
+                    className="gap-2 rounded-lg"
+                    onClick={onRequestEnd}
+                  >
+                    <Flag className="size-3.5 text-zinc-500" />
                     Yêu cầu kết thúc truyện
                   </DropdownMenuItem>
                 ) : null}
                 {(hasBlockingEndRequest || hasPendingEndRequest) ? (
-                  <DropdownMenuItem disabled>
+                  <DropdownMenuItem disabled className="gap-2 rounded-lg">
                     <Flag className="size-3.5" />
                     Đã có yêu cầu kết thúc
                   </DropdownMenuItem>
                 ) : null}
-                <DropdownMenuSeparator />
+                <DropdownMenuSeparator className="my-1.5" />
                 <DropdownMenuItem
-                  className="text-destructive focus:text-destructive"
+                  className="gap-2 rounded-lg text-destructive focus:text-destructive"
                   onClick={onDelete}
                 >
                   <Trash2 className="size-3.5" />
@@ -631,6 +700,7 @@ export default function Mangaka() {
   const [teSending, setTeSending] = useState(false);          // đang gửi sang TE
   const [teSendChapter, setTeSendChapter] = useState(null);   // chapter đang mở dialog gửi TE
   const [teRevisionInboxOpen, setTeRevisionInboxOpen] = useState(false);
+  const [openRevisionAfterSeriesTab, setOpenRevisionAfterSeriesTab] = useState(false);
   const [teRevisionSeenTick, setTeRevisionSeenTick] = useState(0);
   const [heroSlide, setHeroSlide] = useState(0);
   const [lastApprovedChapter, setLastApprovedChapter] = useState(null);
@@ -638,6 +708,12 @@ export default function Mangaka() {
   const teTargetChapter = teSelectorOpen
     ? (teSendChapter ?? lastApprovedChapter)
     : (lastApprovedChapter ?? teSendChapter);
+
+  useEffect(() => {
+    if (tab !== "series" || !openRevisionAfterSeriesTab) return;
+    setTeRevisionInboxOpen(true);
+    setOpenRevisionAfterSeriesTab(false);
+  }, [tab, openRevisionAfterSeriesTab]);
 
   // Load danh sách TE khi mở selector
   useEffect(() => {
@@ -1554,7 +1630,7 @@ export default function Mangaka() {
               </div>
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium text-white">{mangakaName}</p>
-                <p className="text-xs text-zinc-400">Tác giả · Workspace</p>
+                <p className="text-xs text-white/80">Tác giả · Workspace</p>
               </div>
             </div>
           </div>
@@ -1562,7 +1638,7 @@ export default function Mangaka() {
       </section>
 
       <main className="page-container mk-main flex-1 py-8">
-        {tab !== "annotate" ? (
+        {tab !== "annotate" && tab !== "assistants" && tab !== "series" ? (
           <WorkspaceActionBar
             pendingReviewCount={pendingReviews.length}
             teReadyCount={teReadyChapters.length}
@@ -1570,8 +1646,14 @@ export default function Mangaka() {
             incompleteSeriesCount={incompleteSeriesCount}
             onOpenChaptersTab={() => setTab("chapters")}
             onOpenSeriesTab={() => setTab("series")}
-            onOpenAssistantsTab={() => setTab("assistants")}
-            onOpenRevisionInbox={() => setTeRevisionInboxOpen((open) => !open)}
+            onOpenRevisionInbox={() => {
+              if (tab !== "series") {
+                setOpenRevisionAfterSeriesTab(true);
+                setTab("series");
+                return;
+              }
+              setTeRevisionInboxOpen(true);
+            }}
           />
         ) : null}
 
@@ -1583,71 +1665,73 @@ export default function Mangaka() {
         >
           <div className="mk-content min-w-0">
             <Tabs value={tab} onValueChange={setTab}>
-              <div className="mb-5 flex flex-wrap items-center justify-end gap-2">
-                <DropdownMenu
-                  open={teRevisionInboxOpen}
-                  onOpenChange={setTeRevisionInboxOpen}
-                >
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className={cn(
-                        "h-9 shrink-0 gap-1.5",
-                        unreadTeRevisions.length > 0
-                          && "border-amber-200 bg-amber-50/70 text-amber-950 hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100",
-                        unreadTeRevisions.length > 0
-                          && teRevisionInboxOpen
-                          && "border-amber-300 bg-amber-100 dark:border-amber-500/40 dark:bg-amber-500/15",
-                      )}
-                    >
-                      <Bell className="size-3.5" />
-                      Thông báo chỉnh sửa
-                      {unreadTeRevisions.length > 0 ? (
-                        <Badge
-                          variant="secondary"
-                          className="h-5 min-w-5 justify-center bg-amber-600 px-1.5 text-[10px] text-white hover:bg-amber-600"
-                        >
-                          {unreadTeRevisions.length}
-                        </Badge>
-                      ) : null}
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent
-                    align="end"
-                    sideOffset={8}
-                    className="w-[min(calc(100vw-2rem),24rem)] p-3"
-                    onCloseAutoFocus={(e) => e.preventDefault()}
-                  >
-                    <TeRevisionInboxPanel
-                      revisions={unreadTeRevisions}
-                      onClose={() => setTeRevisionInboxOpen(false)}
-                      onMarkRead={(chapterId) => {
-                        markTeRevisionSeen(chapterId);
-                      }}
-                    />
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-
-              <TabsContent value="series" className="mk-panel space-y-4">
+              <TabsContent value="series" className="mk-panel space-y-5">
                 <div className="flex flex-wrap items-end justify-between gap-3">
                   <div>
                     <h2 className="text-xl font-semibold tracking-tight">Series của tôi</h2>
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-sm text-zinc-500 dark:text-zinc-400">
                       Quản lý hồ sơ từng series
                     </p>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button size="sm" variant="outline" className="gap-1.5" asChild>
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <DropdownMenu
+                      open={teRevisionInboxOpen}
+                      onOpenChange={setTeRevisionInboxOpen}
+                    >
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className={cn(
+                            "h-9 shrink-0 gap-1.5 rounded-lg border-zinc-200 bg-zinc-50/80 text-zinc-800 hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-800/40 dark:text-zinc-100 dark:hover:bg-zinc-800",
+                            unreadTeRevisions.length > 0
+                              && "border-amber-200/90 bg-amber-50 text-amber-950 hover:bg-amber-100/90 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100",
+                            unreadTeRevisions.length > 0
+                              && teRevisionInboxOpen
+                              && "border-amber-300 bg-amber-100 dark:border-amber-500/40 dark:bg-amber-500/15",
+                          )}
+                        >
+                          <Bell className="size-3.5" />
+                          Thông báo chỉnh sửa
+                          {unreadTeRevisions.length > 0 ? (
+                            <Badge
+                              variant="secondary"
+                              className="h-5 min-w-5 justify-center rounded-md bg-amber-600 px-1.5 text-[10px] text-white hover:bg-amber-600"
+                            >
+                              {unreadTeRevisions.length}
+                            </Badge>
+                          ) : null}
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent
+                        align="end"
+                        sideOffset={8}
+                        className="w-[min(calc(100vw-2rem),24rem)] rounded-xl p-3"
+                        onCloseAutoFocus={(e) => e.preventDefault()}
+                      >
+                        <TeRevisionInboxPanel
+                          revisions={unreadTeRevisions}
+                          onClose={() => setTeRevisionInboxOpen(false)}
+                          onMarkRead={(chapterId) => {
+                            markTeRevisionSeen(chapterId);
+                          }}
+                        />
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-9 gap-1.5 rounded-lg border-zinc-200 bg-zinc-50/80 text-zinc-800 hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-800/40 dark:text-zinc-100 dark:hover:bg-zinc-800"
+                      asChild
+                    >
                       <Link to="/mangaka/end-requests">
                         <Flag className="size-3.5" />
                         Yêu cầu kết thúc
                         {pendingEndSeriesIds.size > 0 ? (
                           <Badge
                             variant="secondary"
-                            className="ml-0.5 h-5 min-w-5 justify-center bg-amber-600 px-1.5 text-[10px] text-white hover:bg-amber-600"
+                            className="ml-0.5 h-5 min-w-5 justify-center rounded-md bg-amber-600 px-1.5 text-[10px] text-white hover:bg-amber-600"
                           >
                             {pendingEndSeriesIds.size}
                           </Badge>
@@ -1657,6 +1741,7 @@ export default function Mangaka() {
                     <Button
                       size="sm"
                       variant="outline"
+                      className="h-9 gap-1.5 rounded-lg border-rose-200/80 bg-rose-50/70 text-rose-800 hover:bg-rose-100 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200 dark:hover:bg-rose-500/15"
                       onClick={openAddSeriesModal}
                     >
                       <Plus className="size-4" />
@@ -1678,7 +1763,7 @@ export default function Mangaka() {
                     )}
                   />
                 ) : (
-                  <div className="mk-series-grid grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+                  <div className="mk-series-grid grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                     {seriesList.map((s) => (
                       <SeriesCard
                         key={s.id}
@@ -1697,17 +1782,20 @@ export default function Mangaka() {
                 )}
               </TabsContent>
 
-              <TabsContent value="chapters" className="mk-panel space-y-4">
+              <TabsContent value="chapters" className="mk-panel space-y-5">
                 <div className="flex flex-wrap items-end justify-between gap-3">
                   <div>
-                    <h2 className="text-xl font-semibold tracking-tight">Chapter đã upload</h2>
-                    <p className="text-sm text-muted-foreground">
+                    <h2 className="text-xl font-semibold tracking-tight text-gray-900 dark:text-zinc-50">
+                      Chapter đã upload
+                    </h2>
+                    <p className="text-sm text-gray-500 dark:text-zinc-400">
                       {chapterRows.length} chapter · {chapterRowsBySeries.length} series
                     </p>
                   </div>
                   <Button
                     size="sm"
                     variant="outline"
+                    className="h-9 gap-1.5 rounded-lg border-zinc-200 bg-zinc-50/80 text-zinc-800 hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-800/40 dark:text-zinc-100 dark:hover:bg-zinc-800"
                     disabled={seriesList.length === 0}
                     onClick={() => {
                       if (annotateSeries) {
@@ -1744,7 +1832,7 @@ export default function Mangaka() {
                     )}
                   />
                 ) : (
-                  <div className="mk-chapter-registry space-y-8">
+                  <div className="mk-chapter-registry space-y-6">
                     {chapterRowsBySeries.map(({ series, chapters: groupChapters }) => {
                       const seriesMeta = seriesList.find(x => x.title === series);
                       const slug = seriesMeta?.slug ?? slugifySeriesTitle(series);
@@ -1752,11 +1840,11 @@ export default function Mangaka() {
                       return (
                         <div
                           key={series}
-                          className="mk-chapter-registry__series overflow-hidden rounded-xl border bg-card shadow-sm"
+                          className="mk-chapter-registry__series overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm"
                         >
                           <Link
                             to={`/mangaka/series/${slug}`}
-                            className="mk-chapter-registry__series-head group flex items-center gap-3 px-4 py-3.5 transition-colors hover:bg-muted/40"
+                            className="mk-chapter-registry__series-head group flex items-center gap-3 rounded-t-xl bg-gray-50/80 px-4 py-3 transition-colors hover:bg-gray-100/90 dark:bg-zinc-900/60 dark:hover:bg-zinc-900"
                           >
                             <span
                               className="flex size-10 shrink-0 items-center justify-center rounded-xl text-lg font-extrabold text-white shadow-sm"
@@ -1765,8 +1853,10 @@ export default function Mangaka() {
                               {(series[0] || '?').toUpperCase()}
                             </span>
                             <div className="min-w-0 flex-1">
-                              <p className="font-semibold group-hover:underline">{series}</p>
-                              <p className="text-xs text-muted-foreground">
+                              <p className="truncate font-semibold text-gray-900 group-hover:underline dark:text-zinc-50">
+                                {series}
+                              </p>
+                              <p className="text-xs text-gray-500 dark:text-zinc-400">
                                 {groupChapters.length} chapter
                                 {seriesMeta?.needsFullDebutPipeline ? (
                                   <span className="ml-1.5 inline-flex items-center gap-0.5 text-amber-600">
@@ -1775,13 +1865,13 @@ export default function Mangaka() {
                                 ) : null}
                               </p>
                             </div>
-                            <span className="text-xs text-muted-foreground transition-colors group-hover:text-foreground">
+                            <span className="inline-flex items-center text-xs font-medium text-gray-500 transition-colors group-hover:text-gray-900 dark:text-zinc-400 dark:group-hover:text-zinc-100">
                               Xem series
-                              <ChevronRight className="ml-0.5 inline size-3.5" />
+                              <ChevronRight className="ml-0.5 size-3.5" />
                             </span>
                           </Link>
 
-                          <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
+                          <div className="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2 md:grid-cols-3">
                             {groupChapters.map((c) => {
                               const annot = resolveAnnotatorChapter(c, annotatorChapters);
                               const review = pendingReviewByChapter.get(String(c.id));
@@ -1795,9 +1885,10 @@ export default function Mangaka() {
                                 || seriesMeta?.coverImage
                                 || null,
                               ) || null;
-                              const thumbUrl = hasSubmittedImages ? firstResultUrl : chapterCoverUrl;
+                              // Ưu tiên ảnh bìa chapter/series; chỉ dùng ảnh Assistant khi chưa có cover.
+                              const thumbUrl = chapterCoverUrl || firstResultUrl || null;
                               const statusBadge = hasSubmittedImages
-                                ? { label: 'Đã gửi ảnh', className: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400' }
+                                ? { label: 'Đã gửi ảnh', className: 'bg-emerald-100/90 text-emerald-800 hover:bg-emerald-100/90 dark:bg-emerald-500/20 dark:text-emerald-200' }
                                 : (STATUS_BADGE[c.status] ?? STATUS_BADGE.draft);
                               const debutGate = findSeriesDebutGate(seriesList, c);
                               const debutSubmitAllowed = canSubmitMoreChaptersToTe(debutGate);
@@ -1810,13 +1901,13 @@ export default function Mangaka() {
                               return (
                                 <div
                                   key={c.id}
-                                  className="group/card relative flex flex-col overflow-hidden rounded-lg border bg-background transition-all hover:-translate-y-0.5 hover:shadow-md"
+                                  className="group/card relative flex flex-col overflow-hidden rounded-xl border border-border/70 bg-white transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md dark:bg-card"
                                 >
                                   <Link
                                     to={`/mangaka/series/${slug}/chapter/${c.id}`}
                                     className="flex flex-1 flex-col"
                                   >
-                                    <div className="relative aspect-[4/3] w-full overflow-hidden bg-muted">
+                                    <div className="relative aspect-[4/3] w-full overflow-hidden bg-gray-100 dark:bg-zinc-800">
                                       {thumbUrl ? (
                                         <img
                                           src={thumbUrl}
@@ -1824,58 +1915,69 @@ export default function Mangaka() {
                                           className="size-full object-cover transition-transform duration-300 group-hover/card:scale-105"
                                         />
                                       ) : (
-                                        <div className="flex size-full items-center justify-center text-muted-foreground">
-                                          <BookOpen className="size-8 opacity-30" />
+                                        <div className="flex size-full items-center justify-center text-gray-400">
+                                          <BookOpen className="size-8 opacity-40" />
                                         </div>
                                       )}
-                                      <div className="absolute inset-x-0 top-0 flex items-start justify-between gap-1 p-2">
+                                      <div className="absolute inset-x-0 top-0 flex flex-wrap items-start justify-between gap-1.5 p-2">
                                         {hasSubmittedImages ? (
-                                          <Badge
-                                            variant="secondary"
-                                            className="bg-black/65 text-[10px] text-white hover:bg-black/65"
-                                          >
+                                          <span className="rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur-md">
                                             Assistant · {resultUrls.length}
-                                          </Badge>
+                                          </span>
                                         ) : (
                                           <span />
                                         )}
-                                        <Badge className={cn("shadow-sm", statusBadge.className)} variant="secondary">
+                                        <span
+                                          className={cn(
+                                            "rounded-full px-2 py-0.5 text-[10px] font-semibold backdrop-blur-md",
+                                            hasSubmittedImages
+                                              ? "bg-emerald-100/90 text-emerald-800"
+                                              : cn("shadow-sm", statusBadge.className),
+                                          )}
+                                        >
                                           {statusBadge.label}
-                                        </Badge>
+                                        </span>
                                       </div>
                                     </div>
 
-                                    <div className="flex flex-1 flex-col gap-1 p-3">
-                                      <div className="flex items-start justify-between gap-2">
-                                        <p className="text-sm font-semibold leading-tight">
-                                          Ch. {c.num}
-                                          {c.title ? (
-                                            <span className="ml-1 font-normal text-muted-foreground">
-                                              · {c.title}
-                                            </span>
-                                          ) : null}
-                                        </p>
-                                        <Badge variant="outline" className="shrink-0 text-[10px]">
-                                          {c.type}
-                                        </Badge>
-                                      </div>
-                                      <p className="text-xs text-muted-foreground">
-                                        {pageCount} trang
-                                        {c.assistantName ? ` · ${c.assistantName}` : ""}
+                                    <div className="flex flex-1 flex-col gap-1.5 p-3.5">
+                                      <p className="text-sm font-semibold leading-snug text-gray-900 dark:text-zinc-50">
+                                        Ch. {c.num}
+                                        {c.title ? (
+                                          <span className="text-gray-800 dark:text-zinc-200">
+                                            {" "}· {c.title}
+                                          </span>
+                                        ) : null}
                                       </p>
-                                      <p className="mt-auto text-[11px] text-muted-foreground">
-                                        {c.date}
+                                      <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-gray-500 dark:text-zinc-400">
+                                        <span className="font-medium uppercase tracking-wide text-gray-600 dark:text-zinc-300">
+                                          {c.type}
+                                        </span>
+                                        <span className="text-gray-300 dark:text-zinc-600" aria-hidden>·</span>
+                                        <span>{pageCount} trang</span>
+                                        {c.date ? (
+                                          <>
+                                            <span className="text-gray-300 dark:text-zinc-600" aria-hidden>·</span>
+                                            <span>{c.date}</span>
+                                          </>
+                                        ) : null}
+                                        {c.assistantName ? (
+                                          <>
+                                            <span className="text-gray-300 dark:text-zinc-600" aria-hidden>·</span>
+                                            <span className="truncate">{c.assistantName}</span>
+                                          </>
+                                        ) : null}
                                       </p>
                                     </div>
                                   </Link>
 
                                   {/* Hành động cho chapter chờ Mangaka duyệt */}
                                   {review ? (
-                                    <div className="flex gap-2 border-t bg-muted/30 px-3 py-2">
+                                    <div className="flex gap-2 border-t border-border/70 bg-gray-50/60 px-3 py-2.5 dark:bg-zinc-900/40">
                                       <Button
                                         size="xs"
-                                        variant="default"
-                                        className="flex-1"
+                                        variant="outline"
+                                        className="flex-1 border-red-100 bg-red-50 font-medium text-red-600 transition-colors hover:bg-red-600 hover:text-white dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-600 dark:hover:text-white"
                                         asChild
                                       >
                                         <Link to={`/mangaka/review/chapter/${c.id}`}>
@@ -1886,7 +1988,7 @@ export default function Mangaka() {
                                       <Button
                                         size="xs"
                                         variant="outline"
-                                        className="flex-1"
+                                        className="flex-1 border-gray-200 text-gray-700 hover:bg-gray-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
                                         onClick={() => openCardRevision(c, review)}
                                       >
                                         <Send className="size-3" />
@@ -1895,7 +1997,7 @@ export default function Mangaka() {
                                     </div>
                                   ) : null}
                                   {canSendTe ? (
-                                    <div className="border-t bg-sky-50/40 px-3 py-2 dark:bg-sky-500/5">
+                                    <div className="border-t border-border/70 bg-sky-50/40 px-3 py-2.5 dark:bg-sky-500/5">
                                       <Button
                                         size="xs"
                                         variant="secondary"
@@ -1907,7 +2009,7 @@ export default function Mangaka() {
                                       </Button>
                                     </div>
                                   ) : canMangakaSendToTe(c.apiStatus) && !debutSubmitAllowed ? (
-                                    <div className="border-t bg-muted/30 px-3 py-2">
+                                    <div className="border-t border-border/70 bg-muted/30 px-3 py-2.5">
                                       <p className="text-[11px] leading-snug text-muted-foreground">
                                         Đang khóa debut — chờ EB confirm-publish rồi mới gửi chapter tiếp.
                                       </p>
@@ -1964,12 +2066,12 @@ export default function Mangaka() {
           </div>
 
           {tab !== "annotate" ? (
-          <aside className="mk-sidebar space-y-4">
+          <aside className="mk-sidebar sticky top-4 space-y-4 self-start">
             {(lastApprovedChapter
               || teReadyChapters.length > 0
               || tantouRevisions.length > 0
               || pendingReviews.length > 0) ? (
-              <Card className="mk-sidebar-card border-primary/15 shadow-sm">
+              <Card className="mk-sidebar-card rounded-xl border-primary/15 shadow-sm">
                 <CardHeader className="pb-3">
                   <CardTitle className="flex items-center gap-2 text-base">
                     <ListChecks className="size-4 text-primary" />
@@ -1978,56 +2080,70 @@ export default function Mangaka() {
                 </CardHeader>
                 <CardContent className="space-y-3">
                   {pendingReviews.length > 0 ? (
-                    <div className="flex items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2.5">
-                      <p className="text-sm">
-                        <strong>{pendingReviews.length}</strong> chapter chờ duyệt Assistant
-                      </p>
-                      <Button size="xs" asChild>
+                    <div className="flex items-center justify-between gap-3 rounded-xl border border-rose-200/80 bg-rose-50/70 px-3.5 py-3 dark:border-rose-500/25 dark:bg-rose-500/10">
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-rose-700 dark:text-rose-300">
+                          Ưu tiên
+                        </p>
+                        <p className="mt-0.5 text-sm text-foreground">
+                          <strong>{pendingReviews.length}</strong> chapter chờ duyệt Assistant
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 shrink-0 rounded-lg border-rose-300 bg-white/80 text-rose-800 hover:bg-rose-100 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-200 dark:hover:bg-rose-500/20"
+                        asChild
+                      >
                         <Link to="/mangaka/review">Duyệt</Link>
                       </Button>
                     </div>
                   ) : null}
 
                   {lastApprovedChapter ? (
-                    <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-3 dark:border-emerald-500/30 dark:bg-emerald-500/5">
-                      <p className="flex items-center gap-1.5 text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+                    <div className="rounded-xl border border-emerald-200/80 bg-emerald-50/60 p-3.5 dark:border-emerald-500/30 dark:bg-emerald-500/5">
+                      <p className="flex items-center gap-1.5 text-sm font-semibold text-emerald-800 dark:text-emerald-300">
                         <CheckCircle2 className="size-4 shrink-0" />
                         Đã duyệt Ch. {lastApprovedChapter.num}
                       </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
+                      <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
                         {lastApprovedChapter.series}
                       </p>
                       {(() => {
                         const gate = findSeriesDebutGate(seriesList, lastApprovedChapter);
                         const allowSubmit = canSubmitMoreChaptersToTe(gate);
+                        const lockedHint = allowSubmit
+                          ? ""
+                          : (getDebutSubmitLockedMessage(gate)
+                            || "Cần hoàn thành xác nhận trước khi gửi");
                         return (
                           <div className="mt-2 flex gap-2">
                             <Button
                               size="xs"
                               variant="outline"
+                              className="rounded-lg"
                               onClick={() => setLastApprovedChapter(null)}
                             >
                               Để sau
                             </Button>
-                            <Button
-                              size="xs"
-                              disabled={!allowSubmit}
-                              title={
-                                allowSubmit
-                                  ? undefined
-                                  : getDebutSubmitLockedMessage(gate)
-                              }
-                              onClick={() => openTeSelector(lastApprovedChapter)}
-                            >
-                              Gửi {LABEL_TANTOU_EDITOR}
-                            </Button>
+                            <HoverHint disabled={!allowSubmit} hint={lockedHint}>
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                className="rounded-lg border-emerald-300 bg-white/80 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200"
+                                disabled={!allowSubmit}
+                                onClick={() => openTeSelector(lastApprovedChapter)}
+                              >
+                                Gửi {LABEL_TANTOU_EDITOR}
+                              </Button>
+                            </HoverHint>
                           </div>
                         );
                       })()}
                       {!canSubmitMoreChaptersToTe(
                         findSeriesDebutGate(seriesList, lastApprovedChapter),
                       ) ? (
-                        <p className="mt-2 text-[11px] text-muted-foreground">
+                        <p className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
                           Đang khóa debut — chờ EB confirm-publish.
                         </p>
                       ) : null}
@@ -2042,34 +2158,36 @@ export default function Mangaka() {
                     };
                     const gate = findSeriesDebutGate(seriesList, payload);
                     const allowSubmit = canSubmitMoreChaptersToTe(gate);
+                    const lockedHint = allowSubmit
+                      ? ""
+                      : (getDebutSubmitLockedMessage(gate)
+                        || "Cần hoàn thành xác nhận trước khi gửi");
                     return (
                     <div
                       key={chapter.id}
-                      className="flex items-center justify-between gap-2 rounded-lg border bg-card px-3 py-2"
+                      className="flex items-center justify-between gap-2 rounded-xl border border-sky-200/70 bg-sky-50/50 px-3 py-2.5 dark:border-sky-500/25 dark:bg-sky-500/5"
                     >
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-medium">
+                        <p className="truncate text-sm font-medium text-foreground">
                           {chapter.series} · Ch. {chapter.num}
                         </p>
-                        <p className="text-[10px] text-muted-foreground">
+                        <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
                           {allowSubmit
                             ? `Sẵn sàng gửi ${LABEL_TANTOU_EDITOR}`
                             : "Khóa debut — chờ confirm-publish"}
                         </p>
                       </div>
-                      <Button
-                        size="xs"
-                        variant="secondary"
-                        disabled={!allowSubmit}
-                        title={
-                          allowSubmit
-                            ? undefined
-                            : getDebutSubmitLockedMessage(gate)
-                        }
-                        onClick={() => openTeSelector(payload)}
-                      >
-                        Gửi
-                      </Button>
+                      <HoverHint disabled={!allowSubmit} hint={lockedHint}>
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          className="rounded-lg border-sky-300 bg-white/80 text-sky-800 hover:bg-sky-100 dark:border-sky-500/40 dark:bg-sky-500/10 dark:text-sky-200"
+                          disabled={!allowSubmit}
+                          onClick={() => openTeSelector(payload)}
+                        >
+                          Gửi
+                        </Button>
+                      </HoverHint>
                     </div>
                     );
                   })}
@@ -2077,15 +2195,15 @@ export default function Mangaka() {
                   {tantouRevisions.slice(0, 2).map((s) => {
                     const revisionPath = getMangakaTeRevisionPath(s.chapterId ?? s.id);
                     return (
-                      <div key={s.id} className="rounded-lg border bg-card p-3">
-                        <p className="text-sm font-medium">{s.seriesTitle}</p>
-                        <p className="text-xs text-muted-foreground">
+                      <div key={s.id} className="rounded-xl border border-amber-200/80 bg-amber-50/50 p-3 dark:border-amber-500/25 dark:bg-amber-500/5">
+                        <p className="text-sm font-medium text-foreground">{s.seriesTitle}</p>
+                        <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
                           Ch. {s.chapterNum} · nhận xét {LABEL_TANTOU_EDITOR}
                         </p>
                         {revisionPath ? (
                           <Link
                             to={revisionPath}
-                            className="mt-2 inline-flex items-center text-xs font-medium text-primary hover:underline"
+                            className="mt-2 inline-flex items-center text-xs font-medium text-amber-800 hover:underline dark:text-amber-300"
                           >
                             Xem chi tiết
                             <ChevronRight className="size-3" />
@@ -2099,46 +2217,79 @@ export default function Mangaka() {
             ) : null}
 
             {tab !== "annotate" && seriesRankings.length > 0 ? (
-              <Card className="mk-sidebar-card shadow-sm">
+              <Card className="mk-sidebar-card rounded-xl shadow-sm">
                 <CardHeader className="pb-3">
                   <CardTitle className="flex items-center gap-2 text-base">
                     <TrendingUp className="size-4 text-emerald-600" />
                     Bảng xếp hạng
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-2">
-                  {seriesRankings.map((r) => (
-                    <div
-                      key={r.title}
-                      className={cn(
-                        "flex items-center gap-3 rounded-md border p-2.5",
-                        r.atRisk &&
-                          "border-amber-200 bg-amber-50/40 dark:border-amber-500/30 dark:bg-amber-500/5",
-                      )}
-                    >
-                      <span className="flex size-7 items-center justify-center rounded-md bg-muted text-xs font-bold">
-                        #{r.rank}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">
-                          {r.title}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {r.reads} đọc · {r.delta}
-                        </p>
+                <CardContent className="space-y-2.5">
+                  {seriesRankings.map((r) => {
+                    const cover = seriesList.find((s) => s.title === r.title)?.coverImage;
+                    const coverUrl = cover ? resolveMediaUrl(cover) : null;
+                    return (
+                      <div
+                        key={r.title}
+                        className={cn(
+                          "flex items-center gap-3 rounded-xl border border-border/70 p-2.5",
+                          r.atRisk &&
+                            "border-amber-200 bg-amber-50/40 dark:border-amber-500/30 dark:bg-amber-500/5",
+                        )}
+                      >
+                        <div className="relative size-10 shrink-0 overflow-hidden rounded-lg bg-muted">
+                          {coverUrl ? (
+                            <img
+                              src={coverUrl}
+                              alt=""
+                              className="size-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex size-full items-center justify-center text-[10px] font-bold text-muted-foreground">
+                              {(r.title?.[0] || "#").toUpperCase()}
+                            </div>
+                          )}
+                          <span
+                            className={cn(
+                              "absolute left-0.5 top-0.5 flex size-5 items-center justify-center rounded-md text-[10px] font-bold shadow-sm",
+                              r.rank === 1
+                                ? "bg-amber-500 text-white"
+                                : r.rank === 2
+                                  ? "bg-zinc-400 text-white"
+                                  : r.rank === 3
+                                    ? "bg-orange-600 text-white"
+                                    : "bg-background text-foreground ring-1 ring-border",
+                            )}
+                          >
+                            #{r.rank}
+                          </span>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-foreground">
+                            {r.title}
+                          </p>
+                          <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                            <span className="tabular-nums text-zinc-600 dark:text-zinc-300">
+                              {r.reads}
+                            </span>
+                            {" "}đọc
+                            <span className="mx-1 text-border">·</span>
+                            <span className="tabular-nums">{r.delta}</span>
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   {atRiskSeries.length > 0 ? (
-                    <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2.5 text-xs dark:border-amber-500/30 dark:bg-amber-500/10">
-                      <p className="flex items-center gap-1 font-semibold text-amber-700 dark:text-amber-400">
+                    <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 p-2.5 text-xs dark:border-amber-500/30 dark:bg-amber-500/10">
+                      <p className="flex items-center gap-1 font-semibold text-amber-800 dark:text-amber-300">
                         <AlertTriangle className="size-3" />
                         Cảnh báo huỷ series
                       </p>
                       {atRiskSeries.map((r) => (
                         <p
                           key={r.title}
-                          className="mt-1 text-amber-700 dark:text-amber-400"
+                          className="mt-1 text-amber-800/90 dark:text-amber-300/90"
                         >
                           {r.title}: {r.riskReason}
                         </p>

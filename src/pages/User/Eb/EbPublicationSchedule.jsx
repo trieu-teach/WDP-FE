@@ -36,6 +36,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getSession, logout } from "@/lib/auth.js";
 import { ebEvaluationsService } from "@/api/ebEvaluations.service.js";
 import { getApiErrorMessage } from "@/api/http.js";
+import { EB_NAV_LINKS } from "@/constants/ebNav.js";
 import { LABEL_EDITOR_BOARD } from "@/constants/roleTerminology.js";
 import {
   EB_PUBLICATION_SCHEDULES,
@@ -48,9 +49,7 @@ import {
 import { cn } from "@/lib/utils";
 import "./Eb.css";
 
-const NAV_LINKS = [
-  { to: "/", label: "Trang chủ" },
-];
+const NAV_LINKS = EB_NAV_LINKS;
 
 function ScheduleEventRow({ event }) {
   const href = resolveEbPublicationEventHref(event);

@@ -22,6 +22,7 @@ import {
 import { ebEvaluationsService } from "@/api/ebEvaluations.service.js";
 import { getApiErrorMessage } from "@/api/http.js";
 import { getSession, logout } from "@/lib/auth.js";
+import { EB_NAV_LINKS } from "@/constants/ebNav.js";
 import { LABEL_EDITOR_BOARD } from "@/constants/roleTerminology.js";
 import {
   EB_SCORE_CRITERIA,
@@ -29,10 +30,16 @@ import {
   ebHistoryStatusLabel,
   mapEbHistoryDetailResponse,
 } from "@/utils/ebEvaluationMappers.js";
+import {
+  EB_CONTENT_LEVEL_FIELDS,
+  getCriterionMeta,
+  mapEbRubric,
+  mapExtensionScoresFromApi,
+} from "@/utils/ebScoringRubric.js";
 import { cn } from "@/lib/utils";
 import "./Eb.css";
 
-const NAV_LINKS = [{ to: "/", label: "Trang chủ" }];
+const NAV_LINKS = EB_NAV_LINKS;
 
 function formatDate(value) {
   if (!value) return "—";
@@ -106,15 +113,26 @@ export default function EbHistoryDetail() {
 
   const series = detail?.series;
   const cover = series?.coverImageUrl;
+  const historyRubric = detail
+    ? mapEbRubric({
+        id: detail.appliedRubricId || "history",
+        name: detail.appliedRubricId || "Rubric đã áp dụng",
+        weights: detail.appliedRubricWeights || {},
+        total_weight: detail.appliedRubricTotalWeight,
+        has_extension: Boolean(
+          detail.memberScores?.some((m) => m.extensionScores?.length),
+        ),
+      })
+    : null;
+  const breakdownFields = historyRubric?.scoreFields?.length
+    ? historyRubric.scoreFields
+    : EB_SCORE_CRITERIA;
+  const ageSafety = detail?.ageSafety;
+  const contentLevels = detail?.contentLevels;
 
   return (
     <div className="eb-page flex min-h-screen flex-col bg-background">
-      <Header
-        navLinks={NAV_LINKS}
-        userName={user?.name}
-        userAvatar={user?.avatar}
-        onLogout={handleLogout}
-      />
+      <Header links={NAV_LINKS} onLogout={handleLogout} />
 
       <main className="mx-auto w-full max-w-5xl flex-1 space-y-4 px-4 py-6 sm:px-6">
         <div className="flex flex-wrap items-center gap-3">
@@ -246,14 +264,49 @@ export default function EbHistoryDetail() {
                       </div>
                     </div>
                     <div className="space-y-2.5">
-                      {EB_SCORE_CRITERIA.map((c) => (
+                      {breakdownFields.map((c) => (
                         <ScoreBar
                           key={c.key}
-                          label={c.shortLabel}
+                          label={c.shortLabel || c.label}
                           value={detail.councilBreakdown?.[c.key]}
                         />
                       ))}
                     </div>
+                    {detail.appliedRubricId ? (
+                      <p className="text-xs text-muted-foreground">
+                        Rubric: <strong>{detail.appliedRubricId}</strong>
+                        {detail.appliedRubricTotalWeight != null
+                          ? ` · tổng trọng số ${detail.appliedRubricTotalWeight}`
+                          : ""}
+                      </p>
+                    ) : null}
+                    {ageSafety ? (
+                      <div
+                        className={cn(
+                          "rounded-lg border px-3 py-2 text-xs",
+                          ageSafety.passed
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                            : "border-rose-200 bg-rose-50 text-rose-800",
+                        )}
+                      >
+                        Age safety: {ageSafety.passed ? "đạt" : "không đạt"}
+                        {ageSafety.severity ? ` · ${ageSafety.severity}` : ""}
+                      </div>
+                    ) : null}
+                    {contentLevels ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {EB_CONTENT_LEVEL_FIELDS.map((field) => (
+                          <Badge
+                            key={field.key}
+                            variant="outline"
+                            className="text-[10px] font-normal"
+                          >
+                            {field.label}:{" "}
+                            {contentLevels[field.key] ?? 0}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : null}
                     <p className="text-xs text-muted-foreground">
                       Chấm ngày {formatDate(detail.createdAt)}
                       {detail.evaluatedBy?.name
@@ -314,8 +367,12 @@ export default function EbHistoryDetail() {
                                 </Badge>
                               </div>
                               <div className="flex flex-wrap gap-1.5">
-                                {EB_SCORE_CRITERIA.map((c) => {
-                                  const score = member.scores?.[c.key];
+                                {breakdownFields.map((c) => {
+                                  const score = c.isExtension
+                                    ? mapExtensionScoresFromApi(
+                                        member.extensionScores,
+                                      )[c.key]
+                                    : member.scores?.[c.key];
                                   if (score == null) return null;
                                   return (
                                     <Badge
@@ -323,7 +380,8 @@ export default function EbHistoryDetail() {
                                       variant="outline"
                                       className="text-[11px] font-normal"
                                     >
-                                      {c.shortLabel} {Number(score).toFixed(1)}
+                                      {c.shortLabel || getCriterionMeta(c.key).shortLabel}{" "}
+                                      {Number(score).toFixed(1)}
                                     </Badge>
                                   );
                                 })}

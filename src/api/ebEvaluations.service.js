@@ -108,14 +108,104 @@ export const ebEvaluationsService = {
   /**
    * POST /eb-evaluations/chapter/:chapterId/evaluate
    * Body: {
-   *   member_scores: [{ member_id, member_name, scores }],
-   *   notes?
+   *   rubric_id?,
+   *   content_levels?,
+   *   member_scores: [{ member_id, member_name, scores, extension_scores? }],
+   *   notes?, result?
    * }
-   * BE yêu cầu member_name (required) — tên hiển thị từ roster FE.
    */
   evaluateChapter(chapterId, payload) {
     return http
       .post(`/eb-evaluations/chapter/${chapterId}/evaluate`, payload)
+      .then(unwrapData)
+  },
+
+  /**
+   * POST /eb-evaluations/series/:seriesId/evaluate — first review + rubric + age safety.
+   */
+  evaluateSeries(seriesId, payload) {
+    const id = String(seriesId ?? '').trim()
+    if (!id) return Promise.reject(new Error('seriesId required'))
+    return http
+      .post(`/eb-evaluations/series/${id}/evaluate`, payload)
+      .then(unwrapData)
+  },
+
+  /**
+   * GET /eb-evaluations/age-safety-check
+   * Query flat: age_rating + violence, fear, profanity, nudity, danger_simulation
+   */
+  checkAgeSafety(params = {}) {
+    const query = {}
+    if (params.age_rating != null) query.age_rating = params.age_rating
+    if (params.series_id) query.series_id = params.series_id
+    const levels = params.content_levels && typeof params.content_levels === 'object'
+      ? params.content_levels
+      : params
+    for (const key of [
+      'violence',
+      'fear',
+      'profanity',
+      'nudity',
+      'danger_simulation',
+    ]) {
+      if (levels[key] != null) query[key] = levels[key]
+    }
+    return http
+      .get('/eb-evaluations/age-safety-check', { params: query })
+      .then(unwrap)
+  },
+
+  /**
+   * POST /eb-evaluations/preview-council-average
+   * Body: { rubric_id, member_scores }
+   * Response data: weighted_council_average, per_criteria_averages, classification...
+   */
+  previewCouncilAverage(payload) {
+    return http
+      .post('/eb-evaluations/preview-council-average', payload)
+      .then(unwrapData)
+  },
+
+  /**
+   * GET /eb-evaluations/rubrics?family=
+   */
+  getRubrics(params = {}) {
+    return http.get('/eb-evaluations/rubrics', { params }).then(unwrap)
+  },
+
+  /** GET /eb-evaluations/suggest-rubric/:seriesId → suggested_rubric + alternatives */
+  suggestRubric(seriesId) {
+    const id = String(seriesId ?? '').trim()
+    if (!id) return Promise.reject(new Error('seriesId required'))
+    return http
+      .get(`/eb-evaluations/suggest-rubric/${id}`)
+      .then(unwrap)
+  },
+
+  /**
+   * PATCH /eb-evaluations/series/:seriesId/decision
+   * Body: { decision: continue|cancelled|change_schedule, schedule? }
+   */
+  decideSeries(seriesId, payload) {
+    const id = String(seriesId ?? '').trim()
+    if (!id) return Promise.reject(new Error('seriesId required'))
+    return http
+      .patch(`/eb-evaluations/series/${id}/decision`, payload)
+      .then(unwrapData)
+  },
+
+  /** GET /eb-evaluations/series/:seriesId — lịch sử chấm của 1 series */
+  getSeriesEvaluations(seriesId) {
+    const id = String(seriesId ?? '').trim()
+    if (!id) return Promise.reject(new Error('seriesId required'))
+    return http.get(`/eb-evaluations/series/${id}`).then(unwrapData)
+  },
+
+  /** GET /eb-evaluations/my-history */
+  getMyHistory(params = {}) {
+    return http
+      .get('/eb-evaluations/my-history', { params })
       .then(unwrapData)
   },
 

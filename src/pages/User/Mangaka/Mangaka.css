@@ -2893,8 +2893,13 @@
 }
 
 /* Thuê Assistant tab */
+.mk-assistants {
+  --mk-assist-radius: 12px;
+}
+
 .mk-assistants [id^="assistant-"] {
   animation: mk-assist-in 0.32s ease both;
+  border-radius: var(--mk-assist-radius);
 }
 
 @keyframes mk-assist-in {
@@ -2931,7 +2936,11 @@
 
 .ws-page--mangaka .mk-sidebar {
   position: sticky;
-  top: 20px;
+  top: 1rem;
+  align-self: start;
+  max-height: calc(100vh - 2rem);
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .ws-page--mangaka .mk-content {
@@ -4542,8 +4551,11 @@
 
 .ws-page--mangaka .mk-sidebar {
   position: sticky;
-  top: 1.25rem;
+  top: 1rem;
   align-self: start;
+  max-height: calc(100vh - 2rem);
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 @media (max-width: 1024px) {

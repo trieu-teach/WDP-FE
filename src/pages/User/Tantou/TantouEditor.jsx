@@ -45,6 +45,7 @@ import {
   getTantouSection,
   TANTOU_SECTION_IDS,
 } from "@/constants/tantouSections.js";
+import { TANTOU_NAV_LINKS } from "@/constants/tantouNav.js";
 import {
   formatTeChapterPublishError,
   formatTePublishBufferWarning,
@@ -78,9 +79,7 @@ import { TantouPublicationCalendar } from "@/components/Tantou/TantouPublication
 import { TantouReviewHistory } from "@/components/Tantou/TantouReviewHistory.jsx";
 import "./TantouEditor.css";
 
-const NAV_LINKS = [
-  { to: "/", label: "Trang chủ" },
-];
+const NAV_LINKS = TANTOU_NAV_LINKS;
 
 const HERO_IMAGES = [
   "/images/editor1.png",
@@ -120,34 +119,34 @@ function publicationStatusBadgeClass(status) {
 
 function statusBadgeClass(status) {
   if (status === "pending") {
-    return "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200";
+    return "border-0 bg-amber-50 text-amber-700";
   }
   if (status === "awaiting_publish") {
-    return "border-violet-200 bg-violet-50 text-violet-900 dark:border-violet-500/30 dark:bg-violet-500/15 dark:text-violet-200";
+    return "border-0 bg-purple-50 text-purple-700";
   }
   if (status === "scheduled") {
-    return "border-sky-200 bg-sky-50 text-sky-900 dark:border-sky-500/30 dark:bg-sky-500/15 dark:text-sky-200";
+    return "border-0 bg-sky-50 text-sky-700";
   }
   if (status === "forwarded_eb" || status === "approved_publish") {
-    return "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200";
+    return "border-0 bg-emerald-50 text-emerald-700";
   }
   if (status === "revision") {
-    return "border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-500/30 dark:bg-rose-500/15 dark:text-rose-200";
+    return "border-0 bg-rose-50 text-rose-700";
   }
-  return "border-border bg-muted text-muted-foreground";
+  return "border-0 bg-gray-100 text-gray-600";
 }
 
 function assignmentBadgeClass(status) {
   if (status === "unassigned") {
-    return "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-500/30 dark:bg-sky-500/15 dark:text-sky-200";
+    return "border-0 bg-sky-50 text-sky-700";
   }
   if (status === "mine") {
-    return "border-violet-200 bg-violet-50 text-violet-900 dark:border-violet-500/30 dark:bg-violet-500/15 dark:text-violet-200";
+    return "border-0 bg-violet-50 text-violet-700";
   }
   if (status === "other") {
-    return "border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-500/30 dark:bg-rose-500/15 dark:text-rose-200";
+    return "border-0 bg-rose-50 text-rose-700";
   }
-  return "border-border bg-muted text-muted-foreground";
+  return "border-0 bg-gray-100 text-gray-600";
 }
 
 function SubmissionCard({
@@ -161,19 +160,19 @@ function SubmissionCard({
     : 1;
   const chapterLabel = `Chapter ${sub.chapterNum || "?"}`;
   const metaLine = hideMangakaMeta
-    ? `${chapterLabel} · ${pageCount} trang`
-    : `${chapterLabel} · ${pageCount} trang · ${sub.mangakaName}`;
+    ? `${chapterLabel} • ${pageCount} trang`
+    : `${chapterLabel} • ${pageCount} trang • ${sub.mangakaName}`;
 
   return (
-    <Card
+    <div
       className={cn(
-        "gap-0 overflow-hidden border-border/70 py-0 shadow-sm transition-all duration-200",
-        "hover:-translate-y-0.5 hover:border-sky-300/70 hover:shadow-md dark:hover:border-sky-500/40",
+        "mb-3 flex flex-col items-start justify-between gap-4 rounded-2xl border border-gray-100 bg-white p-4 shadow-sm",
+        "transition-all duration-150 hover:border-gray-200 sm:flex-row sm:items-center",
         !canReview && "opacity-75",
       )}
     >
-      <CardContent className="flex items-stretch gap-3.5 p-3 sm:gap-4 sm:p-3.5">
-        <div className="relative aspect-[3/4] w-[4.25rem] shrink-0 overflow-hidden rounded-lg bg-muted sm:w-[5.25rem]">
+      <div className="flex min-w-0 w-full flex-1 items-start gap-3.5 sm:items-center sm:gap-4">
+        <div className="h-20 w-16 shrink-0 overflow-hidden rounded-xl bg-gray-100 shadow-sm sm:h-24 sm:w-20">
           {(sub.chapterCoverUrl || sub.mangakaImageUrl) ? (
             <img
               src={sub.chapterCoverUrl || sub.mangakaImageUrl}
@@ -181,67 +180,69 @@ function SubmissionCard({
               className="size-full object-cover"
             />
           ) : (
-            <div className="flex size-full items-center justify-center bg-gradient-to-br from-sky-500/20 to-violet-500/20 text-lg font-bold text-sky-700/70">
+            <div className="flex size-full items-center justify-center bg-gradient-to-br from-sky-100 to-violet-100 text-lg font-bold text-sky-700/70">
               {(sub.seriesTitle || "?").slice(0, 1).toUpperCase()}
             </div>
           )}
         </div>
 
-        <div className="flex min-w-0 flex-1 flex-col justify-center gap-2">
-          <div className="min-w-0 space-y-1.5">
-            <h3 className="truncate text-base font-semibold leading-snug tracking-tight sm:text-[1.05rem]">
-              {sub.seriesTitle}
-            </h3>
-            <div className="flex flex-wrap items-center gap-1.5">
-              <Badge
-                variant="outline"
-                className={cn("text-[11px] font-medium", statusBadgeClass(sub.status))}
+        <div className="min-w-0 flex-1">
+          <h3 className="mb-1 truncate text-base font-semibold text-gray-900">
+            {sub.seriesTitle}
+          </h3>
+          <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+            <span
+              className={cn(
+                "rounded-full px-2.5 py-0.5 text-xs font-medium",
+                statusBadgeClass(sub.status),
+              )}
+            >
+              {statusLabel(sub.status)}
+            </span>
+            {sub.teAssignmentStatus ? (
+              <span
+                className={cn(
+                  "rounded-full px-2.5 py-0.5 text-xs font-medium",
+                  assignmentBadgeClass(sub.teAssignmentStatus),
+                )}
               >
-                {statusLabel(sub.status)}
-              </Badge>
-              {sub.teAssignmentStatus ? (
-                <Badge
-                  variant="outline"
-                  className={cn(
-                    "text-[11px] font-medium",
-                    assignmentBadgeClass(sub.teAssignmentStatus),
-                  )}
-                >
-                  {sub.teAssignmentStatus === "unassigned"
-                    ? "Chưa ai nhận"
-                    : sub.teAssignmentStatus === "mine"
-                      ? "Của bạn"
-                      : "TE khác"}
-                </Badge>
-              ) : null}
-            </div>
-            <p className="text-xs text-muted-foreground/90 sm:text-[13px]">
-              {metaLine}
-            </p>
-            {sub.scheduledPublishAt ? (
-              <p className="text-[11px] text-sky-700 dark:text-sky-300">
-                Lịch publish: {formatTeScheduledPublishDisplay(sub.scheduledPublishAt)}
-              </p>
-            ) : null}
-            {sub.teAssignmentLabel ? (
-              <p className="text-[11px] text-muted-foreground">{sub.teAssignmentLabel}</p>
+                {sub.teAssignmentStatus === "unassigned"
+                  ? "Chưa ai nhận"
+                  : sub.teAssignmentStatus === "mine"
+                    ? "Của bạn"
+                    : "TE khác"}
+              </span>
             ) : null}
           </div>
+          <p className="text-xs font-normal text-gray-500">
+            {metaLine}
+          </p>
+          {sub.scheduledPublishAt ? (
+            <p className="mt-1 text-[11px] text-sky-600">
+              Lịch publish: {formatTeScheduledPublishDisplay(sub.scheduledPublishAt)}
+            </p>
+          ) : null}
+          {sub.teAssignmentLabel ? (
+            <p className="mt-1 text-[11px] italic text-gray-400">
+              {sub.teAssignmentLabel}
+            </p>
+          ) : null}
         </div>
+      </div>
 
-        <div className="flex shrink-0 flex-col items-stretch justify-center gap-2 self-center sm:min-w-[9.5rem]">
-          <Button
-            size="sm"
-            disabled={!canReview}
-            className="h-9 gap-1.5 bg-sky-600 px-3 text-white shadow-sm hover:bg-sky-700"
-            onClick={() => onReview(sub)}
-          >
-            <MessageSquareText className="size-3.5" />
-            Mở & nhận xét
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+      <button
+        type="button"
+        disabled={!canReview}
+        className={cn(
+          "flex shrink-0 items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-medium text-white shadow-sm transition-colors",
+          "hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50",
+        )}
+        onClick={() => onReview(sub)}
+      >
+        <MessageSquareText className="size-3.5" />
+        Mở & nhận xét
+      </button>
+    </div>
   );
 }
 
@@ -311,56 +312,59 @@ function MangakaSelectCard({ group, onSelect }) {
     <button
       type="button"
       onClick={() => onSelect(group.key)}
-      className="group relative text-left"
+      className={cn(
+        'group relative cursor-pointer overflow-hidden rounded-xl border border-gray-100 bg-white text-left shadow-sm',
+        'transition-all duration-200 hover:-translate-y-1 hover:border-gray-200 hover:shadow-md',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/30',
+      )}
     >
-      <Card className="gap-0 overflow-hidden py-0 shadow-sm transition-all hover:-translate-y-0.5 hover:border-sky-300 hover:shadow-md dark:hover:border-sky-500/40">
-        <div className="relative flex aspect-[4/3] w-full items-center justify-center overflow-hidden bg-gradient-to-br from-sky-500/15 via-muted to-violet-500/10">
-          {group.coverUrl ? (
-            <img
-              src={group.coverUrl}
-              alt=""
-              className="size-full object-cover transition-transform duration-300 group-hover:scale-105"
-            />
-          ) : (
-            <div className="flex size-20 items-center justify-center rounded-2xl bg-sky-600 text-2xl font-bold text-white shadow-lg shadow-sky-900/20">
+      <div className="relative aspect-[3/4] w-full overflow-hidden rounded-t-xl bg-gradient-to-br from-sky-50 via-gray-50 to-violet-50">
+        {group.coverUrl ? (
+          <img
+            src={group.coverUrl}
+            alt=""
+            className="size-full object-cover transition-transform duration-300 group-hover:scale-105"
+          />
+        ) : (
+          <div className="flex size-full items-center justify-center">
+            <div className="flex size-16 items-center justify-center rounded-2xl bg-sky-600 text-xl font-bold text-white shadow-lg shadow-sky-900/15">
               {initials}
             </div>
-          )}
-          <Badge className="absolute right-2 top-2 h-6 min-w-6 justify-center bg-amber-600 px-1.5 text-xs text-white hover:bg-amber-600">
-            {group.count}
-          </Badge>
-        </div>
-        <CardContent className="space-y-1 p-3">
-          <p className="flex items-center gap-2 truncate text-sm font-semibold">
-            <span className="group/avatar inline-flex shrink-0">
-              <Avatar
-                size="sm"
-                className={cn(
-                  "size-6 ring-1 ring-border",
-                  "transition-all duration-200 ease-out",
-                  "group-hover/avatar:scale-110 group-hover/avatar:ring-2 group-hover/avatar:ring-sky-400",
-                  "group-hover/avatar:shadow-sm group-hover/avatar:shadow-sky-500/30",
-                )}
-              >
-                {group.avatarUrl ? (
-                  <AvatarImage
-                    src={group.avatarUrl}
-                    alt=""
-                    className="transition-transform duration-300 group-hover/avatar:scale-110"
-                  />
-                ) : null}
-                <AvatarFallback className="bg-sky-600 text-[10px] font-bold text-white">
-                  {initials}
-                </AvatarFallback>
-              </Avatar>
-            </span>
-            <span className="truncate">{group.name}</span>
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {group.count} chapter chờ duyệt
-          </p>
-        </CardContent>
-      </Card>
+          </div>
+        )}
+        <span className="absolute right-2 top-2 rounded-full bg-amber-500/90 px-2 py-0.5 text-xs font-bold text-white shadow-sm backdrop-blur-md">
+          {group.count}
+        </span>
+      </div>
+      <div className="space-y-1 bg-white p-3">
+        <p className="flex items-center gap-2 truncate text-sm font-semibold text-gray-900">
+          <span className="group/avatar inline-flex shrink-0">
+            <Avatar
+              size="sm"
+              className={cn(
+                'size-6 ring-1 ring-gray-200',
+                'transition-all duration-200 ease-out',
+                'group-hover/avatar:scale-110 group-hover/avatar:ring-2 group-hover/avatar:ring-sky-400',
+              )}
+            >
+              {group.avatarUrl ? (
+                <AvatarImage
+                  src={group.avatarUrl}
+                  alt=""
+                  className="transition-transform duration-300 group-hover/avatar:scale-110"
+                />
+              ) : null}
+              <AvatarFallback className="bg-sky-600 text-[10px] font-bold text-white">
+                {initials}
+              </AvatarFallback>
+            </Avatar>
+          </span>
+          <span className="truncate">{group.name}</span>
+        </p>
+        <p className="text-xs text-gray-500">
+          {group.count} chapter chờ duyệt
+        </p>
+      </div>
     </button>
   );
 }
@@ -1135,9 +1139,13 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
 
   if (reviewOpen && selected) {
     return (
-      <div className="flex min-h-screen flex-col bg-background">
-        <Header links={NAV_LINKS} onLogout={user ? handleLogout : undefined} />
-        <main className="page-container flex-1 py-8">
+      <div className="relative flex min-h-screen flex-col bg-gray-50">
+        <Header
+          links={NAV_LINKS}
+          onLogout={user ? handleLogout : undefined}
+          className="relative z-50"
+        />
+        <main className="page-container relative z-0 flex-1 overflow-x-hidden py-6 md:py-8">
           <TantouPageReview
             submission={selected}
             relatedSubmissions={submissions.filter(
@@ -1158,10 +1166,10 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
   }
 
   return (
-    <div className="ws-page--tantou flex min-h-screen flex-col bg-background">
+    <div className="ws-page--tantou flex min-h-screen flex-col bg-gray-50">
       <Header links={NAV_LINKS} onLogout={user ? handleLogout : undefined} />
 
-      <section className="ws-hero--tantou te-hero-slideshow relative overflow-hidden border-b border-white/5 text-white">
+      <section className="ws-hero--tantou te-hero-slideshow te-hero-section relative overflow-hidden text-white">
         <div className="te-hero-slides" aria-hidden>
           {HERO_IMAGES.map((src, index) => (
             <img
@@ -1175,20 +1183,23 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
             />
           ))}
         </div>
-        <div className="te-hero-slides__veil" aria-hidden />
-        <div className="page-container relative py-10 md:py-14">
-          <div className="max-w-2xl space-y-3">
+        <div
+          className="absolute inset-0 z-[1] bg-gradient-to-r from-black/80 via-black/50 to-transparent"
+          aria-hidden
+        />
+        <div className="page-container relative z-[2] pb-10 pt-8 md:pb-12 md:pt-10">
+          <div className="max-w-2xl space-y-2.5">
             <Badge
               variant="secondary"
-              className="bg-white/10 text-white hover:bg-white/15"
+              className="border-0 bg-white/15 px-2.5 py-0.5 text-[10px] font-medium tracking-wide text-white hover:bg-white/20"
             >
               {LABEL_TANTOU_EDITOR}
             </Badge>
-            <h1 className="text-3xl font-bold tracking-tight md:text-4xl">
+            <h1 className="text-2xl font-bold tracking-tight text-white drop-shadow-sm md:text-3xl">
               {sectionMeta.title}
             </h1>
             {sectionMeta.description ? (
-              <p className="leading-relaxed text-zinc-300">
+              <p className="max-w-xl text-sm leading-relaxed text-white/85 md:text-[15px]">
                 {sectionMeta.description}
               </p>
             ) : null}
@@ -1196,157 +1207,157 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
         </div>
       </section>
 
-      <main className="page-container flex-1 space-y-6 py-8">
-        <Button type="button" variant="ghost" size="sm" asChild>
-          <Link to={PATH_TANTOU_EDITOR}>
-            <ArrowLeft className="size-4" />
-            Về khu vực làm việc
-          </Link>
-        </Button>
+      <main className="page-container flex-1 space-y-5 py-6 md:py-8">
+        <Link
+          to={PATH_TANTOU_EDITOR}
+          className="mb-4 flex items-center gap-1 text-xs text-gray-500 transition-colors hover:text-gray-900"
+        >
+          <ArrowLeft className="size-3.5" />
+          Về khu vực làm việc
+        </Link>
 
         {sectionId === "series-pending" ? (
-          <section className="space-y-4">
-            <Card className="flex flex-col gap-0 overflow-hidden py-0 shadow-sm">
-              <CardHeader className="shrink-0 border-b bg-muted/20 px-5 py-4 sm:px-6">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0 space-y-1.5">
-                    <CardTitle className="flex flex-wrap items-center gap-2.5 text-xl tracking-tight sm:text-2xl">
-                      {selectedMangakaGroup ? (
-                        <span className="group/avatar inline-flex shrink-0">
-                          <Avatar
-                            className={cn(
-                              "size-9 rounded-full shadow-sm shadow-sky-900/20 ring-1 ring-border",
-                              "transition-all duration-200 ease-out",
-                              "group-hover/avatar:scale-110 group-hover/avatar:ring-2 group-hover/avatar:ring-sky-400",
-                              "group-hover/avatar:shadow-md group-hover/avatar:shadow-sky-500/25",
-                            )}
-                          >
-                            {selectedMangakaGroup.avatarUrl ? (
-                              <AvatarImage
-                                src={selectedMangakaGroup.avatarUrl}
-                                alt=""
-                                className="transition-transform duration-300 group-hover/avatar:scale-110"
-                              />
-                            ) : null}
-                            <AvatarFallback className="rounded-full bg-sky-600 text-sm font-bold text-white">
-                              {(selectedMangakaGroup.name.length >= 2
-                                ? selectedMangakaGroup.name
-                                : `${selectedMangakaGroup.name}●`
-                              ).slice(0, 2).toUpperCase()}
-                            </AvatarFallback>
-                          </Avatar>
-                        </span>
-                      ) : (
-                        <Sparkles className="size-5 text-amber-500" />
-                      )}
-                      <span className="truncate">
-                        {selectedMangakaGroup
-                          ? selectedMangakaGroup.name
-                          : (pendingSections?.seriesLevel?.label ?? "Series chưa được duyệt")}
-                      </span>
-                      <Badge
+          <section className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-gray-100 px-5 py-4 sm:px-6">
+              <div className="min-w-0 space-y-1">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  {selectedMangakaGroup ? (
+                    <span className="group/avatar inline-flex shrink-0">
+                      <Avatar
                         className={cn(
-                          "h-6 min-w-6 justify-center px-2 text-xs font-semibold",
-                          selectedMangakaGroup
-                            ? "bg-amber-600 text-white hover:bg-amber-600"
-                            : "bg-secondary text-secondary-foreground hover:bg-secondary",
+                          "size-9 rounded-full shadow-sm shadow-sky-900/20 ring-1 ring-gray-200",
+                          "transition-all duration-200 ease-out",
+                          "group-hover/avatar:scale-110 group-hover/avatar:ring-2 group-hover/avatar:ring-sky-400",
                         )}
                       >
-                        {selectedMangakaGroup
-                          ? selectedMangakaGroup.count
-                          : (debutQueue.length || pendingSections?.seriesLevel?.count || 0)}
-                      </Badge>
-                    </CardTitle>
-                    {!selectedMangakaGroup ? (
-                      <CardDescription>
-                        Chọn Mangaka để xem chapter đang chờ duyệt.
-                      </CardDescription>
-                    ) : (
-                      <CardDescription>
-                        {selectedMangakaGroup.count} chapter chờ duyệt từ Mangaka này.
-                      </CardDescription>
+                        {selectedMangakaGroup.avatarUrl ? (
+                          <AvatarImage
+                            src={selectedMangakaGroup.avatarUrl}
+                            alt=""
+                            className="transition-transform duration-300 group-hover/avatar:scale-110"
+                          />
+                        ) : null}
+                        <AvatarFallback className="rounded-full bg-sky-600 text-sm font-bold text-white">
+                          {(selectedMangakaGroup.name.length >= 2
+                            ? selectedMangakaGroup.name
+                            : `${selectedMangakaGroup.name}●`
+                          ).slice(0, 2).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                    </span>
+                  ) : (
+                    <span className="flex size-9 items-center justify-center rounded-xl bg-amber-50 text-amber-600">
+                      <Sparkles className="size-4" />
+                    </span>
+                  )}
+                  <h2 className="truncate text-lg font-semibold tracking-tight text-gray-900 sm:text-xl">
+                    {selectedMangakaGroup
+                      ? selectedMangakaGroup.name
+                      : "Chọn Mangaka"}
+                  </h2>
+                  <span
+                    className={cn(
+                      "inline-flex h-6 min-w-6 items-center justify-center rounded-full px-2 text-xs font-semibold",
+                      selectedMangakaGroup
+                        ? "bg-amber-500 text-white"
+                        : "bg-gray-100 text-gray-700",
                     )}
-                  </div>
-                  {selectedMangakaGroup ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-9 shrink-0 gap-1.5 border-sky-200 bg-background shadow-sm hover:bg-sky-50 dark:border-sky-500/30 dark:hover:bg-sky-500/10"
-                      onClick={() => setSelectedMangakaKey(null)}
-                    >
-                      <ArrowLeft className="size-4" />
-                      Tất cả Mangaka
-                    </Button>
-                  ) : null}
+                  >
+                    {selectedMangakaGroup
+                      ? selectedMangakaGroup.count
+                      : (debutQueue.length || pendingSections?.seriesLevel?.count || 0)}
+                  </span>
                 </div>
-              </CardHeader>
-              <CardContent className="scrollbar-hide max-h-[min(560px,calc(100vh-260px))] space-y-2.5 overflow-y-auto px-4 py-4 sm:px-5">
-                {debutQueue.length === 0 ? (
-                  <Card>
-                    <CardContent className="py-12 text-center text-muted-foreground">
-                      {loading ? "Đang tải hàng chờ..." : "Không có series chờ duyệt."}
-                    </CardContent>
-                  </Card>
-                ) : selectedMangakaGroup ? (
-                  selectedMangakaGroup.chapters.map((sub) => (
+                {!selectedMangakaGroup ? (
+                  <p className="text-xs text-gray-500 sm:text-sm">
+                    Chọn Mangaka để xem chapter đang chờ duyệt.
+                  </p>
+                ) : (
+                  <p className="text-xs text-gray-500 sm:text-sm">
+                    {selectedMangakaGroup.count} chapter chờ duyệt từ Mangaka này.
+                  </p>
+                )}
+              </div>
+              {selectedMangakaGroup ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9 shrink-0 gap-1.5 border-gray-200 bg-white shadow-sm hover:bg-gray-50"
+                  onClick={() => setSelectedMangakaKey(null)}
+                >
+                  <ArrowLeft className="size-4" />
+                  Tất cả Mangaka
+                </Button>
+              ) : null}
+            </div>
+
+            <div className="scrollbar-hide max-h-[min(640px,calc(100vh-240px))] overflow-y-auto">
+              {debutQueue.length === 0 ? (
+                <div className="px-6 py-16 text-center text-sm text-gray-500">
+                  {loading ? "Đang tải hàng chờ..." : "Không có series chờ duyệt."}
+                </div>
+              ) : selectedMangakaGroup ? (
+                <div className="space-y-2.5 p-4 sm:p-5">
+                  {selectedMangakaGroup.chapters.map((sub) => (
                     <SubmissionCard
                       key={sub.id}
                       sub={sub}
                       onReview={openReview}
                       hideMangakaMeta
                     />
-                  ))
-                ) : (
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-                    {debutByMangaka.map((group) => (
-                      <MangakaSelectCard
-                        key={group.key}
-                        group={group}
-                        onSelect={setSelectedMangakaKey}
-                      />
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+                  ))}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-5 p-6 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+                  {debutByMangaka.map((group) => (
+                    <MangakaSelectCard
+                      key={group.key}
+                      group={group}
+                      onSelect={setSelectedMangakaKey}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
           </section>
         ) : null}
 
         {sectionId === "series-approved" ? (
-          <section className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <FileText className="size-5 text-sky-500" />
-                  {pendingSections?.chapterLevel?.label ?? "Series đã được duyệt"}
-                  <Badge variant="secondary" className="font-normal">
+          <section className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-5 py-4 sm:px-6">
+              <div className="min-w-0 space-y-1">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <span className="flex size-9 items-center justify-center rounded-xl bg-sky-50 text-sky-600">
+                    <FileText className="size-4" />
+                  </span>
+                  <h2 className="text-lg font-semibold tracking-tight text-gray-900">
+                    Chapter chờ duyệt
+                  </h2>
+                  <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-gray-100 px-2 text-xs font-semibold text-gray-700">
                     {recurringQueue.length}
-                  </Badge>
-                </CardTitle>
-                <CardDescription>
-                  {pendingSections?.chapterLevel?.description
-                    ?? "Series đã được Hội đồng chấp nhận — duyệt chapter để phát hành."}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {recurringQueue.length === 0 ? (
-                  <Card>
-                    <CardContent className="py-12 text-center text-muted-foreground">
-                      {loading ? "Đang tải hàng chờ..." : "Không có chapter chờ duyệt."}
-                    </CardContent>
-                  </Card>
-                ) : (
-                  recurringQueue.map((sub) => (
-                    <SubmissionCard
-                      key={sub.id}
-                      sub={sub}
-                      onReview={openReview}
-                    />
-                  ))
-                )}
-              </CardContent>
-            </Card>
+                  </span>
+                </div>
+                <p className="text-xs text-gray-500 sm:text-sm">
+                  Series đã được Hội đồng chấp nhận — mở chapter để nhận xét và phát hành.
+                </p>
+              </div>
+            </div>
+            <div className="p-4 sm:p-5">
+              {recurringQueue.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50/60 px-6 py-14 text-center text-sm text-gray-500">
+                  {loading ? "Đang tải hàng chờ..." : "Không có chapter chờ duyệt."}
+                </div>
+              ) : (
+                recurringQueue.map((sub) => (
+                  <SubmissionCard
+                    key={sub.id}
+                    sub={sub}
+                    onReview={openReview}
+                  />
+                ))
+              )}
+            </div>
           </section>
         ) : null}
 
