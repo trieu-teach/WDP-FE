@@ -32,12 +32,9 @@ import {
   parseApproveChapterErrorData,
 } from "@/utils/chapterTaskFlow.js";
 import { LABEL_TANTOU_EDITOR } from "@/constants/roleTerminology.js";
+import { MANGAKA_NAV_LINKS } from "@/constants/mangakaNav.js";
 
-const NAV_LINKS = [
-  { to: "/", label: "Trang chủ" },
-  { to: "/mangaka", label: "Mangaka" },
-  { to: "/mangaka/review", label: "Duyệt bản Assistant" },
-];
+const NAV_LINKS = MANGAKA_NAV_LINKS;
 
 export default function MangakaAssistantReviewDetail() {
   const navigate = useNavigate();

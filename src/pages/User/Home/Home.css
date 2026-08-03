@@ -66,17 +66,23 @@
   gap: 8px;
 }
 
-.home-header__nav a {
+.home-header__nav a,
+.home-header__nav button {
   padding: 8px 14px;
   font-size: 14px;
   font-weight: 500;
   color: var(--home-muted);
   text-decoration: none;
+  border: none;
+  background: transparent;
   border-radius: 999px;
+  cursor: pointer;
+  font-family: inherit;
   transition: color 0.15s ease, background 0.15s ease;
 }
 
-.home-header__nav a:hover {
+.home-header__nav a:hover,
+.home-header__nav button:hover {
   color: var(--home-green-dark);
   background: var(--home-green-light);
 }

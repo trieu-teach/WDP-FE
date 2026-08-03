@@ -46,7 +46,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -112,10 +112,11 @@ import {
   seriesToExternalSummary,
   slugifySeriesTitle,
 } from "@/utils/seriesModel.js";
+import { MANGAKA_NAV_LINKS, MANGAKA_WORKSPACE_TAB_IDS } from "@/constants/mangakaNav.js";
 import "@/styles/mangaPage.css";
 import "./Mangaka.css";
 
-const NAV_LINKS = [{ to: "/", label: "Trang chủ" }];
+const NAV_LINKS = MANGAKA_NAV_LINKS;
 
 const HERO_IMAGES = [
   "/images/mangaka1.png",
@@ -156,13 +157,6 @@ const STATUS_BADGE = {
       "bg-emerald-100 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-400",
   },
 };
-
-const TAB_ITEMS = [
-  { id: "series", label: "Series", icon: BookOpen },
-  { id: "chapters", label: "Chapter", icon: FileText },
-  { id: "assistants", label: "Thuê Assistant", icon: UserPlus },
-  { id: "annotate", label: "Upload & ghi chú", icon: PenSquare },
-];
 
 function EmptyWorkspaceState({ icon: Icon, title, description, action }) {
   return (
@@ -1475,6 +1469,17 @@ export default function Mangaka() {
   }
 
   useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const tabFromQuery = params.get("tab");
+    if (
+      tabFromQuery
+      && MANGAKA_WORKSPACE_TAB_IDS.includes(tabFromQuery)
+    ) {
+      setTab(tabFromQuery);
+    }
+  }, [location.search]);
+
+  useEffect(() => {
     const st = location.state;
     if (!st || typeof st !== "object") return;
     if (
@@ -1578,30 +1583,7 @@ export default function Mangaka() {
         >
           <div className="mk-content min-w-0">
             <Tabs value={tab} onValueChange={setTab}>
-              <div className="mb-5 flex flex-wrap items-center gap-2">
-                <TabsList className="mk-tabs h-auto min-w-0 flex-1 flex-wrap justify-start gap-1 bg-muted/40 p-1">
-                  {TAB_ITEMS.map((t) => {
-                    const Icon = t.icon;
-                    return (
-                      <TabsTrigger
-                        key={t.id}
-                        value={t.id}
-                        className="gap-2 data-[state=active]:shadow-sm"
-                      >
-                        <Icon className="size-4" />
-                        {t.label}
-                        {t.id === "chapters" && pendingReviews.length > 0 ? (
-                          <Badge
-                            variant="secondary"
-                            className="h-5 min-w-5 justify-center px-1.5 text-[10px]"
-                          >
-                            {pendingReviews.length}
-                          </Badge>
-                        ) : null}
-                      </TabsTrigger>
-                    );
-                  })}
-                </TabsList>
+              <div className="mb-5 flex flex-wrap items-center justify-end gap-2">
                 <DropdownMenu
                   open={teRevisionInboxOpen}
                   onOpenChange={setTeRevisionInboxOpen}

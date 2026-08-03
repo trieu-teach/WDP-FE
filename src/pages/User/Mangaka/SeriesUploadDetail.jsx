@@ -68,14 +68,12 @@ import {
   slugifySeriesTitle,
 } from '@/utils/seriesModel.js'
 import { LABEL_EDITOR_BOARD } from '@/constants/roleTerminology.js'
+import { MANGAKA_NAV_LINKS } from '@/constants/mangakaNav.js'
 import AddSeriesModal from './AddSeriesModal.jsx'
 import { seriesToForm, applySeriesFormUpdate } from '@/utils/seriesModel.js'
 import '@/styles/mangaPage.css'
 
-const NAV_LINKS = [
-  { to: '/', label: 'Trang chủ' },
-  { to: '/mangaka', label: 'Workspace' },
-]
+const NAV_LINKS = MANGAKA_NAV_LINKS
 
 const STATUS_BADGE = {
   draft: { label: 'Nháp', className: 'bg-zinc-100 text-zinc-700 hover:bg-zinc-100 dark:bg-zinc-500/15 dark:text-zinc-400' },

@@ -7,12 +7,10 @@ import { MangakaTeRevisionView } from '@/components/Mangaka/MangakaTeRevisionVie
 import { Button } from '@/components/ui/button'
 import { getSession, logout } from '@/lib/auth.js'
 import { LABEL_TANTOU_EDITOR } from '@/constants/roleTerminology.js'
+import { MANGAKA_NAV_LINKS } from '@/constants/mangakaNav.js'
 import { markTeRevisionSeen } from '@/utils/teRevisionSeenStorage.js'
 
-const NAV_LINKS = [
-  { to: '/', label: 'Trang chủ' },
-  { to: '/mangaka', label: 'Mangaka' },
-]
+const NAV_LINKS = MANGAKA_NAV_LINKS
 
 export default function MangakaTeRevision() {
   const navigate = useNavigate()

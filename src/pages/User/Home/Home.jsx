@@ -235,6 +235,16 @@ export default function Home() {
             <a href="#pipeline">Quy trình</a>
             <a href="#welcome">Giới thiệu</a>
             <a href="#why">Tính năng</a>
+            {workspacePath ? (
+              <Link to={workspacePath}>Workspace</Link>
+            ) : (
+              <button
+                type="button"
+                onClick={() => requireLogin(null)}
+              >
+                Workspace
+              </button>
+            )}
           </nav>
 
           <div className="home-header__actions">
