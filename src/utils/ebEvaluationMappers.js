@@ -72,10 +72,45 @@ export function getEbClassificationStyle(classification, { scored = true, averag
   }
 }
 
-/** Series còn ở bước first review (draft | submitted). */
+/**
+ * Series còn ở bước first review.
+ * pending_EB không có lịch sử chấm vẫn là first review;
+ * approved_by_TE / rejected / revision / đã có evaluation → second review (quick decision).
+ */
 export function isEbFirstReviewSeriesStatus(status) {
   const s = String(status ?? '').toLowerCase()
-  return s === 'draft' || s === 'submitted' || s === ''
+  if (!s || s === 'draft' || s === 'submitted' || s === 'pending_eb') return true
+  if (
+    s === 'approved_by_te'
+    || s === 'approved_by_eb'
+    || s === 'rejected'
+    || s === 'revision'
+    || s === 'eb_revision'
+    || s === 'approved'
+    || s === 'published'
+    || s === 'cancelled'
+  ) {
+    return false
+  }
+  return false
+}
+
+/**
+ * @param {{
+ *   seriesStatus?: string|null,
+ *   firstReviewFlag?: boolean|null,
+ *   hasPriorEvaluation?: boolean,
+ * }} opts
+ */
+export function resolveEbIsFirstReview({
+  seriesStatus = null,
+  firstReviewFlag = null,
+  hasPriorEvaluation = false,
+} = {}) {
+  if (firstReviewFlag === false) return false
+  if (hasPriorEvaluation) return false
+  if (firstReviewFlag === true) return true
+  return isEbFirstReviewSeriesStatus(seriesStatus)
 }
 
 /** Tiêu chí chấm điểm — khớp BE EB_CRITERIA_KEYS */
@@ -1014,6 +1049,10 @@ export function mapEbChapterDetailResponse(data) {
       chapter.seriesId
       || resolveEntityId(seriesRaw._id ?? seriesRaw.id)
       || '',
+    seriesStatus: seriesRaw.status ?? chapter.seriesStatus ?? null,
+    firstReview: latestEval
+      ? Boolean(latestEval.first_review ?? latestEval.firstReview)
+      : (data.first_review ?? data.firstReview ?? null),
     ageRating:
       seriesRaw.age_rating
       ?? seriesRaw.ageRating
@@ -1022,6 +1061,10 @@ export function mapEbChapterDetailResponse(data) {
     genre: Array.isArray(seriesRaw.genre) ? seriesRaw.genre : [],
     seriesDetail: seriesRaw,
     evaluationHistory,
+    publicationSchedule:
+      seriesRaw.publication_schedule
+      ?? seriesRaw.publicationSchedule
+      ?? null,
   }
 }
 

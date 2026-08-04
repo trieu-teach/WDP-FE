@@ -29,8 +29,24 @@ export const seriesService = {
     return http.get('/series', { params }).then(unwrap)
   },
 
-  getMine() {
-    return http.get('/series/mine').then(unwrap)
+  /**
+   * GET /series/mine — danh sách series của Mangaka.
+   * Fallback GET /series/my (alias BE mới).
+   * Query: status=rejected|revision|...
+   */
+  getMine(params = {}) {
+    const query = {}
+    if (params.status) query.status = params.status
+    if (params.page != null) query.page = params.page
+    if (params.limit != null) query.limit = params.limit
+    return http
+      .get('/series/mine', { params: query })
+      .then(unwrap)
+      .catch(async (err) => {
+        if (err?.response?.status !== 404) throw err
+        const res = await http.get('/series/my', { params: query })
+        return unwrap(res)
+      })
   },
 
   getRanking(params) {

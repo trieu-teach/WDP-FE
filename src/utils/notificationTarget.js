@@ -109,4 +109,54 @@ export function readEbApprovalMeta(notification) {
     classificationText: meta.classification_text ?? meta.classificationText ?? '',
   }
 }
+
+/** series_approved | series_eb_revision | series_rejected — luồng EB → Mangaka. */
+export const SERIES_EB_NOTIFICATION_TYPES = [
+  'series_approved',
+  'series_eb_revision',
+  'series_rejected',
+]
+
+export function isSeriesEbDecisionNotification(notification) {
+  if (!notification) return false
+  const type = String(notification.type ?? '').toLowerCase()
+  return SERIES_EB_NOTIFICATION_TYPES.includes(type)
+}
+
+export function resolveSeriesIdFromNotification(notification) {
+  if (!notification) return null
+  const meta = readMetaBag(notification)
+  const raw = notification.raw ?? {}
+  const relatedType = String(
+    notification.relatedEntityType ?? raw.related_entity_type ?? '',
+  ).toLowerCase()
+
+  const fromMeta = resolveEntityId(
+    meta.series_id
+    ?? meta.seriesId
+    ?? meta.series?.id
+    ?? meta.series?._id
+    ?? raw.series_id
+    ?? raw.seriesId,
+  )
+  if (fromMeta) return fromMeta
+
+  if (relatedType === 'series') {
+    return resolveEntityId(notification.relatedEntityId ?? raw.related_entity_id)
+  }
+  return null
+}
+
+export function getMangakaSeriesDetailPath(seriesId, { showFeedback = false } = {}) {
+  const id = resolveEntityId(seriesId)
+  if (!id) return null
+  const base = `/mangaka/series/${encodeURIComponent(id)}`
+  return showFeedback ? `${base}?ebFeedback=1` : base
+}
+
+export function readSeriesEbFeedback(notification) {
+  const meta = readMetaBag(notification)
+  const feedback = meta.feedback ?? meta.notes ?? meta.eb_feedback ?? meta.ebFeedback
+  return feedback != null && String(feedback).trim() ? String(feedback).trim() : ''
+}
 

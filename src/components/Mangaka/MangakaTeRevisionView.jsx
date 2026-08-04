@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Loader2, Zap } from 'lucide-react'
 import { TantouPageAnnotator } from '@/components/Tantou/TantouPageAnnotator'
 import { useMangakaTeRevisionChapter } from '@/hooks/useMangakaTeRevisionChapter.js'
 import { Button } from '@/components/ui/button'
 import { markTeRevisionSeen } from '@/utils/teRevisionSeenStorage.js'
+import { canShowQuickRevision } from '@/utils/apiMappers.js'
+import { buildMangakaQuickRevisionState } from '@/utils/mangakaQuickRevisionNav.js'
 
 export function MangakaTeRevisionView({
   chapterId,
@@ -12,6 +15,7 @@ export function MangakaTeRevisionView({
   onClose,
   className = '',
 }) {
+  const navigate = useNavigate()
   const [pageIndex, setPageIndex] = useState(0)
   const {
     loading,
@@ -58,6 +62,23 @@ export function MangakaTeRevisionView({
 
   const currentNotes = notesByPage[pageIndex] ?? []
 
+  const seriesTitleForNav =
+    seriesTitleProp
+    ?? chapterMeta?.seriesName
+    ?? chapterMeta?.series_id?.name
+    ?? chapterMeta?.series?.name
+    ?? 'Series'
+
+  const showQuickRevision = canShowQuickRevision(
+    chapterMeta?.status ?? null,
+    null,
+  )
+
+  const quickRevisionState = buildMangakaQuickRevisionState({
+    series: seriesTitleForNav,
+    chapterId,
+  })
+
   useEffect(() => {
     if (loading || error || !chapterId) return
     markTeRevisionSeen(chapterId)
@@ -94,6 +115,22 @@ export function MangakaTeRevisionView({
           </p>
           <p className="mt-1 text-sm leading-relaxed text-foreground">
             {revisionNotes}
+          </p>
+        </div>
+      ) : null}
+
+      {showQuickRevision && quickRevisionState ? (
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            className="bg-sky-600 hover:bg-sky-700"
+            onClick={() => navigate('/mangaka', { state: quickRevisionState })}
+          >
+            <Zap className="size-4" />
+            Sửa nhanh & gửi TE
+          </Button>
+          <p className="text-xs text-muted-foreground">
+            Thay 1–5 trang rồi gửi thẳng TE — không qua Assistant.
           </p>
         </div>
       ) : null}

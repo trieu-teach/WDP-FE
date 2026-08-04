@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
-  ChevronRight,
   Eraser,
   Image as ImageIcon,
   Maximize2,
@@ -23,13 +22,11 @@ import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Select,
@@ -44,6 +41,8 @@ import {
   getAnnotatorPageDisplayUrl,
   shouldHideLegacyAnnotatorNotes,
   shouldShowAssistantEditedOnAnnotate,
+  canShowQuickRevision,
+  QUICK_REVISION_MAX_PAGES,
 } from '@/utils/apiMappers.js'
 import {
   isAssistantPageApproved,
@@ -116,9 +115,13 @@ export default function ChapterAnnotator({
   workspaceApi = null,
   pendingReviewCount = 0,
   revisionMode = false,
+  seriesStatus = null,
+  onQuickRevision = null,
+  quickRevisionFocus = false,
 }) {
   const fileRef = useRef(null)
   const coverFileRef = useRef(null)
+  const quickReplaceFileRef = useRef(null)
   const boardRef = useRef(null)
   const fsBoardRef = useRef(null)
   const noteSaveTimersRef = useRef({})
@@ -139,8 +142,24 @@ export default function ChapterAnnotator({
   const [coverBusy, setCoverBusy] = useState(false)
   const [sendAssistantId, setSendAssistantId] = useState('')
   const [sendingToAssistant, setSendingToAssistant] = useState(false)
+  const [quickRevisionDrafts, setQuickRevisionDrafts] = useState({})
+  const [quickRevisionBusy, setQuickRevisionBusy] = useState(false)
+  const [quickReplaceInputKey, setQuickReplaceInputKey] = useState(0)
+  const [quickRevisionNewPages, setQuickRevisionNewPages] = useState([])
+  const [quickRevisionDeletedPageIds, setQuickRevisionDeletedPageIds] = useState({})
 
   const activeChapter = chapters.find(c => c.id === activeChapterId)
+  const quickNewPagesFileRef = useRef(null)
+  const resolvedSeriesStatus = useMemo(() => {
+    if (seriesStatus) return seriesStatus
+    return seriesOptions.find((s) => s.title === selectedSeriesTitle)?.status ?? null
+  }, [seriesStatus, seriesOptions, selectedSeriesTitle])
+
+  const quickRevisionEligible = useMemo(
+    () => canShowQuickRevision(activeChapter?.apiStatus, resolvedSeriesStatus),
+    [activeChapter?.apiStatus, resolvedSeriesStatus],
+  )
+  const quickRevisionUi = quickRevisionFocus && quickRevisionEligible && !revisionMode
   const chapterPages = activeChapter?.pages ?? []
   const pages = useMemo(() => {
     const apiStatus = activeChapter?.apiStatus ?? null
@@ -169,15 +188,24 @@ export default function ChapterAnnotator({
         ...page,
         url: getAnnotatorPageDisplayUrl(page, apiStatus, { preferResult }),
       }
+    }).map((page) => {
+      const pageId = page?.id ?? page?._id
+      const draft = pageId ? quickRevisionDrafts[String(pageId)] : null
+      if (!draft?.previewUrl) return page
+      return { ...page, url: draft.previewUrl, quickRevisionDraft: true }
     })
   }, [
     chapterPages,
     activeChapter?.apiStatus,
     activeChapterId,
     revisionMode,
+    quickRevisionDrafts,
   ])
   const pageKey = activeChapter ? `${activeChapterId}-${pageIndex}` : ''
-  const currentPageId = pages[pageIndex]?.id ?? null
+  const currentPageId = pages[pageIndex]?.id ?? pages[pageIndex]?._id ?? null
+  const currentPageMarkedDeleted = Boolean(
+    currentPageId && quickRevisionDeletedPageIds[String(currentPageId)],
+  )
   const isValidObjectId = (id) => typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id)
   const hideLegacyNotes =
     shouldHideLegacyAnnotatorNotes(
@@ -197,6 +225,22 @@ export default function ChapterAnnotator({
   useEffect(() => {
     revisionDraftKeysRef.current.clear()
   }, [revisionMode, activeChapterId])
+
+  useEffect(() => {
+    setQuickRevisionDrafts((prev) => {
+      Object.values(prev).forEach((d) => {
+        if (d?.previewUrl) URL.revokeObjectURL(d.previewUrl)
+      })
+      return {}
+    })
+    setQuickRevisionNewPages((prev) => {
+      prev.forEach((d) => {
+        if (d?.previewUrl) URL.revokeObjectURL(d.previewUrl)
+      })
+      return []
+    })
+    setQuickRevisionDeletedPageIds({})
+  }, [activeChapterId])
 
   useEffect(() => {
     legacyNotesClearedRef.current.clear()
@@ -710,6 +754,129 @@ export default function ChapterAnnotator({
     void handleCoverFile(e.dataTransfer.files?.[0])
   }
 
+  const handleQuickReplaceFile = useCallback((file) => {
+    if (!file) return
+    if (!quickRevisionEligible) return
+    if (!currentPageId) {
+      toast.error('Không tìm thấy page_id hợp lệ để thay ảnh trang này.')
+      return
+    }
+    const validation = validateChapterCoverFile(file)
+    if (!validation.ok) {
+      toast.error(validation.message)
+      return
+    }
+    const pageId = String(currentPageId)
+    setQuickRevisionDeletedPageIds((prev) => {
+      if (!prev[pageId]) return prev
+      const next = { ...prev }
+      delete next[pageId]
+      return next
+    })
+    const previewUrl = URL.createObjectURL(file)
+    setQuickRevisionDrafts((prev) => {
+      const next = { ...prev }
+      const old = next[pageId]
+      if (old?.previewUrl) URL.revokeObjectURL(old.previewUrl)
+      next[pageId] = {
+        file,
+        previewUrl,
+        pageNumber: pageIndex + 1,
+      }
+      return next
+    })
+    toast.success(`Đã chọn ảnh thay thế cho trang ${pageIndex + 1}.`)
+  }, [currentPageId, pageIndex, quickRevisionEligible])
+
+  function onQuickReplaceChange(e) {
+    const file = e.target.files?.[0]
+    if (!file) {
+      e.target.value = ''
+      // Edge/Chromium đôi khi giữ state input sau Cancel; remount input để click lại luôn mở picker.
+      setQuickReplaceInputKey((k) => k + 1)
+      return
+    }
+    handleQuickReplaceFile(file)
+    e.target.value = ''
+    setQuickReplaceInputKey((k) => k + 1)
+  }
+
+  const openQuickReplacePicker = useCallback(() => {
+    if (!quickRevisionEligible) {
+      toast.error('Chapter/series hiện tại chưa đủ điều kiện Quick Revision.')
+      return
+    }
+    if (!currentPageId) {
+      toast.error('Không tìm thấy page_id hợp lệ để thay ảnh trang này.')
+      return
+    }
+    const totalChanges =
+      Object.keys(quickRevisionDrafts).length
+      + quickRevisionNewPages.length
+      + Object.keys(quickRevisionDeletedPageIds).length
+    const atLimit =
+      totalChanges >= QUICK_REVISION_MAX_PAGES
+      && !quickRevisionDrafts[String(currentPageId)]
+    if (atLimit) {
+      toast.error(`Quick revision tối đa ${QUICK_REVISION_MAX_PAGES} trang mỗi lần.`)
+      return
+    }
+    const input = quickReplaceFileRef.current
+    if (!input) {
+      toast.error('Không mở được hộp chọn ảnh. Vui lòng tải lại trang.')
+      return
+    }
+    input.value = ''
+    input.click()
+  }, [currentPageId, quickRevisionDeletedPageIds, quickRevisionDrafts, quickRevisionEligible, quickRevisionNewPages.length])
+
+  const onQuickNewPagesChange = useCallback((e) => {
+    const picked = Array.from(e.target.files ?? [])
+    e.target.value = ''
+    if (!picked.length) return
+    if (!quickRevisionEligible) {
+      toast.error('Chapter/series hiện tại chưa đủ điều kiện Quick Revision.')
+      return
+    }
+    const existing =
+      Object.keys(quickRevisionDrafts).length
+      + quickRevisionNewPages.length
+      + Object.keys(quickRevisionDeletedPageIds).length
+    const room = Math.max(0, QUICK_REVISION_MAX_PAGES - existing)
+    if (room <= 0) {
+      toast.error(`Quick revision tối đa ${QUICK_REVISION_MAX_PAGES} thay đổi mỗi lần.`)
+      return
+    }
+    const accepted = []
+    for (const file of picked.slice(0, room)) {
+      const validation = validateChapterCoverFile(file)
+      if (!validation.ok) {
+        toast.error(validation.message)
+        continue
+      }
+      accepted.push({
+        id: `quick-new-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        file,
+        previewUrl: URL.createObjectURL(file),
+      })
+    }
+    if (!accepted.length) return
+    setQuickRevisionNewPages((prev) => [...prev, ...accepted])
+    toast.success(`Đã thêm ${accepted.length} trang mới cho quick revision.`)
+  }, [quickRevisionDeletedPageIds, quickRevisionDrafts, quickRevisionEligible, quickRevisionNewPages.length])
+
+  const clearQuickRevisionDraft = useCallback((pageId) => {
+    const key = String(pageId ?? '')
+    if (!key) return
+    setQuickRevisionDrafts((prev) => {
+      if (!prev[key]) return prev
+      const next = { ...prev }
+      if (next[key]?.previewUrl) URL.revokeObjectURL(next[key].previewUrl)
+      delete next[key]
+      return next
+    })
+  }, [])
+
   const removeCover = useCallback(async () => {
     if (!activeChapterId) return
     const target = chapters.find((c) => c.id === activeChapterId)
@@ -940,6 +1107,31 @@ export default function ChapterAnnotator({
     if (oldPages.length === 0) return
 
     const removed = oldPages[idx]
+    const removedId = String(removed?.id ?? removed?._id ?? '')
+    const canDeleteViaQuickRevision =
+      quickRevisionEligible
+      && /^[0-9a-f]{24}$/i.test(removedId)
+      && !String(removedId).startsWith('quick-new-')
+    if (canDeleteViaQuickRevision) {
+      setQuickRevisionDeletedPageIds((prev) => {
+        const next = { ...prev }
+        if (next[removedId]) {
+          delete next[removedId]
+          toast.success(`Đã bỏ đánh dấu xóa trang ${idx + 1}.`)
+        } else {
+          next[removedId] = true
+          toast.success(`Đã đánh dấu xóa trang ${idx + 1}.`)
+        }
+        return next
+      })
+      setQuickRevisionDrafts((prev) => {
+        const next = { ...prev }
+        if (next[removedId]?.previewUrl) URL.revokeObjectURL(next[removedId].previewUrl)
+        delete next[removedId]
+        return next
+      })
+      return
+    }
     if (removed?.url?.startsWith('blob:')) URL.revokeObjectURL(removed.url)
 
     const serverPage = removed?.id && !String(removed.id).startsWith('note-')
@@ -986,7 +1178,7 @@ export default function ChapterAnnotator({
       const max = newPages.length - 1
       return pi > max ? max : pi
     })
-  }, [activeChapter, activeChapterId, pageIndex, chapters, setChapters, setNotes, setActiveChapterId, setPageIndex, workspaceApi])
+  }, [activeChapter, activeChapterId, pageIndex, chapters, quickRevisionEligible, setChapters, setNotes, setActiveChapterId, setPageIndex, workspaceApi])
 
   const draftRect = drawStart && drawCurrent ? {
     x: Math.min(drawStart.x, drawCurrent.x),
@@ -999,12 +1191,14 @@ export default function ChapterAnnotator({
     ? pages.reduce((sum, _, i) => sum + (notes[`${activeChapterId}-${i}`]?.length ?? 0), 0)
     : 0
 
+  const needsAssistantForUpload = !quickRevisionEligible
   const canUpload = seriesOptions.length > 0
     && selectedSeriesTitle.trim().length > 0
     && !!uploadTargetChapter
-    && (hiredAssistants.length === 0 || !!sendAssistantId)
+    && (!needsAssistantForUpload || hiredAssistants.length === 0 || !!sendAssistantId)
     && !coverBusy
     && !uploadUi
+    && !quickRevisionEligible
 
   function ToolButtons({ onDark = false }) {
     const outlineOnDark =
@@ -1096,8 +1290,49 @@ export default function ChapterAnnotator({
             title="Gỡ ảnh trang đang xem"
           >
             <Trash2 className="size-3.5" />
-            {compact ? 'Gỡ' : 'Gỡ trang'}
+            {quickRevisionEligible
+              ? (compact ? (currentPageMarkedDeleted ? 'Bỏ xóa' : 'Xóa') : (currentPageMarkedDeleted ? 'Bỏ đánh dấu xóa' : 'Đánh dấu xóa'))
+              : (compact ? 'Gỡ' : 'Gỡ trang')}
           </Button>
+        ) : null}
+        {quickRevisionEligible && currentPageId && /^[0-9a-f]{24}$/i.test(String(currentPageId)) ? (
+          <>
+            <input
+              key={quickReplaceInputKey}
+              ref={quickReplaceFileRef}
+              type="file"
+              accept={CHAPTER_COVER_ACCEPT}
+              className="sr-only"
+              onChange={onQuickReplaceChange}
+            />
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className={navBtnCls}
+              disabled={currentPageMarkedDeleted}
+              onClick={openQuickReplacePicker}
+              title="Chọn ảnh thay thế cho trang đang xem"
+            >
+              <Upload className="size-3.5" />
+              {compact ? 'Thay ảnh' : 'Thay ảnh trang'}
+            </Button>
+            {quickRevisionDrafts[String(currentPageId)] ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                className={cn(
+                  onDark
+                    ? 'text-zinc-400 hover:text-zinc-200'
+                    : 'text-muted-foreground',
+                )}
+                onClick={() => clearQuickRevisionDraft(currentPageId)}
+                title="Huỷ ảnh thay thế"
+              >
+                <X className="size-3.5" />
+              </Button>
+            ) : null}
+          </>
         ) : null}
       </div>
     )
@@ -1111,6 +1346,8 @@ export default function ChapterAnnotator({
       <div className="flex gap-2 overflow-x-auto py-1">
         {pages.map((pg, i) => {
           const badge = notes[`${activeChapterId}-${i}`]?.length ?? 0
+          const pgId = String(pg?.id ?? pg?._id ?? '')
+          const markedDeleted = Boolean(quickRevisionDeletedPageIds[pgId])
           return (
             <button
               key={`${activeChapterId}-${pg.pageNumber ?? i}-${pg.id ?? i}`}
@@ -1134,6 +1371,16 @@ export default function ChapterAnnotator({
               {badge > 0 ? (
                 <Badge className="absolute right-0.5 top-0.5 h-4 px-1 text-[9px]" variant="destructive">
                   {badge}
+                </Badge>
+              ) : null}
+              {pg.quickRevisionDraft ? (
+                <Badge className="absolute bottom-0 left-0 h-3 rounded-none rounded-tr px-0.5 text-[8px]" variant="secondary">
+                  thay
+                </Badge>
+              ) : null}
+              {markedDeleted ? (
+                <Badge className="absolute bottom-0 right-0 h-3 rounded-none rounded-tl px-0.5 text-[8px]" variant="destructive">
+                  xóa
                 </Badge>
               ) : null}
             </button>
@@ -1436,6 +1683,127 @@ export default function ChapterAnnotator({
     )
   }
 
+  function QuickRevisionBar({ compact = false, embedded = false }) {
+    const draftEntries = Object.entries(quickRevisionDrafts)
+    const deletedIds = Object.keys(quickRevisionDeletedPageIds)
+    const totalChanges = draftEntries.length + quickRevisionNewPages.length + deletedIds.length
+    const atLimit = totalChanges >= QUICK_REVISION_MAX_PAGES
+    const canSubmit =
+      totalChanges > 0
+      && totalChanges <= QUICK_REVISION_MAX_PAGES
+      && activeChapter
+      && onQuickRevision
+      && /^[0-9a-f]{24}$/i.test(String(activeChapter.id))
+
+    const handleSubmit = async () => {
+      if (!canSubmit || quickRevisionBusy) return
+      setQuickRevisionBusy(true)
+      try {
+        const items = draftEntries
+          .filter(([pageId]) => !quickRevisionDeletedPageIds[pageId])
+          .map(([pageId, draft]) => ({
+            pageId,
+            file: draft.file,
+            pageNumber: draft.pageNumber ?? 0,
+          }))
+          .sort((a, b) => a.pageNumber - b.pageNumber)
+        const submitted = await onQuickRevision({
+          chapter: activeChapter,
+          items,
+          newPages: quickRevisionNewPages.map((d) => d.file),
+          deletedPageIds: deletedIds,
+        })
+        if (submitted === false) return
+        Object.values(quickRevisionDrafts).forEach((d) => {
+          if (d?.previewUrl) URL.revokeObjectURL(d.previewUrl)
+        })
+        quickRevisionNewPages.forEach((d) => {
+          if (d?.previewUrl) URL.revokeObjectURL(d.previewUrl)
+        })
+        setQuickRevisionDrafts({})
+        setQuickRevisionNewPages([])
+        setQuickRevisionDeletedPageIds({})
+      } catch {
+        // Parent shows toast
+      } finally {
+        setQuickRevisionBusy(false)
+      }
+    }
+
+    return (
+      <div className={cn(
+        'rounded-xl border border-sky-200/90 bg-sky-50/90 p-3 dark:border-sky-500/30 dark:bg-sky-500/10',
+        compact && 'p-2',
+        embedded && !compact && 'border-sky-500/25 bg-zinc-900/90',
+      )}>
+        <p className={cn(
+          'text-xs font-semibold text-sky-800 dark:text-sky-200',
+          embedded && 'text-sky-300',
+        )}>
+          Sửa nhanh & gửi TE
+        </p>
+        <p className={cn(
+          'mt-1 text-[11px] leading-relaxed text-sky-900/80 dark:text-sky-100/80',
+          embedded && 'text-zinc-400',
+        )}>
+          Có thể thay, thêm mới, hoặc xóa trang (tối đa {QUICK_REVISION_MAX_PAGES} thay đổi/lần), rồi gửi thẳng cho TE.
+        </p>
+        {totalChanges > 0 ? (
+          <p className={cn(
+            'mt-2 text-[11px] font-medium text-sky-800 dark:text-sky-200',
+            embedded && 'text-zinc-300',
+          )}>
+            Thay: {draftEntries
+              .map(([, d]) => d.pageNumber)
+              .sort((a, b) => a - b)
+              .join(', ') || '0'} ·
+            Thêm: {quickRevisionNewPages.length} ·
+            Xóa: {deletedIds.length}
+          </p>
+        ) : (
+          <p className={cn(
+            'mt-2 text-[11px] text-muted-foreground',
+            embedded && 'text-zinc-500',
+          )}>
+            Bấm &quot;Thay ảnh trang&quot;, &quot;Gỡ trang&quot; hoặc thêm trang mới.
+          </p>
+        )}
+        <input
+          ref={quickNewPagesFileRef}
+          type="file"
+          accept={CHAPTER_COVER_ACCEPT}
+          className="sr-only"
+          multiple
+          onChange={onQuickNewPagesChange}
+        />
+        <Button
+          size="sm"
+          variant="outline"
+          className="mt-2 h-8 w-full text-xs"
+          disabled={atLimit}
+          onClick={() => quickNewPagesFileRef.current?.click()}
+        >
+          <Plus className="size-3 shrink-0" />
+          Thêm trang mới
+        </Button>
+        <Button
+          size="sm"
+          className="mt-2 h-8 w-full bg-sky-600 text-xs text-white hover:bg-sky-700"
+          disabled={!canSubmit || quickRevisionBusy}
+          onClick={() => { void handleSubmit() }}
+        >
+          <Send className="size-3 shrink-0" />
+          {quickRevisionBusy ? 'Đang gửi…' : 'Sửa nhanh & gửi TE'}
+        </Button>
+        {atLimit ? (
+          <p className="mt-1.5 text-[10px] text-amber-700 dark:text-amber-300">
+            Đã đạt giới hạn {QUICK_REVISION_MAX_PAGES} thay đổi — gửi lần này hoặc giảm thao tác.
+          </p>
+        ) : null}
+      </div>
+    )
+  }
+
   function SendActionsBar({ compact = false, embedded = false, inline = false }) {
     const handleAssistant = async () => {
       const sendHandler = revisionMode ? onSendRevision : onSendToAssistant
@@ -1542,409 +1910,436 @@ export default function ChapterAnnotator({
   function AssistantPicker() {
     const assistantReady = hiredAssistants.length > 0 && sendAssistantId
     return (
-      <Card className={cn(
-        'border-violet-200 bg-gradient-to-br from-violet-50/80 to-background dark:border-violet-500/30 dark:from-violet-500/5',
-      )}>
-        <CardHeader className="pb-3">
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className="size-6 justify-center p-0 font-semibold">1</Badge>
-            <CardTitle className="text-base">Chọn Assistant nhận chapter</CardTitle>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {assistantReady ? (
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-sm">
-                Đang giao cho: <strong>{hiredAssistants.find(a => String(a.assistantId) === String(sendAssistantId))?.label ?? sendAssistantId}</strong>
-              </p>
-              <Button size="sm" variant="ghost" onClick={() => setSendAssistantId('')}>
-                Đổi Assistant
-              </Button>
-            </div>
-          ) : hiredAssistants.length > 0 ? (
-            <Select
-              value={sendAssistantId ? String(sendAssistantId) : undefined}
-              onValueChange={setSendAssistantId}
-            >
-              <SelectTrigger className="h-9 w-full min-w-0">
-                <SelectValue placeholder="— Chọn Assistant —" />
-              </SelectTrigger>
-              <SelectContent>
-                {hiredAssistants.map(a => (
-                  <SelectItem key={a.assistantId} value={String(a.assistantId)}>
-                    {a.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              Chưa có Assistant trong đội — {onOpenAssistantsTab ? (
-                <button type="button" className="font-medium text-primary underline-offset-2 hover:underline" onClick={onOpenAssistantsTab}>
-                  thuê Assistant
-                </button>
-              ) : (
-                <span>thuê Assistant ở tab Thuê Assistant</span>
-              )} trước.
+      <div className="space-y-1.5 rounded-xl border border-gray-200/80 bg-white p-3">
+        <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">
+          Assistant
+        </p>
+        {assistantReady ? (
+          <div className="flex items-center justify-between gap-2">
+            <p className="min-w-0 truncate text-sm font-semibold text-gray-900">
+              {hiredAssistants.find(a => String(a.assistantId) === String(sendAssistantId))?.label ?? sendAssistantId}
             </p>
-          )}
-        </CardContent>
-      </Card>
+            <button
+              type="button"
+              onClick={() => setSendAssistantId('')}
+              className="shrink-0 rounded-lg border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] font-medium text-gray-600 transition-colors hover:bg-gray-100"
+            >
+              Đổi
+            </button>
+          </div>
+        ) : hiredAssistants.length > 0 ? (
+          <Select
+            value={sendAssistantId ? String(sendAssistantId) : undefined}
+            onValueChange={setSendAssistantId}
+          >
+            <SelectTrigger className="h-9 w-full min-w-0 rounded-lg border border-gray-200 bg-gray-50/50 text-sm shadow-none">
+              <SelectValue placeholder="— Chọn Assistant —" />
+            </SelectTrigger>
+            <SelectContent>
+              {hiredAssistants.map(a => (
+                <SelectItem key={a.assistantId} value={String(a.assistantId)}>
+                  {a.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <p className="text-[11px] leading-relaxed text-gray-500">
+            Chưa có Assistant — {onOpenAssistantsTab ? (
+              <button type="button" className="font-medium text-red-600 underline-offset-2 hover:underline" onClick={onOpenAssistantsTab}>
+                thuê ngay
+              </button>
+            ) : (
+              <span>thuê ở tab Thuê Assistant</span>
+            )}.
+          </p>
+        )}
+      </div>
     )
   }
 
+  const uploadStepActive = quickRevisionUi
+    ? (Object.keys(quickRevisionDrafts).length > 0 ? 2 : 1)
+    : (Boolean(sendAssistantId)
+      ? (activeChapterId ? 3 : 2)
+      : 1)
+
+  const uploadSteps = quickRevisionUi
+    ? [
+        { id: 1, label: '1 · Chọn trang' },
+        { id: 2, label: '2 · Thay ảnh & gửi TE' },
+      ]
+    : quickRevisionEligible
+      ? [
+          { id: 1, label: '1 · Thay ảnh trang' },
+          { id: 2, label: '2 · Ghi chú & gửi TE' },
+        ]
+      : [
+          { id: 1, label: '1 · Assistant' },
+          { id: 2, label: '2 · Upload' },
+          { id: 3, label: '3 · Ghi chú' },
+        ]
+
   return (
-    <div className="mk-annotate space-y-6">
+    <div className="mk-annotate mx-auto max-w-5xl space-y-5 bg-gray-50/50 px-4 py-6">
       {revisionMode ? (
-        <div className="rounded-lg border border-amber-300/70 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
           <strong>Yêu cầu Assistant sửa lại:</strong>{' '}
           khoanh vùng trên bản Assistant đã gửi, nhập ghi chú rồi bấm
           {' '}“Gửi yêu cầu sửa cho Assistant”.
         </div>
       ) : null}
-      {pendingReviewCount > 0 ? (
-        <div className="flex items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2.5">
-          <p className="text-sm">
-            <strong>{pendingReviewCount}</strong> chapter chờ duyệt Assistant
-          </p>
-          <Button size="xs" asChild>
-            <Link to="/mangaka/review">Duyệt</Link>
-          </Button>
+      {quickRevisionEligible && !revisionMode ? (
+        <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2.5 text-xs text-sky-900 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-100">
+          <strong>{quickRevisionUi ? 'Sửa nhanh & gửi TE' : 'Quick Revision'}:</strong>{' '}
+          thay / thêm mới / xóa trang (tối đa {QUICK_REVISION_MAX_PAGES} thay đổi/lần) rồi gửi thẳng cho TE.
+          Nhiều hơn {QUICK_REVISION_MAX_PAGES} thay đổi → dùng luồng Assistant.
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-        <span className={cn(
-          'rounded-full px-2.5 py-1 font-medium transition-colors',
-          sendAssistantId ? 'bg-violet-100 text-violet-800 dark:bg-violet-500/15 dark:text-violet-300' : 'bg-background text-foreground shadow-sm',
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+        {pendingReviewCount > 0 ? (
+          <div className="flex shrink-0 items-center gap-2 rounded-xl border border-gray-200/80 bg-white px-3 py-2">
+            <p className="text-xs text-gray-700">
+              <strong>{pendingReviewCount}</strong> chờ duyệt
+            </p>
+            <Button size="xs" asChild className="h-7 bg-red-600 px-2.5 text-[11px] text-white hover:bg-red-700">
+              <Link to="/mangaka/review">Duyệt</Link>
+            </Button>
+          </div>
+        ) : null}
+        <div className={cn(
+          'grid min-w-0 flex-1 gap-1 rounded-xl bg-gray-200/60 p-1 text-center text-xs font-medium',
+          quickRevisionUi || quickRevisionEligible ? 'grid-cols-2' : 'grid-cols-3',
         )}>
-          1 · Assistant
-        </span>
-        <ChevronRight className="size-3.5 opacity-40" aria-hidden />
-        <span className={cn(
-          'rounded-full px-2.5 py-1 font-medium',
-          activeChapterId ? 'bg-background text-foreground shadow-sm' : 'opacity-60',
-        )}>
-          2 · Upload
-        </span>
-        <ChevronRight className="size-3.5 opacity-40" aria-hidden />
-        <span className={cn(
-          'rounded-full px-2.5 py-1 font-medium',
-          totalNotes > 0 ? 'bg-background text-foreground shadow-sm' : 'opacity-60',
-        )}>
-          3 · Ghi chú & gửi
-        </span>
+          {uploadSteps.map((step) => {
+            const isActive = uploadStepActive === step.id
+            return (
+              <span
+                key={step.id}
+                className={cn(
+                  'rounded-lg py-2',
+                  isActive
+                    ? 'bg-white font-semibold text-gray-900 shadow-xs'
+                    : 'text-gray-500',
+                )}
+              >
+                {step.label}
+              </span>
+            )
+          })}
+        </div>
       </div>
 
-      <AssistantPicker />
+      <div className="grid grid-cols-1 items-start gap-5 md:grid-cols-[260px_1fr]">
+        <aside className="space-y-3">
+          {!quickRevisionUi && !quickRevisionEligible ? <AssistantPicker /> : null}
 
-      <Card className="overflow-hidden border-border/80 shadow-sm">
-        <CardHeader className="border-b bg-muted/20">
-          <div className="flex items-center gap-2">
-            <Badge variant="outline" className="size-6 justify-center p-0 font-semibold">2</Badge>
-            <CardTitle className="text-base">Chapter & upload ảnh</CardTitle>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-5 pt-5">
-          <div className="space-y-2">
-            <Label>Series</Label>
-            <Select
-              value={seriesOptions.some(s => s.title === selectedSeriesTitle) ? selectedSeriesTitle : ''}
-              onValueChange={(v) => onSelectedSeriesTitleChange(v)}
-              disabled={seriesOptions.length === 0}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="— Chọn series —" />
-              </SelectTrigger>
-              <SelectContent>
-                {seriesOptions.map(s => (
-                  <SelectItem key={s.id} value={s.title}>{s.title}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="grid gap-5 lg:grid-cols-[280px_1fr]">
-            <section className="space-y-3">
-              <h3 className="text-sm font-semibold">Chapter</h3>
-              <Button
-                size="sm"
-                className="w-full"
-                disabled={!selectedSeriesTitle.trim()}
-                onClick={createNewChapter}
+          <div className="space-y-3 rounded-xl border border-gray-200/80 bg-white p-3">
+            <div className="space-y-1.5">
+              <Label className="text-[11px] font-medium uppercase tracking-wide text-gray-400">
+                Series
+              </Label>
+              <Select
+                value={seriesOptions.some(s => s.title === selectedSeriesTitle) ? selectedSeriesTitle : ''}
+                onValueChange={(v) => onSelectedSeriesTitleChange(v)}
+                disabled={seriesOptions.length === 0}
               >
-                <Plus className="size-3.5" />
-                Tạo Chapter {nextChapterNum}
-              </Button>
+                <SelectTrigger className="h-9 rounded-lg border border-gray-200 bg-gray-50/50 text-sm shadow-none">
+                  <SelectValue placeholder="— Chọn series —" />
+                </SelectTrigger>
+                <SelectContent>
+                  {seriesOptions.map(s => (
+                    <SelectItem key={s.id} value={s.title}>{s.title}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-              {seriesChapters.length === 0 ? (
-                <p className="text-xs text-muted-foreground">Chưa có chapter — bấm nút trên để tạo Ch. {nextChapterNum}.</p>
-              ) : (
-                <ScrollArea className="max-h-64 rounded-lg border">
-                  <ul className="divide-y">
-                    {seriesChapters.map(ch => {
-                      const isPick = ch.id === activeChapterId
-                      const noteCount = countChapterNotes(ch.id, ch.pages, notes)
-                      const seriesMeta = seriesOptions.find((s) => s.title === ch.series)
-                      const thumb = resolveChapterCoverDisplay({
-                        coverImageUrl: ch.cover?.url,
-                        page1OriginalUrl: getPage1OriginalUrl(ch.pages),
-                        seriesCoverUrl: seriesMeta?.coverImage,
-                      })
-                      const status = String(ch.apiStatus ?? '').toLowerCase()
-                      const isLocalId = !/^[0-9a-f]{24}$/i.test(String(ch.id))
-                      const pageCount = Array.isArray(ch.pages) ? ch.pages.length : 0
-                      // Khớp BE: draft | pending_assistant + 0 page (hoặc chapter local chưa sync)
-                      const canDelete =
-                        isLocalId
-                        || (
-                          pageCount === 0
-                          && (!status || status === 'draft' || status === 'pending_assistant')
-                        )
-                      const deleteTitle =
-                        status === 'pending_assistant'
-                          ? `Xóa Ch. ${ch.num} (đang chờ Assistant, chưa có trang)`
-                          : `Xóa Ch. ${ch.num}`
-                      return (
-                        <li
-                          key={ch.id}
-                          className={cn(
-                            'group flex items-center gap-2 px-3 py-2 transition-colors',
-                            isPick ? 'bg-primary/10' : 'hover:bg-muted/50',
+            <button
+              type="button"
+              disabled={!selectedSeriesTitle.trim()}
+              onClick={createNewChapter}
+              className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-red-600 py-2.5 text-xs font-medium text-white shadow-xs transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Plus className="size-3.5" />
+              Tạo Chapter {nextChapterNum}
+            </button>
+
+            {seriesChapters.length === 0 ? (
+              <p className="text-[11px] text-gray-400">Chưa có chapter — tạo Ch. {nextChapterNum}.</p>
+            ) : (
+              <ul className="max-h-[350px] space-y-2 overflow-y-auto">
+                {seriesChapters.map(ch => {
+                  const isPick = ch.id === activeChapterId
+                  const noteCount = countChapterNotes(ch.id, ch.pages, notes)
+                  const seriesMeta = seriesOptions.find((s) => s.title === ch.series)
+                  const thumb = resolveChapterCoverDisplay({
+                    coverImageUrl: ch.cover?.url,
+                    page1OriginalUrl: getPage1OriginalUrl(ch.pages),
+                    seriesCoverUrl: seriesMeta?.coverImage,
+                  })
+                  const status = String(ch.apiStatus ?? '').toLowerCase()
+                  const isLocalId = !/^[0-9a-f]{24}$/i.test(String(ch.id))
+                  const pageCount = Array.isArray(ch.pages) ? ch.pages.length : 0
+                  // Khớp BE: draft | pending_assistant + 0 page (hoặc chapter local chưa sync)
+                  const canDelete =
+                    isLocalId
+                    || (
+                      pageCount === 0
+                      && (!status || status === 'draft' || status === 'pending_assistant')
+                    )
+                  const deleteTitle =
+                    status === 'pending_assistant'
+                      ? `Xóa Ch. ${ch.num} (đang chờ Assistant, chưa có trang)`
+                      : `Xóa Ch. ${ch.num}`
+                  return (
+                    <li
+                      key={ch.id}
+                      className={cn(
+                        'group flex items-center gap-2 rounded-lg border px-2 py-1.5 transition-colors',
+                        isPick
+                          ? 'border-red-200 bg-red-50'
+                          : 'border-gray-100 bg-gray-50/40 hover:border-gray-200 hover:bg-white',
+                      )}
+                    >
+                      <button
+                        type="button"
+                        className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm"
+                        onClick={() => activateChapter(ch, 0)}
+                      >
+                        <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md border border-gray-100 bg-white">
+                          {thumb ? (
+                            <img src={thumb} alt="" className="size-full object-cover" />
+                          ) : (
+                            <ImageIcon className="size-3.5 text-gray-400" />
                           )}
-                        >
-                          <button
-                            type="button"
-                            className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm"
-                            onClick={() => activateChapter(ch, 0)}
-                          >
-                            <div className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted">
-                              {thumb ? (
-                                <img src={thumb} alt="" className="size-full object-cover" />
-                              ) : (
-                                <ImageIcon className="size-4 text-muted-foreground" />
-                              )}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate font-semibold">Ch. {ch.num}</p>
-                              <p className="text-[11px] text-muted-foreground">
-                                {ch.pages.length} trang{ch.cover ? ' · có bìa' : ''}
-                              </p>
-                            </div>
-                            {noteCount > 0 ? (
-                              <Badge variant="secondary" className="text-[10px]">
-                                {noteCount} ô
-                              </Badge>
-                            ) : null}
-                          </button>
-                          {canDelete ? (
-                            <Button
-                              type="button"
-                              size="xs"
-                              variant="ghost"
-                              className="size-7 shrink-0 p-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                              title={deleteTitle}
-                              aria-label={deleteTitle}
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                void deleteChapter(ch.id)
-                              }}
-                            >
-                              <Trash2 className="size-3.5" />
-                            </Button>
-                          ) : null}
-                        </li>
-                      )
-                    })}
-                  </ul>
-                </ScrollArea>
-              )}
-            </section>
-
-            <section className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold">
-                  Upload{uploadTargetChapter ? <> — <strong>Ch. {uploadTargetChapter.num}</strong></> : null}
-                </h3>
-                {uploadTargetChapter ? (
-                  <Badge variant="outline" className="text-[10px]">
-                    {uploadTargetChapter.pages.length} trang
-                    {uploadTargetChapter.cover ? ' · có bìa' : ''}
-                  </Badge>
-                ) : null}
-              </div>
-
-              {uploadRejectMessage ? (
-                <Alert variant="destructive">
-                  <AlertDescription>{uploadRejectMessage}</AlertDescription>
-                </Alert>
-              ) : null}
-
-              <input
-                ref={coverFileRef}
-                type="file"
-                accept={CHAPTER_COVER_ACCEPT}
-                hidden
-                disabled={!coverInteractive}
-                onChange={onCoverChange}
-              />
-              <div className="rounded-xl border bg-muted/20 p-3">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    <ImageIcon className="size-3.5" />
-                    Ảnh bìa chapter
-                    <span className="font-normal normal-case tracking-normal">(tuỳ chọn)</span>
-                  </div>
-                  {uploadTargetChapter?.cover && coverInteractive ? (
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      className="text-destructive"
-                      disabled={coverBusy}
-                      onClick={() => { void removeCover() }}
-                    >
-                      <Trash2 className="size-3" />
-                      Gỡ
-                    </Button>
-                  ) : null}
-                </div>
-                {coverBusy ? (
-                  <p className="mb-2 text-xs text-muted-foreground">Đang lưu ảnh bìa...</p>
-                ) : null}
-                {coverLocked ? (
-                  <p className="mb-2 text-xs text-amber-700 dark:text-amber-300">
-                    Chapter đã published — không đổi / xóa ảnh bìa.
-                  </p>
-                ) : null}
-                {uploadTargetChapter?.cover ? (
-                  <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      disabled={!coverInteractive}
-                      onClick={() => coverInteractive && coverFileRef.current?.click()}
-                      className="group relative h-24 w-20 shrink-0 overflow-hidden rounded-lg border bg-background disabled:cursor-not-allowed disabled:opacity-70"
-                      title="Bấm để đổi ảnh bìa"
-                    >
-                      <img src={uploadTargetChapter.cover.url} alt="Ảnh bìa" className="size-full object-cover transition-transform group-hover:scale-105" />
-                    </button>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">{uploadTargetChapter.cover.name || 'cover.png'}</p>
-                      {coverLocked ? (
-                        <p className="text-xs text-muted-foreground">Không thể chỉnh sửa.</p>
-                      ) : null}
-                      {coverInteractive ? (
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs font-semibold text-gray-900">Ch. {ch.num}</p>
+                          <p className="text-[10px] text-gray-500">
+                            {ch.pages.length} trang{ch.cover ? ' · bìa' : ''}
+                            {noteCount > 0 ? ` · ${noteCount} ô` : ''}
+                          </p>
+                        </div>
+                      </button>
+                      {canDelete ? (
                         <Button
+                          type="button"
                           size="xs"
-                          variant="outline"
-                          className="mt-2"
-                          disabled={coverBusy}
-                          onClick={() => coverFileRef.current?.click()}
+                          variant="ghost"
+                          className="size-7 shrink-0 p-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                          title={deleteTitle}
+                          aria-label={deleteTitle}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            void deleteChapter(ch.id)
+                          }}
                         >
-                          <Upload className="size-3" />
-                          Đổi ảnh
+                          <Trash2 className="size-3.5" />
                         </Button>
                       ) : null}
-                    </div>
-                  </div>
-                ) : (
-                  <div
-                    className={cn(
-                      'flex flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed px-4 py-5 text-center transition-colors',
-                      coverInteractive
-                        ? 'cursor-pointer hover:border-primary/50 hover:bg-muted/50'
-                        : 'cursor-not-allowed opacity-60',
-                    )}
-                    onDrop={coverInteractive ? onCoverDrop : e => e.preventDefault()}
-                    onDragOver={e => e.preventDefault()}
-                    onClick={() => { if (coverInteractive) coverFileRef.current?.click() }}
-                    role={coverInteractive ? 'button' : undefined}
-                  >
-                    <ImageIcon className="size-5 text-muted-foreground" />
-                    <p className="text-xs font-medium">Chọn ảnh bìa cho chapter</p>
-                    <p className="text-[11px] text-muted-foreground">
-                      {!uploadTargetChapter
-                        ? 'Tạo / chọn chapter trước'
-                        : coverLocked
-                          ? 'Chapter đã published'
-                          : 'Tuỳ chọn · JPEG/PNG/WEBP · tối đa 10MB'}
-                    </p>
-                  </div>
-                )}
-              </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+        </aside>
 
+        <section className="space-y-5 rounded-2xl border border-gray-200/80 bg-white p-5 shadow-2xs">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-gray-900">
+              Upload{uploadTargetChapter ? <> — <strong>Ch. {uploadTargetChapter.num}</strong></> : null}
+            </h3>
+            {uploadTargetChapter ? (
+              <Badge variant="outline" className="border-gray-200 text-[10px] text-gray-600">
+                {uploadTargetChapter.pages.length} trang
+                {uploadTargetChapter.cover ? ' · có bìa' : ''}
+              </Badge>
+            ) : null}
+          </div>
+
+          {uploadRejectMessage ? (
+            <Alert variant="destructive">
+              <AlertDescription>{uploadRejectMessage}</AlertDescription>
+            </Alert>
+          ) : null}
+
+          <input
+            ref={coverFileRef}
+            type="file"
+            accept={CHAPTER_COVER_ACCEPT}
+            hidden
+            disabled={!coverInteractive}
+            onChange={onCoverChange}
+          />
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-medium text-gray-600">
+                Ảnh bìa <span className="font-normal text-gray-400">(tuỳ chọn)</span>
+              </p>
+              {uploadTargetChapter?.cover && coverInteractive ? (
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  className="h-7 text-destructive"
+                  disabled={coverBusy}
+                  onClick={() => { void removeCover() }}
+                >
+                  <Trash2 className="size-3" />
+                  Gỡ
+                </Button>
+              ) : null}
+            </div>
+            {coverBusy ? (
+              <p className="text-[11px] text-gray-500">Đang lưu ảnh bìa...</p>
+            ) : null}
+            {coverLocked ? (
+              <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                Chapter đã published — không đổi / xóa ảnh bìa.
+              </p>
+            ) : null}
+            {uploadTargetChapter?.cover ? (
+              <div className="flex h-24 items-center gap-3 rounded-xl border border-gray-200 bg-gray-50/50 px-3">
+                <button
+                  type="button"
+                  disabled={!coverInteractive}
+                  onClick={() => coverInteractive && coverFileRef.current?.click()}
+                  className="group relative h-16 w-12 shrink-0 overflow-hidden rounded-md border border-gray-100 bg-white disabled:cursor-not-allowed disabled:opacity-70"
+                  title="Bấm để đổi ảnh bìa"
+                >
+                  <img src={uploadTargetChapter.cover.url} alt="Ảnh bìa" className="size-full object-cover transition-transform group-hover:scale-105" />
+                </button>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-gray-900">{uploadTargetChapter.cover.name || 'cover.png'}</p>
+                  {coverInteractive ? (
+                    <button
+                      type="button"
+                      disabled={coverBusy}
+                      onClick={() => coverFileRef.current?.click()}
+                      className="mt-1 text-[11px] font-medium text-red-600 hover:underline disabled:opacity-50"
+                    >
+                      Đổi ảnh
+                    </button>
+                  ) : (
+                    <p className="text-[11px] text-gray-500">Không thể chỉnh sửa.</p>
+                  )}
+                </div>
+              </div>
+            ) : (
               <div
                 className={cn(
-                  'flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors',
-                  canUpload
-                    ? 'border-border bg-muted/30 hover:border-primary/50 hover:bg-muted/50'
-                    : 'cursor-not-allowed border-muted bg-muted/20 opacity-60',
-                  uploadUi && 'border-primary bg-primary/5',
+                  'flex h-24 cursor-pointer items-center justify-center gap-3 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/50 transition-colors',
+                  coverInteractive
+                    ? 'hover:border-red-400'
+                    : 'cursor-not-allowed opacity-60',
                 )}
-                onDrop={canUpload ? onDrop : e => e.preventDefault()}
+                onDrop={coverInteractive ? onCoverDrop : e => e.preventDefault()}
                 onDragOver={e => e.preventDefault()}
-                onClick={() => { if (canUpload) fileRef.current?.click() }}
-                role={canUpload ? 'button' : undefined}
+                onClick={() => { if (coverInteractive) coverFileRef.current?.click() }}
+                role={coverInteractive ? 'button' : undefined}
               >
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept="image/png,image/jpeg,image/jpg,image/webp"
-                  multiple
-                  hidden
-                  disabled={!canUpload}
-                  onChange={onFileChange}
-                />
-                <div className="flex size-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                  <Upload className="size-5" />
+                <ImageIcon className="size-5 text-gray-400" />
+                <div className="text-left">
+                  <p className="text-xs font-medium text-gray-700">Chọn ảnh bìa</p>
+                  <p className="text-[11px] text-gray-400">
+                    {!uploadTargetChapter
+                      ? 'Tạo / chọn chapter trước'
+                      : coverLocked
+                        ? 'Chapter đã published'
+                        : 'JPEG/PNG/WEBP · tối đa 10MB'}
+                  </p>
                 </div>
-                <p className="text-sm font-medium">Kéo thả ảnh trang hoặc bấm để chọn</p>
-                {uploadUi ? (
-                  <p className="text-xs text-primary">
-                    Đang tải <strong>{uploadUi.series}</strong> · Ch. <strong>{uploadUi.chapter}</strong> · {uploadUi.pct}%
-                  </p>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    {!selectedSeriesTitle.trim()
-                      ? 'Chọn series ở trên'
-                      : !uploadTargetChapter
-                        ? 'Tạo hoặc chọn chapter bên trái'
-                        : hiredAssistants.length > 0 && !sendAssistantId
-                          ? 'Chọn Assistant trước khi upload'
-                          : `Thêm ảnh vào Ch. ${uploadTargetChapter.num} (${uploadTargetChapter.pages.length} trang đã có)`}
-                  </p>
-                )}
               </div>
-            </section>
+            )}
           </div>
-        </CardContent>
-      </Card>
+
+          <div
+            className={cn(
+              'flex min-h-[220px] cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/30 p-6 text-center transition-all',
+              canUpload
+                ? 'hover:border-red-400 hover:bg-red-50/10'
+                : 'cursor-not-allowed opacity-60',
+              uploadUi && 'border-red-400 bg-red-50/20',
+            )}
+            onDrop={canUpload ? onDrop : e => e.preventDefault()}
+            onDragOver={e => e.preventDefault()}
+            onClick={() => { if (canUpload) fileRef.current?.click() }}
+            role={canUpload ? 'button' : undefined}
+          >
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/png,image/jpeg,image/jpg,image/webp"
+              multiple
+              hidden
+              disabled={!canUpload}
+              onChange={onFileChange}
+            />
+            <div className="flex size-11 items-center justify-center rounded-xl bg-red-50 text-red-600">
+              <Upload className="size-5" />
+            </div>
+            <p className="text-sm font-medium text-gray-900">
+              {quickRevisionEligible
+                ? 'Quick Revision — thay ảnh trang đã có'
+                : 'Kéo thả ảnh trang hoặc bấm để chọn'}
+            </p>
+            {uploadUi ? (
+              <p className="text-xs text-red-600">
+                Đang tải <strong>{uploadUi.series}</strong> · Ch. <strong>{uploadUi.chapter}</strong> · {uploadUi.pct}%
+              </p>
+            ) : quickRevisionEligible ? (
+              <p className="text-xs text-sky-700">
+                Quick Revision hỗ trợ thay, thêm mới, xóa trang — thao tác ở phần Ghi chú bên dưới.
+              </p>
+            ) : (
+              <p className="text-xs text-gray-500">
+                {!selectedSeriesTitle.trim()
+                  ? 'Chọn series bên trái'
+                  : !uploadTargetChapter
+                    ? 'Tạo hoặc chọn chapter bên trái'
+                    : (needsAssistantForUpload && hiredAssistants.length > 0 && !sendAssistantId)
+                      ? 'Chọn Assistant trước khi upload'
+                      : `Thêm ảnh vào Ch. ${uploadTargetChapter.num} (${uploadTargetChapter.pages.length} trang đã có)`}
+              </p>
+            )}
+            {!quickRevisionEligible ? (
+              <p className="text-[11px] text-gray-400">
+                Tối đa 20MB/ảnh • Hỗ trợ kéo thả nhiều trang cùng lúc
+              </p>
+            ) : null}
+          </div>
+        </section>
+      </div>
 
       {activeChapter ? (
-        <Card className="overflow-hidden border-border/80 shadow-sm">
-          <CardHeader className="border-b bg-muted/20">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <Badge variant="outline" className="size-6 justify-center p-0 font-semibold">3</Badge>
-                <div>
-                  <CardTitle className="text-base">Ghi chú trên trang truyện</CardTitle>
-                  <CardDescription>
-                    <strong>{activeChapter.series}</strong> · Ch. <strong>{activeChapter.num}</strong>
-                  </CardDescription>
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <ToolButtons />
-                <Button size="sm" variant="outline" onClick={() => setIsFullscreen(true)}>
-                  <Maximize2 className="size-3.5" />
-                  Phóng to
-                </Button>
-                <Badge variant="secondary">
-                  {totalNotes} ô · {pages.length} trang
-                </Badge>
+        <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-2xs">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-4 py-3">
+            <div className="flex items-center gap-2">
+              <span className="flex size-5 items-center justify-center rounded-md bg-gray-900 text-[10px] font-bold text-white">
+                3
+              </span>
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">Ghi chú trên trang</h3>
+                <p className="text-[11px] text-gray-500">
+                  <strong className="font-medium text-gray-700">{activeChapter.series}</strong> · Ch. <strong className="font-medium text-gray-700">{activeChapter.num}</strong>
+                </p>
               </div>
             </div>
-          </CardHeader>
-          <CardContent className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <ToolButtons />
+              <Button size="sm" variant="outline" className="h-8 border-gray-200" onClick={() => setIsFullscreen(true)}>
+                <Maximize2 className="size-3.5" />
+                Phóng to
+              </Button>
+              <Badge variant="secondary" className="text-[10px]">
+                {totalNotes} ô · {pages.length} trang
+              </Badge>
+            </div>
+          </div>
+          <div className="space-y-3 p-4">
             <div className="flex items-center gap-3">
               <PageNav />
               <div className="min-w-0 flex-1 overflow-x-auto">
@@ -1952,30 +2347,33 @@ export default function ChapterAnnotator({
               </div>
             </div>
             <div
-              className="flex h-[min(720px,calc(100vh-280px))] min-h-[480px] gap-3 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 p-3"
+              className="flex h-[min(640px,calc(100vh-260px))] min-h-[420px] gap-3 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950 p-3"
             >
               <div className="mk-board-stage-scroll min-h-0 min-w-0 flex-1 overflow-auto">
                 <div className="flex justify-center p-1">
                   <CanvasBoard refEl={boardRef} />
                 </div>
               </div>
-              <aside className="flex h-full w-[min(300px,100%)] min-w-[260px] max-w-[300px] shrink-0 flex-col gap-3 overflow-hidden">
+              <aside className="flex h-full w-[min(280px,100%)] min-w-[240px] max-w-[280px] shrink-0 flex-col gap-3 overflow-hidden">
                 <div className="min-h-0 flex-1 overflow-hidden">
                   {NotesPanel({ embedded: true })}
                 </div>
-                <div className="shrink-0">
-                  {SendActionsBar({ embedded: true })}
+                <div className="shrink-0 space-y-2">
+                  {quickRevisionEligible ? (
+                    <QuickRevisionBar embedded />
+                  ) : null}
+                  {revisionMode || !quickRevisionEligible ? (
+                    SendActionsBar({ embedded: true })
+                  ) : null}
                 </div>
               </aside>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       ) : (
-        <Card>
-          <CardContent className="py-12 text-center text-muted-foreground">
-            Chọn hoặc tạo chapter ở <strong>Bước 1</strong> để bắt đầu ghi chú.
-          </CardContent>
-        </Card>
+        <div className="rounded-xl border border-gray-200/50 bg-gray-100/70 p-3 text-center text-xs font-medium text-gray-500">
+          3 · Ghi chú & gửi — chọn hoặc tạo chapter để bắt đầu ghi chú và gửi Assistant.
+        </div>
       )}
 
       {isFullscreen && activeChapter ? (
@@ -2004,8 +2402,13 @@ export default function ChapterAnnotator({
                 <div className="min-h-0 flex-1 overflow-hidden">
                   {NotesPanel({ inFullscreen: true })}
                 </div>
-                <div className="shrink-0">
-                  {SendActionsBar({ compact: true })}
+                <div className="shrink-0 space-y-2">
+                  {quickRevisionEligible ? (
+                    <QuickRevisionBar compact embedded />
+                  ) : null}
+                  {revisionMode || !quickRevisionEligible ? (
+                    SendActionsBar({ compact: true })
+                  ) : null}
                 </div>
               </div>
             </div>
