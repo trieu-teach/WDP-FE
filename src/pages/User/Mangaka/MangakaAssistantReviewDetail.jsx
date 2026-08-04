@@ -22,8 +22,13 @@ import {
 import {
   canSubmitMoreChaptersToTe,
   findSeriesDebutGate,
+  findSeriesForChapter,
   getDebutSubmitLockedMessage,
 } from "@/utils/debutGate.js";
+import {
+  getSeriesEbResubmitConfirmMessage,
+  isSeriesEbResubmitStatus,
+} from "@/utils/seriesModel.js";
 import {
   buildReviewPageCompare,
   canMangakaApproveChapterReview,
@@ -77,9 +82,13 @@ export default function MangakaAssistantReviewDetail() {
     () => findSeriesDebutGate(seriesList, review?.chapter),
     [seriesList, review?.chapter],
   );
-  const debutSubmitLocked = !canSubmitMoreChaptersToTe(debutGate);
+  const seriesMeta = useMemo(
+    () => findSeriesForChapter(seriesList, review?.chapter),
+    [seriesList, review?.chapter],
+  );
+  const debutSubmitLocked = !canSubmitMoreChaptersToTe(debutGate, seriesMeta);
   const debutSubmitLockedMessage = debutSubmitLocked
-    ? getDebutSubmitLockedMessage(debutGate)
+    ? getDebutSubmitLockedMessage(debutGate, seriesMeta)
     : "";
 
   const [taskActionBusy, setTaskActionBusy] = useState(null);
@@ -248,8 +257,19 @@ export default function MangakaAssistantReviewDetail() {
       ?? chapter.status;
 
     if (debutSubmitLocked) {
-      toast.error(debutSubmitLockedMessage || getDebutSubmitLockedMessage(debutGate));
+      toast.error(debutSubmitLockedMessage || getDebutSubmitLockedMessage(debutGate, seriesMeta));
       return;
+    }
+    const seriesForConfirm = seriesMeta ?? seriesList.find(
+      (s) =>
+        s.title === chapter.series
+        || String(s.id) === String(chapter.seriesId),
+    );
+    if (isSeriesEbResubmitStatus(seriesForConfirm)) {
+      const ok = window.confirm(
+        getSeriesEbResubmitConfirmMessage(seriesForConfirm),
+      );
+      if (!ok) return;
     }
 
     setTeSending(true);

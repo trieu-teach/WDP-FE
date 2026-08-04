@@ -8,6 +8,14 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Card,
   CardContent,
   CardDescription,
@@ -34,6 +42,8 @@ import { cn } from "@/lib/utils";
 import { apiSeriesToUi } from "@/utils/apiMappers.js";
 import {
   getPublicationStatusLabel,
+  getSeriesEbResubmitConfirmMessage,
+  isSeriesEbResubmitStatus,
   SERIES_PUBLICATION_STATUSES,
 } from "@/utils/seriesModel.js";
 import {
@@ -388,6 +398,7 @@ export default function TantouEditor() {
   const [publicationStatusFilter, setPublicationStatusFilter] = useState("all");
   const [heroSlide, setHeroSlide] = useState(0);
   const [selectedMangakaKey, setSelectedMangakaKey] = useState(null);
+  const [resubmitConfirm, setResubmitConfirm] = useState(null);
 
   useEffect(() => {
     if (HERO_IMAGES.length < 2) return undefined;
@@ -1057,6 +1068,25 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
           return;
         }
 
+        if (action === "approve") {
+          const seriesApiStatus =
+            selected.seriesMeta?.seriesApiStatus
+            ?? selected.seriesStatus
+            ?? selected.series_status
+            ?? null;
+          if (isSeriesEbResubmitStatus(seriesApiStatus)) {
+            if (!options.skipResubmitConfirm) {
+              setSaving(false);
+              setResubmitConfirm({
+                message: getSeriesEbResubmitConfirmMessage(seriesApiStatus, { forTe: true }),
+                reviewData,
+                options,
+              });
+              return;
+            }
+          }
+        }
+
         if ((nextText || nextQuickNotes) && action === "approve") {
           await teReviewsService
             .saveSeriesReviewDraft(nextSeriesId, {
@@ -1161,6 +1191,37 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
           />
         </main>
         <Footer />
+        <Dialog
+          open={Boolean(resubmitConfirm)}
+          onOpenChange={(open) => { if (!open) setResubmitConfirm(null); }}
+        >
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Xác nhận gửi EB</DialogTitle>
+              <DialogDescription className="whitespace-pre-line">
+                {resubmitConfirm?.message ?? ""}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setResubmitConfirm(null)}>
+                Huỷ
+              </Button>
+              <Button
+                onClick={async () => {
+                  const payload = resubmitConfirm;
+                  setResubmitConfirm(null);
+                  if (!payload) return;
+                  await handleSaveReview(payload.reviewData, {
+                    ...payload.options,
+                    skipResubmitConfirm: true,
+                  });
+                }}
+              >
+                Phê duyệt & gửi EB
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     );
   }
@@ -1471,6 +1532,37 @@ async function enrichTeQueueItemWithSeriesDetail(mapped) {
       </main>
 
       <Footer />
+      <Dialog
+        open={Boolean(resubmitConfirm)}
+        onOpenChange={(open) => { if (!open) setResubmitConfirm(null); }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Xác nhận gửi EB</DialogTitle>
+            <DialogDescription className="whitespace-pre-line">
+              {resubmitConfirm?.message ?? ""}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setResubmitConfirm(null)}>
+              Huỷ
+            </Button>
+            <Button
+              onClick={async () => {
+                const payload = resubmitConfirm;
+                setResubmitConfirm(null);
+                if (!payload) return;
+                await handleSaveReview(payload.reviewData, {
+                  ...payload.options,
+                  skipResubmitConfirm: true,
+                });
+              }}
+            >
+              Phê duyệt & gửi EB
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

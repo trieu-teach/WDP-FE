@@ -17,6 +17,7 @@ import {
   XCircle,
   ChevronRight,
   TrendingUp,
+  Zap,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -37,14 +38,19 @@ import { chaptersService } from "@/api/chapters.service.js";
 import { getApiErrorMessage } from "@/api/http.js";
 import { EB_CLASSIFICATION_LABELS } from "@/utils/ebEvaluationMappers.js";
 import {
+  getMangakaSeriesDetailPath,
   getMangakaTeRevisionPath,
   isEbApprovedNotification,
   isSafeNotificationLink,
+  isSeriesEbDecisionNotification,
   isTeRevisionNotification,
   readEbApprovalMeta,
+  readSeriesEbFeedback,
   resolveChapterIdFromNotification,
   resolveEntityId,
+  resolveSeriesIdFromNotification,
 } from "@/utils/notificationTarget.js";
+import { buildMangakaQuickRevisionState } from "@/utils/mangakaQuickRevisionNav.js";
 
 const TYPE_META = {
   info: { icon: Info, label: "Thông báo", tone: "sky" },
@@ -119,6 +125,24 @@ const TYPE_META = {
     icon: Handshake,
     label: "Series kết thúc · Assistant",
     tone: "violet",
+  },
+
+  series_approved: {
+    icon: CheckCircle2,
+    label: "Series được xuất bản",
+    tone: "emerald",
+  },
+
+  series_eb_revision: {
+    icon: ListChecks,
+    label: "Series cần chỉnh sửa",
+    tone: "amber",
+  },
+
+  series_rejected: {
+    icon: XCircle,
+    label: "Series bị từ chối",
+    tone: "rose",
   },
 };
 
@@ -224,10 +248,10 @@ function Pill({ children, tone = "sky" }) {
   );
 }
 
-function TeRevisionLinkButton({ to, onClose, className, size, children }) {
+function TeRevisionLinkButton({ to, state, onClose, className, size, children }) {
   return (
     <Button asChild type="button" size={size} className={className}>
-      <Link to={to} onClick={() => onClose(false)}>
+      <Link to={to} state={state} onClick={() => onClose(false)}>
         {children}
       </Link>
     </Button>
@@ -261,13 +285,33 @@ export function NotificationDetailDialog({ notification, open, onOpenChange }) {
 
   const isTeRevision = isTeRevisionNotification(notification);
   const isEbApproved = isEbApprovedNotification(notification);
+  const isSeriesEbDecision = isSeriesEbDecisionNotification(notification);
   const ebApproval = readEbApprovalMeta(notification);
   const publishChapterId = ebApproval.chapterId ?? chapterId;
+  const seriesId = resolveSeriesIdFromNotification(notification);
+  const seriesFeedback = readSeriesEbFeedback(notification);
+  const seriesDetailPath = getMangakaSeriesDetailPath(seriesId, {
+    showFeedback: typeKey === "series_rejected" || typeKey === "series_eb_revision",
+  });
 
   const canOpenTeReview = isTeRevision && Boolean(teRevisionPath);
+  const canOpenSeriesDetail = isSeriesEbDecision && Boolean(seriesDetailPath);
+  const quickRevisionChapterId = publishChapterId ?? chapterId;
+  const quickRevisionSeriesName = String(
+    metaObj?.seriesName ?? metaObj?.series_name ?? "",
+  ).trim();
+  const quickRevisionState = buildMangakaQuickRevisionState({
+    series: quickRevisionSeriesName,
+    chapterId: quickRevisionChapterId,
+  });
+  const canOpenQuickRevision = Boolean(quickRevisionState)
+    && (isTeRevision || isSeriesEbDecision);
 
   const showGenericLink =
-    !isTeRevision && !isEbApproved && isSafeNotificationLink(notification.link);
+    !isTeRevision
+    && !isEbApproved
+    && !isSeriesEbDecision
+    && isSafeNotificationLink(notification.link);
 
   async function handlePublishChapter() {
     if (!publishChapterId) {
@@ -348,7 +392,7 @@ export function NotificationDetailDialog({ notification, open, onOpenChange }) {
               </div>
             )}
 
-            {relatedId || Object.keys(metaObj).length > 0 || isTeRevision ? (
+            {relatedId || Object.keys(metaObj).length > 0 || isTeRevision || isSeriesEbDecision ? (
               <div className="space-y-2.5 rounded-xl border border-border/60 bg-card p-4">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                   Chi tiết
@@ -365,6 +409,10 @@ export function NotificationDetailDialog({ notification, open, onOpenChange }) {
 
                   {metaObj?.seriesName ? (
                     <MetaRow label="Series" value={metaObj.seriesName} />
+                  ) : null}
+
+                  {seriesId ? (
+                    <MetaRow label="Mã series" value={seriesId} mono />
                   ) : null}
 
                   {metaObj?.chapterNumber ? (
@@ -407,10 +455,21 @@ export function NotificationDetailDialog({ notification, open, onOpenChange }) {
                     />
                   ) : null}
 
-                  {relatedId ? (
+                  {relatedId && relatedId !== seriesId ? (
                     <MetaRow label="Mã đối tượng" value={relatedId} mono />
                   ) : null}
                 </div>
+
+                {seriesFeedback ? (
+                  <div className="mt-3 rounded-lg border border-rose-200/80 bg-rose-50/80 px-3 py-2.5 dark:border-rose-500/30 dark:bg-rose-500/10">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-rose-700 dark:text-rose-300">
+                      Feedback từ EB
+                    </p>
+                    <p className="mt-1.5 text-sm leading-relaxed text-rose-950 dark:text-rose-50">
+                      {seriesFeedback}
+                    </p>
+                  </div>
+                ) : null}
 
                 {canOpenTeReview ? (
                   <TeRevisionLinkButton
@@ -427,13 +486,53 @@ export function NotificationDetailDialog({ notification, open, onOpenChange }) {
                     trang Mangaka.
                   </p>
                 ) : null}
+
+                {canOpenSeriesDetail ? (
+                  <TeRevisionLinkButton
+                    to={seriesDetailPath}
+                    onClose={onOpenChange}
+                    className="mt-2 w-full justify-between gap-2"
+                  >
+                    {typeKey === "series_approved"
+                      ? "Xem series đã duyệt"
+                      : "Xem series & feedback EB"}
+                    <ChevronRight className="size-4 shrink-0 opacity-70" />
+                  </TeRevisionLinkButton>
+                ) : null}
+
+                {canOpenQuickRevision ? (
+                  <TeRevisionLinkButton
+                    to="/mangaka"
+                    state={quickRevisionState}
+                    onClose={onOpenChange}
+                    className="mt-2 w-full justify-between gap-2 bg-sky-600 text-white hover:bg-sky-700"
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      <Zap className="size-4" />
+                      Sửa nhanh & gửi TE
+                    </span>
+                    <ChevronRight className="size-4 shrink-0 opacity-70" />
+                  </TeRevisionLinkButton>
+                ) : null}
               </div>
             ) : null}
           </div>
         </ScrollArea>
 
         {canOpenTeReview ? (
-          <div className="flex items-center justify-end gap-2 border-t bg-muted/20 px-6 py-3">
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t bg-muted/20 px-6 py-3">
+            {canOpenQuickRevision ? (
+              <TeRevisionLinkButton
+                to="/mangaka"
+                state={quickRevisionState}
+                onClose={onOpenChange}
+                size="sm"
+                className="gap-1.5 bg-sky-600 text-white hover:bg-sky-700"
+              >
+                <Zap className="size-3.5" />
+                Sửa nhanh & gửi TE
+              </TeRevisionLinkButton>
+            ) : null}
             <TeRevisionLinkButton
               to={teRevisionPath}
               onClose={onOpenChange}
@@ -442,6 +541,30 @@ export function NotificationDetailDialog({ notification, open, onOpenChange }) {
             >
               <ListChecks className="size-3.5" />
               Xem chi tiết
+            </TeRevisionLinkButton>
+          </div>
+        ) : canOpenSeriesDetail ? (
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t bg-muted/20 px-6 py-3">
+            {canOpenQuickRevision ? (
+              <TeRevisionLinkButton
+                to="/mangaka"
+                state={quickRevisionState}
+                onClose={onOpenChange}
+                size="sm"
+                className="gap-1.5 bg-sky-600 text-white hover:bg-sky-700"
+              >
+                <Zap className="size-3.5" />
+                Sửa nhanh & gửi TE
+              </TeRevisionLinkButton>
+            ) : null}
+            <TeRevisionLinkButton
+              to={seriesDetailPath}
+              onClose={onOpenChange}
+              size="sm"
+              className="gap-1.5"
+            >
+              <TrendingUp className="size-3.5" />
+              {typeKey === "series_approved" ? "Mở series" : "Xem feedback"}
             </TeRevisionLinkButton>
           </div>
         ) : isEbApproved ? (

@@ -185,6 +185,9 @@ export function normalizeSeries(raw, index = 0) {
       ? { ...s.debutGate }
       : null,
     deletedAt: s.deletedAt ?? s.deleted_at ?? null,
+    apiStatus: s.apiStatus ?? null,
+    ebEvaluationId: s.ebEvaluationId ?? null,
+    ebEvaluationNotes: s.ebEvaluationNotes ?? null,
   }
   normalized.statusLabel = s.statusLabel ?? buildWorkflowStatusLabel(normalized)
   return normalized
@@ -196,6 +199,8 @@ export function normalizeSeriesList(list) {
 }
 
 export function buildWorkflowStatusLabel(s) {
+  if (s.status === 'rejected') return 'Bị từ chối bởi Editor Board'
+  if (s.status === 'revision') return 'Cần chỉnh sửa theo góp ý EB'
   const pub = getPublicationStatusLabel(s.publicationStatus)
   if (s.status === 'assistant') return 'Đang vẽ ngoại cảnh'
   if (s.status === 'review') return 'Chờ bạn duyệt'
@@ -203,7 +208,50 @@ export function buildWorkflowStatusLabel(s) {
     if (s.publicationStatus == null) return `Bản nháp · ${pub}`
     return 'Bản nháp'
   }
+  if (s.status === 'approved') return 'Đã duyệt EB'
   return pub
+}
+
+/** Series đang rejected/revision — được nộp lại qua TE, nên xác nhận trước khi gửi. */
+export function isSeriesEbResubmitStatus(seriesOrStatus) {
+  const status = typeof seriesOrStatus === 'string'
+    ? seriesOrStatus
+    : (seriesOrStatus?.status ?? seriesOrStatus?.apiStatus ?? '')
+  const s = String(status ?? '').toLowerCase()
+  return s === 'rejected' || s === 'revision'
+}
+
+/** @deprecated Dùng isSeriesEbResubmitStatus — không khóa nộp, chỉ cần xác nhận. */
+export function isSeriesEbSubmitLocked(seriesOrStatus) {
+  return isSeriesEbResubmitStatus(seriesOrStatus)
+}
+
+export function getSeriesEbResubmitConfirmMessage(seriesOrStatus, { forTe = false } = {}) {
+  const status = typeof seriesOrStatus === 'string'
+    ? seriesOrStatus
+    : (seriesOrStatus?.status ?? seriesOrStatus?.apiStatus ?? '')
+  const s = String(status ?? '').toLowerCase()
+  if (forTe) {
+    if (s === 'rejected') {
+      return 'Series này đang bị EB từ chối. Bạn có chắc gửi lại lên EB không?'
+    }
+    if (s === 'revision') {
+      return 'Series này đang ở trạng thái revision (EB yêu cầu chỉnh). Bạn có chắc gửi lại lên EB không?'
+    }
+    return 'Series đã từng bị EB trả về. Bạn có chắc gửi lại lên EB không?'
+  }
+  if (s === 'rejected') {
+    return 'Series đang bị EB từ chối. Đã chỉnh theo feedback chưa? Tiếp tục gửi lại cho TE để TE chuyển EB?'
+  }
+  if (s === 'revision') {
+    return 'Series đang ở trạng thái revision. Đã chỉnh theo feedback EB chưa? Tiếp tục gửi lại cho TE?'
+  }
+  return 'Series đã từng bị EB trả về. Tiếp tục gửi lại cho TE?'
+}
+
+/** @deprecated Dùng getSeriesEbResubmitConfirmMessage */
+export function getSeriesEbSubmitLockMessage(seriesOrStatus) {
+  return getSeriesEbResubmitConfirmMessage(seriesOrStatus)
 }
 
 export function formatSeriesCatalogLine(series) {

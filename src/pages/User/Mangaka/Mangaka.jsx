@@ -24,6 +24,7 @@ import {
   TrendingUp,
   Upload,
   Users,
+  Zap,
 } from "lucide-react";
 import Header from "@/components/User/Header/Header.jsx";
 import Footer from "@/components/User/Footer/Footer.jsx";
@@ -92,7 +93,8 @@ import { getApiErrorMessage, resolveMediaUrl } from "@/api/http.js";
 import { chaptersService } from "@/api/chapters.service.js";
 import { submissionsService } from "@/api/submissions.service.js";
 import { tasksService } from "@/api/tasks.service.js";
-import { uiNoteToTaskCreate, uiChapterToTaskCreate, uiTaskTypeToErrorType, canMangakaSendToTe, chapterPagesToCompareUrls, apiTaskToUi, shouldShowAssistantEditedOnAnnotate } from "@/utils/apiMappers.js";
+import { uiNoteToTaskCreate, uiChapterToTaskCreate, uiTaskTypeToErrorType, canMangakaSendToTe, canShowQuickRevision, chapterPagesToCompareUrls, apiTaskToUi, shouldShowAssistantEditedOnAnnotate, QUICK_REVISION_MAX_PAGES } from "@/utils/apiMappers.js";
+import { buildMangakaChapterDetailPath } from "@/utils/mangakaQuickRevisionNav.js";
 import {
   markAssistantApprovedPages,
   stampAssistantApprovedOnPages,
@@ -107,10 +109,13 @@ import { useMangakaCooperation } from "@/hooks/useMangakaCooperation.js";
 import {
   canSubmitMoreChaptersToTe,
   findSeriesDebutGate,
+  findSeriesForChapter,
   getDebutSubmitLockedMessage,
 } from "@/utils/debutGate.js";
 import {
   formatSeriesCardLine,
+  getSeriesEbResubmitConfirmMessage,
+  isSeriesEbResubmitStatus,
   seriesToExternalSummary,
   slugifySeriesTitle,
 } from "@/utils/seriesModel.js";
@@ -152,6 +157,16 @@ const STATUS_BADGE = {
     label: `Chờ ${LABEL_TANTOU_EDITOR}`,
     className:
       "bg-sky-100 text-sky-700 hover:bg-sky-100 dark:bg-sky-500/15 dark:text-sky-400",
+  },
+  revision: {
+    label: "Cần chỉnh sửa EB",
+    className:
+      "bg-amber-100 text-amber-800 hover:bg-amber-100 dark:bg-amber-500/15 dark:text-amber-200",
+  },
+  rejected: {
+    label: "Bị từ chối",
+    className:
+      "bg-rose-100 text-rose-800 hover:bg-rose-100 dark:bg-rose-500/20 dark:text-rose-300",
   },
   done: {
     label: "Hoàn tất",
@@ -704,6 +719,9 @@ export default function Mangaka() {
   const [teRevisionSeenTick, setTeRevisionSeenTick] = useState(0);
   const [heroSlide, setHeroSlide] = useState(0);
   const [lastApprovedChapter, setLastApprovedChapter] = useState(null);
+  const [seriesStatusFilter, setSeriesStatusFilter] = useState("all");
+  const [quickRevisionFocusId, setQuickRevisionFocusId] = useState(null);
+  const [quickRevisionConfirm, setQuickRevisionConfirm] = useState(null);
 
   const teTargetChapter = teSelectorOpen
     ? (teSendChapter ?? lastApprovedChapter)
@@ -763,9 +781,10 @@ export default function Mangaka() {
 
   function openTeSelector(chapter) {
     if (!chapter) return;
+    const seriesMeta = findSeriesForChapter(seriesList, chapter);
     const debutGate = findSeriesDebutGate(seriesList, chapter);
-    if (!canSubmitMoreChaptersToTe(debutGate)) {
-      toast.error(getDebutSubmitLockedMessage(debutGate));
+    if (!canSubmitMoreChaptersToTe(debutGate, seriesMeta)) {
+      toast.error(getDebutSubmitLockedMessage(debutGate, seriesMeta));
       return;
     }
     setTeSendChapter(chapter);
@@ -800,10 +819,19 @@ export default function Mangaka() {
       toast.error("Chapter chưa sẵn sàng gửi TE. Vui lòng duyệt chapter trước.");
       return;
     }
+    const seriesMeta = seriesList.find(
+      (s) => s.title === chapter.series || String(s.id) === String(chapter.seriesId),
+    ) ?? findSeriesForChapter(seriesList, chapter);
     const debutGate = findSeriesDebutGate(seriesList, chapter);
-    if (!canSubmitMoreChaptersToTe(debutGate)) {
-      toast.error(getDebutSubmitLockedMessage(debutGate));
+    if (!canSubmitMoreChaptersToTe(debutGate, seriesMeta)) {
+      toast.error(getDebutSubmitLockedMessage(debutGate, seriesMeta));
       return;
+    }
+    if (isSeriesEbResubmitStatus(seriesMeta)) {
+      const ok = window.confirm(
+        getSeriesEbResubmitConfirmMessage(seriesMeta),
+      );
+      if (!ok) return;
     }
 
     setTeSending(true);
@@ -845,6 +873,82 @@ export default function Mangaka() {
     } finally {
       setTeSending(false);
     }
+  }
+
+  async function submitQuickRevision({
+    chapter,
+    items,
+    seriesMeta,
+    newPages = [],
+    deletedPageIds = [],
+  }) {
+    try {
+      const res = await submissionsService.quickRevision(chapter.id, {
+        pageIds: items.map((item) => item.pageId),
+        files: items.map((item) => item.file),
+        newPageCount: newPages.length,
+        newPages,
+        deletedPageIds,
+      });
+      const totalChanges = items.length + newPages.length + deletedPageIds.length
+      toast.success(
+        res.message
+        || `Quick revision thành công (${totalChanges} thay đổi) và gửi lại cho TE.`,
+      );
+      setRevisionChapterId(null);
+      setQuickRevisionFocusId(null);
+      await refreshMangakaTasks();
+      await refreshWorkspace();
+      const slug = seriesMeta?.slug ?? slugifySeriesTitle(
+        chapter.series ?? seriesMeta?.title ?? "",
+      );
+      navigate(buildMangakaChapterDetailPath(slug, chapter.id));
+      return true;
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Quick revision thất bại."));
+      throw err;
+    }
+  }
+
+  async function handleQuickRevision({
+    chapter,
+    items = [],
+    newPages = [],
+    deletedPageIds = [],
+  }) {
+    if (!chapter?.id) return false;
+    const totalChanges = items.length + newPages.length + deletedPageIds.length
+    if (totalChanges === 0) {
+      toast.error("Cần ít nhất 1 thay đổi (sửa/thêm/xóa trang).");
+      return false;
+    }
+    if (totalChanges > QUICK_REVISION_MAX_PAGES) {
+      toast.error(
+        `Quick revision chỉ cho phép tối đa ${QUICK_REVISION_MAX_PAGES} thay đổi mỗi lần.`,
+      );
+      return false;
+    }
+    const seriesMeta =
+      seriesList.find(
+        (s) =>
+          s.title === chapter.series
+          || String(s.id) === String(chapter.seriesId),
+      ) ?? findSeriesForChapter(seriesList, chapter);
+    if (isSeriesEbResubmitStatus(seriesMeta)) {
+      setQuickRevisionConfirm({
+        chapter,
+        items,
+        newPages,
+        deletedPageIds,
+        seriesMeta,
+        message: getSeriesEbResubmitConfirmMessage(seriesMeta),
+      });
+      return false;
+    }
+    await submitQuickRevision({
+      chapter, items, seriesMeta, newPages, deletedPageIds,
+    });
+    return true;
   }
 
   async function handleRemoveTe(chapterId) {
@@ -1059,6 +1163,29 @@ export default function Mangaka() {
     [seriesList],
   );
 
+  const filteredSeriesList = useMemo(() => {
+    if (seriesStatusFilter === "needs_fix") {
+      return seriesList.filter(
+        (s) => s.status === "rejected" || s.status === "revision",
+      );
+    }
+    if (seriesStatusFilter === "rejected") {
+      return seriesList.filter((s) => s.status === "rejected");
+    }
+    if (seriesStatusFilter === "revision") {
+      return seriesList.filter((s) => s.status === "revision");
+    }
+    return seriesList;
+  }, [seriesList, seriesStatusFilter]);
+
+  const needsEbFixCount = useMemo(
+    () =>
+      seriesList.filter(
+        (s) => s.status === "rejected" || s.status === "revision",
+      ).length,
+    [seriesList],
+  );
+
   const userInitials = useMemo(() => {
     const parts = String(mangakaName ?? "MK").trim().split(/\s+/).filter(Boolean);
     if (parts.length >= 2) {
@@ -1086,6 +1213,11 @@ export default function Mangaka() {
       };
     });
   }, [annotatorChapters, chapterRows]);
+
+  const annotateSeriesMeta = useMemo(
+    () => seriesList.find((s) => s.title === annotateSeries) ?? null,
+    [seriesList, annotateSeries],
+  );
 
   // Chapter đã approved_by_mangaka → đánh dấu session để Upload & ghi chú hiện ảnh result + ẩn note cũ
   useEffect(() => {
@@ -1269,9 +1401,19 @@ export default function Mangaka() {
     imageOverride,
   }) {
     if (!chapter?.series || !chapter?.id) return;
+    const seriesMeta = seriesList.find(
+      (s) => s.title === chapter.series || String(s.id) === String(chapter.seriesId),
+    ) ?? seriesList.find((s) => s.title === series)
+      ?? findSeriesForChapter(seriesList, chapter);
+    if (isSeriesEbResubmitStatus(seriesMeta)) {
+      const ok = window.confirm(
+        getSeriesEbResubmitConfirmMessage(seriesMeta),
+      );
+      if (!ok) return;
+    }
     const debutGate = findSeriesDebutGate(seriesList, chapter);
-    if (!canSubmitMoreChaptersToTe(debutGate)) {
-      toast.error(getDebutSubmitLockedMessage(debutGate));
+    if (!canSubmitMoreChaptersToTe(debutGate, seriesMeta)) {
+      toast.error(getDebutSubmitLockedMessage(debutGate, seriesMeta));
       return;
     }
     try {
@@ -1570,7 +1712,10 @@ export default function Mangaka() {
     if (typeof st.chapterId === "string" && st.chapterId) {
       setAnnotatorActiveChapterId(st.chapterId);
       setAnnotatorPageIndex(0);
-      setRevisionChapterId(st.revision === true ? st.chapterId : null);
+      setRevisionChapterId(
+        st.revision === true && st.quickRevision !== true ? st.chapterId : null,
+      );
+      setQuickRevisionFocusId(st.quickRevision === true ? st.chapterId : null);
     }
   }, [location.state]);
 
@@ -1578,10 +1723,22 @@ export default function Mangaka() {
     setAnnotateSeries(seriesTitle);
     setTab("annotate");
     setRevisionChapterId(null);
+    setQuickRevisionFocusId(null);
     if (chapterLocalId) {
       setAnnotatorActiveChapterId(chapterLocalId);
       setAnnotatorPageIndex(0);
     }
+  }
+
+  function openQuickRevision(chapter, seriesTitle) {
+    const title = String(seriesTitle ?? chapter?.series ?? "").trim();
+    if (!chapter?.id || !title) return;
+    setAnnotateSeries(title);
+    setTab("annotate");
+    setRevisionChapterId(null);
+    setQuickRevisionFocusId(String(chapter.id));
+    setAnnotatorActiveChapterId(chapter.id);
+    setAnnotatorPageIndex(0);
   }
 
   function handleLogout() {
@@ -1607,8 +1764,11 @@ export default function Mangaka() {
             />
           ))}
         </div>
-        <div className="mk-hero-slides__veil" aria-hidden />
-        <div className="page-container relative py-10 md:py-14">
+        <div
+          className="pointer-events-none absolute inset-0 z-[1] bg-gradient-to-r from-black/80 via-black/40 to-transparent"
+          aria-hidden
+        />
+        <div className="page-container relative z-[2] px-8 pt-10 pb-12">
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div className="max-w-2xl space-y-3">
               <Badge
@@ -1620,17 +1780,17 @@ export default function Mangaka() {
               <h1 className="text-3xl font-bold tracking-tight md:text-4xl">
                 {`Xin chào${user?.name ? `, ${user.name.split(" ")[0]}` : ""}`}
               </h1>
-              <p className="leading-relaxed text-zinc-300">
+              <p className="leading-relaxed text-zinc-200">
                 {`Quản lý series, upload chapter và phối hợp Assistant · ${LABEL_TANTOU_EDITOR} · ${LABEL_EDITOR_BOARD}.`}
               </p>
             </div>
-            <div className="hidden items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 backdrop-blur-sm md:flex">
-              <div className="flex size-10 items-center justify-center rounded-lg bg-gradient-to-br from-rose-500 to-rose-700 text-sm font-bold text-white shadow-lg shadow-rose-900/30">
+            <div className="hidden items-center gap-3 rounded-2xl border border-white/20 bg-white/10 p-2.5 backdrop-blur-md md:flex">
+              <div className="flex size-10 items-center justify-center rounded-xl bg-gradient-to-br from-rose-500 to-rose-700 text-sm font-bold text-white shadow-lg shadow-rose-900/30">
                 {userInitials}
               </div>
-              <div className="min-w-0">
+              <div className="min-w-0 pr-1">
                 <p className="truncate text-sm font-medium text-white">{mangakaName}</p>
-                <p className="text-xs text-white/80">Tác giả · Workspace</p>
+                <p className="text-xs text-white/75">Tác giả · Workspace</p>
               </div>
             </div>
           </div>
@@ -1671,9 +1831,45 @@ export default function Mangaka() {
                     <h2 className="text-xl font-semibold tracking-tight">Series của tôi</h2>
                     <p className="text-sm text-zinc-500 dark:text-zinc-400">
                       Quản lý hồ sơ từng series
+                      {needsEbFixCount > 0
+                        ? ` · ${needsEbFixCount} cần chỉnh sửa theo EB`
+                        : ""}
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center justify-end gap-2">
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        { value: "all", label: "Tất cả" },
+                        { value: "needs_fix", label: "Cần chỉnh EB" },
+                        { value: "revision", label: "Revision" },
+                        { value: "rejected", label: "Từ chối" },
+                      ].map((opt) => (
+                        <Button
+                          key={opt.value}
+                          type="button"
+                          size="sm"
+                          variant={seriesStatusFilter === opt.value ? "default" : "outline"}
+                          className={cn(
+                            "h-8 rounded-lg text-xs",
+                            opt.value === "revision"
+                              && seriesStatusFilter !== opt.value
+                              && "border-amber-200/80 text-amber-800 dark:border-amber-500/30 dark:text-amber-200",
+                            opt.value === "rejected"
+                              && seriesStatusFilter !== opt.value
+                              && "border-rose-200/70 text-rose-800 dark:border-rose-500/30 dark:text-rose-200",
+                            opt.value === "needs_fix"
+                              && seriesStatusFilter !== opt.value
+                              && "border-amber-200/70 text-amber-900 dark:border-amber-500/30 dark:text-amber-100",
+                          )}
+                          onClick={() => setSeriesStatusFilter(opt.value)}
+                        >
+                          {opt.label}
+                          {opt.value === "needs_fix" && needsEbFixCount > 0
+                            ? ` (${needsEbFixCount})`
+                            : ""}
+                        </Button>
+                      ))}
+                    </div>
                     <DropdownMenu
                       open={teRevisionInboxOpen}
                       onOpenChange={setTeRevisionInboxOpen}
@@ -1750,21 +1946,38 @@ export default function Mangaka() {
                   </div>
                 </div>
 
-                {seriesList.length === 0 ? (
+                {filteredSeriesList.length === 0 ? (
                   <EmptyWorkspaceState
                     icon={BookOpen}
-                    title="Chưa có series nào"
-                    description="Đăng ký series đầu tiên để bắt đầu upload chapter và gửi cho Assistant."
-                    action={(
-                      <Button onClick={openAddSeriesModal}>
-                        <Plus className="size-4" />
-                        Đăng ký series
-                      </Button>
-                    )}
+                    title={
+                      seriesList.length === 0
+                        ? "Chưa có series nào"
+                        : "Không có series khớp bộ lọc"
+                    }
+                    description={
+                      seriesList.length === 0
+                        ? "Đăng ký series đầu tiên để bắt đầu upload chapter và gửi cho Assistant."
+                        : "Thử đổi bộ lọc trạng thái hoặc xem Tất cả."
+                    }
+                    action={
+                      seriesList.length === 0 ? (
+                        <Button onClick={openAddSeriesModal}>
+                          <Plus className="size-4" />
+                          Đăng ký series
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          onClick={() => setSeriesStatusFilter("all")}
+                        >
+                          Xem tất cả
+                        </Button>
+                      )
+                    }
                   />
                 ) : (
                   <div className="mk-series-grid grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                    {seriesList.map((s) => (
+                    {filteredSeriesList.map((s) => (
                       <SeriesCard
                         key={s.id}
                         series={s}
@@ -1891,9 +2104,16 @@ export default function Mangaka() {
                                 ? { label: 'Đã gửi ảnh', className: 'bg-emerald-100/90 text-emerald-800 hover:bg-emerald-100/90 dark:bg-emerald-500/20 dark:text-emerald-200' }
                                 : (STATUS_BADGE[c.status] ?? STATUS_BADGE.draft);
                               const debutGate = findSeriesDebutGate(seriesList, c);
-                              const debutSubmitAllowed = canSubmitMoreChaptersToTe(debutGate);
+                              const debutSubmitAllowed = canSubmitMoreChaptersToTe(
+                                debutGate,
+                                seriesMeta,
+                              );
                               const canSendTe =
                                 canMangakaSendToTe(c.apiStatus) && debutSubmitAllowed;
+                              const showQuickRevision = canShowQuickRevision(
+                                c.apiStatus,
+                                seriesMeta?.status,
+                              );
                               const pageCount = Math.max(
                                 Number(c.pages) || 0,
                                 Array.isArray(annot?.pages) ? annot.pages.length : 0,
@@ -2015,6 +2235,18 @@ export default function Mangaka() {
                                       </p>
                                     </div>
                                   ) : null}
+                                  {showQuickRevision ? (
+                                    <div className="border-t border-border/70 bg-sky-50/50 px-3 py-2.5 dark:bg-sky-500/5">
+                                      <Button
+                                        size="xs"
+                                        className="w-full bg-sky-600 text-white hover:bg-sky-700"
+                                        onClick={() => openQuickRevision(c, series)}
+                                      >
+                                        <Zap className="size-3" />
+                                        Sửa nhanh & gửi TE
+                                      </Button>
+                                    </div>
+                                  ) : null}
                                 </div>
                               );
                             })}
@@ -2037,6 +2269,7 @@ export default function Mangaka() {
                   seriesOptions={seriesList.map((s) => ({
                     id: s.id,
                     title: s.title,
+                    status: s.status ?? null,
                     needsFullDebutPipeline: !!s.needsFullDebutPipeline,
                   }))}
                   chapterNum={annotatorChapterNum}
@@ -2059,6 +2292,12 @@ export default function Mangaka() {
                   revisionMode={
                     Boolean(revisionChapterId)
                     && String(revisionChapterId) === String(annotatorActiveChapterId)
+                  }
+                  seriesStatus={annotateSeriesMeta?.status ?? null}
+                  onQuickRevision={handleQuickRevision}
+                  quickRevisionFocus={
+                    Boolean(quickRevisionFocusId)
+                    && String(quickRevisionFocusId) === String(annotatorActiveChapterId)
                   }
                 />
               </TabsContent>
@@ -2111,13 +2350,25 @@ export default function Mangaka() {
                       </p>
                       {(() => {
                         const gate = findSeriesDebutGate(seriesList, lastApprovedChapter);
-                        const allowSubmit = canSubmitMoreChaptersToTe(gate);
+                        const seriesMeta = seriesList.find(
+                          (s) =>
+                            s.title === lastApprovedChapter.series
+                            || String(s.id) === String(lastApprovedChapter.seriesId),
+                        ) ?? findSeriesForChapter(seriesList, lastApprovedChapter);
+                        const needsResubmitConfirm = isSeriesEbResubmitStatus(seriesMeta);
+                        const allowSubmit = canSubmitMoreChaptersToTe(gate, seriesMeta);
                         const lockedHint = allowSubmit
                           ? ""
-                          : (getDebutSubmitLockedMessage(gate)
+                          : (getDebutSubmitLockedMessage(gate, seriesMeta)
                             || "Cần hoàn thành xác nhận trước khi gửi");
                         return (
-                          <div className="mt-2 flex gap-2">
+                          <div className="mt-2 space-y-2">
+                            {needsResubmitConfirm ? (
+                              <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                                Series đang {seriesMeta?.status === "rejected" ? "bị từ chối" : "revision"} — gửi lại sẽ qua TE rồi EB.
+                              </p>
+                            ) : null}
+                            <div className="flex gap-2">
                             <Button
                               size="xs"
                               variant="outline"
@@ -2137,11 +2388,13 @@ export default function Mangaka() {
                                 Gửi {LABEL_TANTOU_EDITOR}
                               </Button>
                             </HoverHint>
+                            </div>
                           </div>
                         );
                       })()}
                       {!canSubmitMoreChaptersToTe(
                         findSeriesDebutGate(seriesList, lastApprovedChapter),
+                        findSeriesForChapter(seriesList, lastApprovedChapter),
                       ) ? (
                         <p className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
                           Đang khóa debut — chờ EB confirm-publish.
@@ -2157,10 +2410,16 @@ export default function Mangaka() {
                       te_id: submission?.te_id,
                     };
                     const gate = findSeriesDebutGate(seriesList, payload);
-                    const allowSubmit = canSubmitMoreChaptersToTe(gate);
+                    const seriesMeta = seriesList.find(
+                      (s) =>
+                        s.title === chapter.series
+                        || String(s.id) === String(chapter.seriesId),
+                    ) ?? findSeriesForChapter(seriesList, payload);
+                    const needsResubmitConfirm = isSeriesEbResubmitStatus(seriesMeta);
+                    const allowSubmit = canSubmitMoreChaptersToTe(gate, seriesMeta);
                     const lockedHint = allowSubmit
                       ? ""
-                      : (getDebutSubmitLockedMessage(gate)
+                      : (getDebutSubmitLockedMessage(gate, seriesMeta)
                         || "Cần hoàn thành xác nhận trước khi gửi");
                     return (
                     <div
@@ -2172,9 +2431,11 @@ export default function Mangaka() {
                           {chapter.series} · Ch. {chapter.num}
                         </p>
                         <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                          {allowSubmit
-                            ? `Sẵn sàng gửi ${LABEL_TANTOU_EDITOR}`
-                            : "Khóa debut — chờ confirm-publish"}
+                          {needsResubmitConfirm
+                            ? "Nộp lại sau EB — sẽ hỏi xác nhận khi gửi"
+                            : (allowSubmit
+                              ? `Sẵn sàng gửi ${LABEL_TANTOU_EDITOR}`
+                              : "Khóa debut — chờ confirm-publish")}
                         </p>
                       </div>
                       <HoverHint disabled={!allowSubmit} hint={lockedHint}>
@@ -2339,6 +2600,40 @@ export default function Mangaka() {
 
       <Footer />
 
+      <Dialog
+        open={Boolean(quickRevisionConfirm)}
+        onOpenChange={(open) => {
+          if (!open) setQuickRevisionConfirm(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Xác nhận Quick Revision</DialogTitle>
+            <DialogDescription className="whitespace-pre-line">
+              {quickRevisionConfirm?.message ?? ""}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setQuickRevisionConfirm(null)}
+            >
+              Huỷ
+            </Button>
+            <Button
+              onClick={async () => {
+                const payload = quickRevisionConfirm;
+                setQuickRevisionConfirm(null);
+                if (!payload) return;
+                await submitQuickRevision(payload);
+              }}
+            >
+              Gửi Quick Revision
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={Boolean(cardRevision)} onOpenChange={(o) => { if (!o) closeCardRevision() }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -2452,7 +2747,25 @@ export default function Mangaka() {
             >
               Huỷ
             </Button>
+            {(() => {
+              const seriesMeta = seriesList.find(
+                (s) =>
+                  s.title === teTargetChapter?.series
+                  || String(s.id) === String(teTargetChapter?.seriesId),
+              ) ?? findSeriesForChapter(seriesList, teTargetChapter);
+              const needsResubmitConfirm = isSeriesEbResubmitStatus(seriesMeta);
+              const gateOk = canSubmitMoreChaptersToTe(
+                findSeriesDebutGate(seriesList, teTargetChapter),
+                seriesMeta,
+              );
+              const submitDisabled = teSending || teLoading || !gateOk;
+              return (
             <div className="flex flex-wrap gap-2">
+              {needsResubmitConfirm ? (
+                <p className="w-full text-xs text-amber-700 dark:text-amber-300">
+                  Series đang {seriesMeta?.status === "rejected" ? "bị từ chối" : "revision"} — khi gửi sẽ hỏi xác nhận nộp lại qua TE → EB.
+                </p>
+              ) : null}
               <Button
                 variant="secondary"
                 disabled={!selectedTeId || teAssigning || teSending || teLoading}
@@ -2462,30 +2775,20 @@ export default function Mangaka() {
               </Button>
               <Button
                 variant="outline"
-                disabled={
-                  teSending
-                  || teLoading
-                  || !canSubmitMoreChaptersToTe(
-                    findSeriesDebutGate(seriesList, teTargetChapter),
-                  )
-                }
+                disabled={submitDisabled}
                 onClick={() => void handleSubmitToTe(null)}
               >
                 {teSending ? "Đang gửi..." : "Gửi tất cả TE"}
               </Button>
               <Button
-                disabled={
-                  teSending
-                  || teLoading
-                  || !canSubmitMoreChaptersToTe(
-                    findSeriesDebutGate(seriesList, teTargetChapter),
-                  )
-                }
+                disabled={submitDisabled}
                 onClick={() => void handleSubmitToTe(selectedTeId || undefined)}
               >
                 {teSending ? "Đang gửi..." : selectedTeId ? "Gửi cho TE đã chọn" : "Gửi cho TE"}
               </Button>
             </div>
+              );
+            })()}
           </DialogFooter>
         </DialogContent>
       </Dialog>

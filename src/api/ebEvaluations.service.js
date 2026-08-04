@@ -258,6 +258,22 @@ export const ebEvaluationsService = {
   },
 
   /**
+   * GET /eb-evaluations/:evaluationId — chi tiết evaluation (notes / member_scores).
+   * Fallback GET .../history-detail nếu route gốc chưa có.
+   */
+  getById(evaluationId) {
+    const id = String(evaluationId ?? '').trim()
+    if (!id) return Promise.reject(new Error('evaluationId required'))
+    return http
+      .get(`/eb-evaluations/${id}`)
+      .then(unwrapData)
+      .catch(async (err) => {
+        if (err?.response?.status !== 404) throw err
+        return this.getHistoryDetail(id)
+      })
+  },
+
+  /**
    * GET /eb-evaluations/:evaluationId/history-detail
    */
   getHistoryDetail(evaluationId) {

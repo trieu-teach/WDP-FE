@@ -16,7 +16,7 @@
 }
 
 .ws-hero--mangaka.mk-hero-slideshow {
-  min-height: clamp(18rem, 36vw, 26rem);
+  min-height: clamp(16rem, 32vw, 22rem);
   background: #141210;
 }
 
@@ -25,8 +25,6 @@
   min-height: inherit;
   flex-direction: column;
   justify-content: flex-end;
-  padding-top: clamp(2.5rem, 6vw, 4.5rem);
-  padding-bottom: clamp(1.75rem, 4vw, 3rem);
 }
 
 .mk-hero-slides {
@@ -50,19 +48,6 @@
   opacity: 1;
 }
 
-.mk-hero-slides__veil {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    95deg,
-    rgba(12, 10, 12, 0.78) 0%,
-    rgba(12, 10, 12, 0.48) 28%,
-    rgba(12, 10, 12, 0.18) 55%,
-    rgba(12, 10, 12, 0.1) 100%
-  );
-  pointer-events: none;
-}
-
 .ws-hero--mangaka.mk-hero-slideshow h1,
 .ws-hero--mangaka.mk-hero-slideshow p {
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55), 0 4px 18px rgba(0, 0, 0, 0.45);
@@ -70,16 +55,7 @@
 
 @media (max-width: 767px) {
   .ws-hero--mangaka.mk-hero-slideshow {
-    min-height: 16rem;
-  }
-
-  .mk-hero-slides__veil {
-    background: linear-gradient(
-      180deg,
-      rgba(12, 10, 12, 0.35) 0%,
-      rgba(12, 10, 12, 0.5) 40%,
-      rgba(12, 10, 12, 0.8) 100%
-    );
+    min-height: 15rem;
   }
 
   .mk-hero-slides__img {

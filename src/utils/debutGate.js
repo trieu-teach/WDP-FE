@@ -8,6 +8,10 @@
  *   max_submitted_chapters_allowed, current_submitted_chapter_count,
  *   current_chapter_count, reasons
  * }
+ *
+ * BE (debutGate.canSubmitChapterToTE): series.status rejected|revision
+ * → allowed (RESUBMIT_AFTER_EB_REJECTION). FE mirror để không chặn khi
+ * payload gate cũ vẫn locked.
  */
 
 export function apiDebutGateToUi(raw) {
@@ -25,7 +29,20 @@ export function apiDebutGateToUi(raw) {
     ) || 0,
     currentChapterCount: Number(raw.current_chapter_count ?? 0) || 0,
     reasons: Array.isArray(raw.reasons) ? raw.reasons.map(String) : [],
+    code: raw.code != null ? String(raw.code) : null,
   }
+}
+
+/** Series đang rejected/revision → được nộp lại TE (khớp BE RESUBMIT_AFTER_EB_REJECTION). */
+export function isDebutResubmitAfterEbRejection(seriesOrStatus) {
+  const status = typeof seriesOrStatus === 'string'
+    ? seriesOrStatus
+    : (seriesOrStatus?.status
+      ?? seriesOrStatus?.apiStatus
+      ?? seriesOrStatus?.seriesApiStatus
+      ?? '')
+  const s = String(status ?? '').toLowerCase()
+  return s === 'rejected' || s === 'revision'
 }
 
 /** Tạo chapter luôn được phép theo gate mới (fallback true nếu thiếu gate). */
@@ -37,13 +54,27 @@ export function canCreateChapterWithDebutGate(debutGate) {
 /**
  * Submit thêm chapter sang TE chỉ khi gate mở.
  * `can_submit_more_chapters === false` → khóa (đã có ≥1 chapter đã submit).
+ * Ngoại lệ: series rejected/revision → luôn cho resubmit (BE đã mở).
+ *
+ * @param {object|null} debutGate
+ * @param {object|string|null} [seriesOrStatus] — series UI hoặc status string
  */
-export function canSubmitMoreChaptersToTe(debutGate) {
+export function canSubmitMoreChaptersToTe(debutGate, seriesOrStatus = null) {
+  if (isDebutResubmitAfterEbRejection(seriesOrStatus)) return true
+  if (
+    debutGate?.code === 'RESUBMIT_AFTER_EB_REJECTION'
+    || debutGate?.reasons?.some((r) => /RESUBMIT_AFTER_EB_REJECTION/i.test(r))
+  ) {
+    return true
+  }
   if (!debutGate) return true
   return debutGate.canSubmitMoreChapters !== false
 }
 
-export function getDebutSubmitLockedMessage(debutGate) {
+export function getDebutSubmitLockedMessage(debutGate, seriesOrStatus = null) {
+  if (isDebutResubmitAfterEbRejection(seriesOrStatus)) {
+    return ''
+  }
   const count = debutGate?.currentSubmittedChapterCount ?? 1
   const max = debutGate?.maxSubmittedChaptersAllowed ?? 1
   return (
@@ -55,6 +86,8 @@ export function getDebutSubmitLockedMessage(debutGate) {
 export function isDebutSubmitLockedError(err) {
   const code = String(err?.response?.data?.code ?? err?.code ?? '').trim()
   if (code === 'DEBUT_SUBMIT_LOCKED' || code === 'DEBUT_GATE_LOCKED') return true
+  // BE mở resubmit — không coi là lỗi khóa
+  if (code === 'RESUBMIT_AFTER_EB_REJECTION') return false
   const status = err?.response?.status
   const msg = String(err?.response?.data?.message ?? err?.message ?? '')
   return status === 409 && /debut|submit.?lock|gate/i.test(msg)
@@ -72,6 +105,22 @@ export function findSeriesDebutGate(seriesList, chapter) {
   if (title) {
     const byTitle = list.find((s) => String(s.title) === title)
     if (byTitle?.debutGate) return byTitle.debutGate
+  }
+  return null
+}
+
+/** Series meta gắn chapter — dùng cho canSubmitMoreChaptersToTe(..., series). */
+export function findSeriesForChapter(seriesList, chapter) {
+  const list = Array.isArray(seriesList) ? seriesList : []
+  if (!list.length || !chapter) return null
+  const seriesId = chapter.seriesId ?? chapter.series_id ?? null
+  if (seriesId) {
+    const byId = list.find((s) => String(s.id) === String(seriesId))
+    if (byId) return byId
+  }
+  const title = String(chapter.series ?? chapter.seriesTitle ?? '').trim()
+  if (title) {
+    return list.find((s) => String(s.title) === title) ?? null
   }
   return null
 }

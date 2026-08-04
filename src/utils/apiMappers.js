@@ -1,4 +1,5 @@
 import { resolveMediaUrl } from '@/api/http.js'
+import { resolveEntityId } from '@/utils/notificationTarget.js'
 import { apiDebutGateToUi } from './debutGate.js'
 import {
   normalizeSeries,
@@ -14,12 +15,18 @@ const API_STATUS_TO_UI = {
   pending_TE: 'tantou',
   TE_revision: 'assistant',
   pending_EB: 'review',
-  EB_revision: 'assistant',
+  EB_revision: 'revision',
+  revision: 'revision',
+  rejected: 'rejected',
+  approved: 'approved',
+  approved_by_EB: 'approved',
+  approved_by_TE: 'review',
   assigned: 'assistant',
   in_progress: 'assistant',
   submitted: 'review',
   review: 'review',
   published: 'done',
+  cancelled: 'rejected',
 }
 
 const UI_STATUS_TO_API = {
@@ -99,6 +106,26 @@ export function apiSeriesToUi(raw, index = 0) {
     age_rating: s.age_rating ?? s.ageRating ?? 'All ages',
     debutGate: apiDebutGateToUi(s.debut_gate ?? s.debutGate),
     deletedAt: s.deleted_at ?? s.deletedAt ?? null,
+    apiStatus: s.status ?? null,
+    ebEvaluationId: resolveEntityId(
+      s.eb_evaluation_id
+      ?? s.ebEvaluationId
+      ?? s.latest_evaluation_id
+      ?? s.latest_evaluation?._id
+      ?? s.latest_evaluation?.id
+      ?? s.evaluation?._id
+      ?? s.evaluation?.id,
+    ),
+    ebEvaluationNotes: String(
+      s.eb_evaluation_notes
+      ?? s.latest_evaluation?.notes
+      ?? s.latest_evaluation?.quick_notes
+      ?? s.latest_evaluation?.quickNotes
+      ?? s.evaluation?.notes
+      ?? s.evaluation?.quick_notes
+      ?? s.evaluation?.quickNotes
+      ?? '',
+    ).trim() || null,
   })
 }
 
@@ -794,6 +821,40 @@ export const MANGAKA_TE_SENDABLE_STATUSES = ['approved_by_mangaka', 'TE_revision
 
 export function canMangakaSendToTe(apiStatus) {
   return MANGAKA_TE_SENDABLE_STATUSES.includes(String(apiStatus ?? ''))
+}
+
+/** Chapter statuses cho phép Quick Revision (sửa nhanh & gửi TE). */
+export const QUICK_REVISION_CHAPTER_STATUSES = [
+  'EB_revision',
+  'TE_revision',
+  'revision_requested',
+]
+
+/** Series statuses cho phép Quick Revision (kể cả khi chapter chưa revision, vd. pending_EB). */
+export const QUICK_REVISION_SERIES_STATUSES = ['rejected', 'revision']
+
+export const QUICK_REVISION_MAX_PAGES = 10
+
+/**
+ * Hiện nút Quick Revision — khớp ma trận BE:
+ * - Chapter ∈ EB_revision | TE_revision | revision_requested → ✅ (series bất kỳ)
+ * - Series ∈ rejected | revision → ✅ (chapter bất kỳ, gồm pending_EB)
+ */
+export function canShowQuickRevision(chapterApiStatus, seriesUiStatus) {
+  const normalizeChapterStatus = (value) =>
+    String(value ?? '').trim().toUpperCase().replace(/-/g, '_')
+
+  const ch = normalizeChapterStatus(chapterApiStatus)
+  if (
+    QUICK_REVISION_CHAPTER_STATUSES.some(
+      (status) => normalizeChapterStatus(status) === ch,
+    )
+  ) {
+    return true
+  }
+
+  const series = String(seriesUiStatus ?? '').trim().toLowerCase()
+  return QUICK_REVISION_SERIES_STATUSES.includes(series)
 }
 
 /**

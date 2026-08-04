@@ -107,4 +107,49 @@ export const submissionsService = {
         message: res?.message ?? '',
       }))
   },
+
+  /**
+   * POST /submissions/chapters/:chapterId/quick-revision
+   * Mangaka quick-revision: sửa/truyền ảnh thay thế, thêm trang mới, xóa trang.
+   * @param {string} chapterId
+   * @param {{
+   *  pageIds?: string[],
+   *  files?: File[],
+   *  newPageCount?: number,
+   *  newPages?: File[],
+   *  deletedPageIds?: string[],
+   * }} payload
+   */
+  quickRevision(chapterId, {
+    pageIds = [],
+    files = [],
+    newPageCount = 0,
+    newPages = [],
+    deletedPageIds = [],
+  }) {
+    const fd = new FormData()
+    fd.append('page_ids', JSON.stringify(Array.isArray(pageIds) ? pageIds : []))
+    for (const file of files) {
+      fd.append('pages', file)
+    }
+    if (Number(newPageCount) > 0) {
+      fd.append('new_page_count', String(Number(newPageCount)))
+    }
+    for (const file of (Array.isArray(newPages) ? newPages : [])) {
+      fd.append('new_pages', file)
+    }
+    if (Array.isArray(deletedPageIds) && deletedPageIds.length > 0) {
+      fd.append('deleted_page_ids', JSON.stringify(deletedPageIds))
+    }
+    return http
+      .post(`/submissions/chapters/${chapterId}/quick-revision`, fd)
+      .then((res) => {
+        const raw = res?.data != null && res?.success !== undefined ? res : res
+        return {
+          data: unwrap(res),
+          message: raw?.message ?? res?.message ?? '',
+          success: raw?.success ?? res?.success ?? true,
+        }
+      })
+  },
 }

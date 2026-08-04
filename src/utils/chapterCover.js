@@ -3,6 +3,19 @@ import { resolveMediaUrl } from '@/api/http.js'
 export const CHAPTER_COVER_ACCEPT = 'image/jpeg,image/jpg,image/png,image/webp'
 export const CHAPTER_COVER_MAX_BYTES = 10 * 1024 * 1024
 
+/** MongoDB ObjectId hợp lệ cho page_id (quick-revision, notes API). */
+export function isValidPageObjectId(id) {
+  return typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id)
+}
+
+/** Lấy page_id từ page UI — null nếu không phải ObjectId 24 ký tự. */
+export function resolvePageObjectId(page) {
+  const raw = page?.id ?? page?._id ?? null
+  if (raw == null) return null
+  const id = String(raw).trim()
+  return isValidPageObjectId(id) ? id : null
+}
+
 /** Chuỗi fallback ảnh bìa chapter theo contract BE. */
 export function resolveChapterCoverDisplay({
   coverImageUrl,

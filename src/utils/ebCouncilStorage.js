@@ -139,6 +139,29 @@ export function saveCouncilMemberAssessment(seriesTitle, memberId, payload) {
   return current
 }
 
+/** Meta phiên chấm (content_levels, rubric) — dùng trang Quyết định đánh giá. */
+export function saveCouncilSessionMeta(seriesKey, meta = {}) {
+  const key = String(seriesKey ?? '').trim()
+  if (!key) return null
+  const all = readAll()
+  const current = all[key] ?? { members: {}, roster: [] }
+  current.sessionMeta = {
+    ...(current.sessionMeta ?? {}),
+    ...meta,
+    updatedAt: new Date().toISOString(),
+  }
+  all[key] = current
+  writeAll(all)
+  return current.sessionMeta
+}
+
+export function readCouncilSessionMeta(seriesKey) {
+  const record = readCouncilSeriesScores(seriesKey)
+  return record?.sessionMeta && typeof record.sessionMeta === 'object'
+    ? record.sessionMeta
+    : null
+}
+
 export function clampCouncilScore(value, max = 5) {
   const parsed = Number.parseFloat(value)
   if (Number.isNaN(parsed)) return 0

@@ -56,17 +56,11 @@ import {
   EB_SCORE_CRITERIA,
   EB_SCORE_MAX,
   EB_COUNCIL_MIN_FOR_PUBLISH,
-  EB_COUNCIL_MAX_FOR_EVALUATE,
-  EB_EVALUATION_RESULTS,
-  EB_PUBLICATION_SCHEDULES,
   buildEmptyEbComments,
   buildEmptyEbScores,
   buildMemberScoresPayload,
   clampEbScore,
-  formatEbClassification,
-  getEbAgeSafetyFailFromError,
   getEbClassificationStyle,
-  getEbDebutGateLockFromError,
   isEbFirstReviewSeriesStatus,
   mapEbChapterDetailResponse,
   mapEbChapterPendingItem,
@@ -76,8 +70,8 @@ import {
   normalizeEbEvaluateResponse,
   normalizeMemberCommentsMap,
   normalizeMemberScoreMap,
+  resolveEbIsFirstReview,
   validateEbScore,
-  validateMemberScoresPayload,
 } from "@/utils/ebEvaluationMappers.js";
 import {
   EB_CONTENT_LEVEL_FIELDS,
@@ -101,6 +95,7 @@ import {
   readCouncilRoster,
   readCouncilSeriesScores,
   saveCouncilMemberAssessment,
+  saveCouncilSessionMeta,
 } from "@/utils/ebCouncilStorage.js";
 import "./Eb.css";
 
@@ -599,7 +594,6 @@ export default function Eb() {
   const [chapterPages, setChapterPages] = useState([]);
   const [pagesLoading, setPagesLoading] = useState(false);
   const [apiLoading, setApiLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
   const [selectedChapterId, setSelectedChapterId] = useState("");
   const [activeMemberId, setActiveMemberId] = useState("");
   const [newCouncilMemberName, setNewCouncilMemberName] = useState("");
@@ -612,10 +606,7 @@ export default function Eb() {
   );
   const [overallComment, setOverallComment] = useState("");
   const [memberNotes, setMemberNotes] = useState("");
-  const [evaluationNotes, setEvaluationNotes] = useState("");
   const [lastEvaluation, setLastEvaluation] = useState(null);
-  /** true chỉ sau Nộp kết quả chấm thành công (hoặc BE đã có evaluation history). */
-  const [scoresSubmitted, setScoresSubmitted] = useState(false);
   const [scoreErrors, setScoreErrors] = useState(() =>
     buildEmptyScoreErrors(DEFAULT_RUBRIC.coreKeys),
   );
@@ -642,9 +633,6 @@ export default function Eb() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewClassification, setPreviewClassification] = useState(null);
   const [seriesContext, setSeriesContext] = useState(null);
-  const [evaluationResult, setEvaluationResult] = useState("approved");
-  const [publicationSchedule, setPublicationSchedule] = useState("weekly");
-  const [quickNotes, setQuickNotes] = useState("");
   const [debutGateLock, setDebutGateLock] = useState(null);
   const refresh = useCallback(() => bumpCouncil((n) => n + 1), []);
 
@@ -796,9 +784,6 @@ export default function Eb() {
           classification: mapped.classification,
           classification_text: mapped.classificationText,
         })
-        if (seriesRaw.publication_schedule) {
-          setPublicationSchedule(seriesRaw.publication_schedule)
-        }
         if (latestEval?.content_levels) {
           setContentLevels(normalizeContentLevels(latestEval.content_levels))
         }
@@ -814,11 +799,9 @@ export default function Eb() {
             classification_text: normalized.classificationText,
             age_safety: normalized.ageSafety,
           })
-          setScoresSubmitted(true)
           if (normalized.ageSafety) setAgeSafety(normalized.ageSafety)
         } else {
           setLastEvaluation(null)
-          setScoresSubmitted(false)
         }
         return mapped
       }
@@ -1034,11 +1017,9 @@ export default function Eb() {
   useEffect(() => {
     if (!councilKey) {
       setActiveMemberId("");
-      setScoresSubmitted(false);
       setLastEvaluation(null);
       return;
     }
-    setScoresSubmitted(false);
     setLastEvaluation(null);
   }, [councilKey]);
 
@@ -1141,13 +1122,23 @@ export default function Eb() {
     const keys = scoreFields.map((field) => field.key);
     return buildCouncilAggregate(councilRecord, keys, councilRoster);
   }, [councilRecord, scoreFields, councilRoster]);
-  const isFirstReview = useMemo(() => {
-    if (seriesContext?.firstReview === false) return false;
-    if (seriesContext?.status) {
-      return isEbFirstReviewSeriesStatus(seriesContext.status);
-    }
-    return true;
-  }, [seriesContext]);
+  const isFirstReview = useMemo(
+    () =>
+      resolveEbIsFirstReview({
+        seriesStatus: seriesContext?.status,
+        firstReviewFlag:
+          seriesContext?.firstReview === true
+            ? true
+            : seriesContext?.firstReview === false
+              ? false
+              : null,
+        hasPriorEvaluation: Boolean(
+          lastEvaluation?.result
+          || lastEvaluation?.council_average != null,
+        ),
+      }),
+    [seriesContext, lastEvaluation],
+  );
 
   const councilClassification = getClassification(
     previewCouncilAvg ?? councilAggregate.councilAverage,
@@ -1170,6 +1161,9 @@ export default function Eb() {
     rosterCount > 0 && savedScoredCount >= rosterCount;
   const canSubmitScores =
     allMembersDraftSaved && rosterCount >= EB_COUNCIL_MIN_FOR_PUBLISH;
+  const canOpenDecision = isFirstReview
+    ? canSubmitScores
+    : Boolean(activeChapter?.id);
   const unscoredMemberNames = useMemo(
     () =>
       councilAggregate.memberRows
@@ -1177,10 +1171,6 @@ export default function Eb() {
         .map((row) => row.name)
         .filter(Boolean),
     [councilAggregate.memberRows],
-  );
-  // Lưu nháp đủ tất cả thành viên → Nộp được; Nộp xong → mới Xác nhận lịch
-  const canConfirmPublish = Boolean(
-    activeChapter?.id && canSubmitScores && scoresSubmitted,
   );
 
   // Live preview weighted average từ BE khi đã lưu đủ draft
@@ -1385,242 +1375,6 @@ export default function Eb() {
     );
   }
 
-  function handleConfirmPublishClick() {
-    if (!allMembersDraftSaved || rosterCount < EB_COUNCIL_MIN_FOR_PUBLISH) {
-      warnMissingCouncilDrafts();
-      return;
-    }
-    if (!scoresSubmitted) {
-      toast.error(
-        "Bạn chưa nộp kết quả chấm. Hãy bấm Nộp kết quả chấm trước khi xác nhận lịch phát hành.",
-      );
-      return;
-    }
-    if (!activeChapter?.id) return;
-    navigate(`/eb/chapter/${encodeURIComponent(activeChapter.id)}/publish`);
-  }
-
-  async function handleSubmitScores() {
-    if (debutGateLock) {
-      toast.error(debutGateLock.message);
-      return;
-    }
-
-    if (!activeChapter?.id && !activeSeriesId) {
-      toast.error("Chưa có series/chapter trong hàng chờ để chấm điểm.");
-      return;
-    }
-
-    if (!evaluationResult) {
-      toast.error("Chọn kết quả đánh giá (approved / revision / rejected).");
-      return;
-    }
-
-    if (evaluationResult === "approved" && !String(publicationSchedule || "").trim()) {
-      toast.error("Khi duyệt (approved) bắt buộc chọn tần suất phát hành.");
-      return;
-    }
-
-    // Quick decision — series đã chấm trước đó
-    if (!isFirstReview) {
-      if (!activeSeriesId) {
-        toast.error("Thiếu seriesId để gửi quick decision.");
-        return;
-      }
-      setSubmitting(true);
-      try {
-        const payload = {
-          quick_decision: evaluationResult,
-          result: evaluationResult,
-          ...(quickNotes.trim() ? { quick_notes: quickNotes.trim() } : {}),
-          ...(evaluationNotes.trim() ? { notes: evaluationNotes.trim() } : {}),
-          ...(evaluationResult === "approved"
-            ? { publication_schedule: publicationSchedule }
-            : {}),
-        };
-        const res = await ebEvaluationsService.evaluateSeries(activeSeriesId, payload);
-        const normalized = normalizeEbEvaluateResponse(res);
-        setLastEvaluation({
-          ...(normalized.evaluation ?? {}),
-          council_average: normalized.councilAverage,
-          classification: normalized.classification,
-          classification_text: normalized.classificationText,
-        });
-        setScoresSubmitted(true);
-        toast.success(
-          normalized.message
-          || `Đã gửi quick decision: ${evaluationResult}.`,
-        );
-        void loadPending({ silent: true });
-        refresh();
-      } catch (err) {
-        toast.error(getApiErrorMessage(err, "Không gửi được quick decision."));
-      } finally {
-        setSubmitting(false);
-      }
-      return;
-    }
-
-    if (!councilRoster.length) {
-      toast.error("Thêm ít nhất một thành viên Hội đồng trước khi gửi đánh giá.");
-      return;
-    }
-
-    if (!canSubmitScores) {
-      warnMissingCouncilDrafts();
-      return;
-    }
-
-    if (rosterCount > EB_COUNCIL_MAX_FOR_EVALUATE) {
-      toast.error(`Tối đa ${EB_COUNCIL_MAX_FOR_EVALUATE} thành viên Hội đồng mỗi lần chấm.`);
-      return;
-    }
-
-    const memberScores = buildMemberScoresDraft();
-    const payloadError = validateMemberScoresPayload(
-      memberScores,
-      rosterCount,
-      {
-        scoreKeys: coreScoreKeys,
-        criteria: scoreFields,
-        extensionKeys: hasExtension ? extensionKeys : [],
-        minCount: EB_COUNCIL_MIN_FOR_PUBLISH,
-        maxCount: EB_COUNCIL_MAX_FOR_EVALUATE,
-      },
-    );
-    if (payloadError) {
-      toast.error(payloadError);
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      const safety = await runAgeSafetyCheck();
-      if (safety && !safety.passed) {
-        toast.error(
-          safety.violations?.[0]?.message
-          || "Age safety không đạt — không thể nộp đánh giá.",
-        );
-        return;
-      }
-
-      const payload = {
-        result: evaluationResult,
-        member_scores: memberScores,
-        content_levels: contentLevels,
-        // Chỉ gửi rubric_id khi EB override từ alternatives — mặc định BE tự derive
-        ...(rubricOverrideId
-          ? { rubric_id: rubricOverrideId }
-          : {}),
-        ...(evaluationNotes.trim() ? { notes: evaluationNotes.trim() } : {}),
-        ...(evaluationResult === "approved"
-          ? { publication_schedule: publicationSchedule }
-          : {}),
-      };
-
-      // First review: ưu tiên series-level; chapter-level khi không có seriesId
-      let res;
-      try {
-        if (activeSeriesId) {
-          res = await ebEvaluationsService.evaluateSeries(activeSeriesId, payload);
-        } else {
-          res = await ebEvaluationsService.evaluateChapter(activeChapter.id, payload);
-        }
-      } catch (primaryErr) {
-        const gate = getEbDebutGateLockFromError(primaryErr);
-        if (gate) {
-          setDebutGateLock(gate);
-          toast.error(gate.message);
-          return;
-        }
-        if (
-          activeSeriesId
-          && primaryErr?.response?.status === 404
-          && activeChapter?.id
-        ) {
-          res = await ebEvaluationsService.evaluateChapter(
-            activeChapter.id,
-            payload,
-          );
-        } else {
-          throw primaryErr;
-        }
-      }
-
-      const normalized = normalizeEbEvaluateResponse(res);
-      if (normalized.ageSafety && !normalized.ageSafety.passed) {
-        setAgeSafety(normalized.ageSafety);
-        toast.error("Age safety không đạt — BE từ chối lưu đánh giá.");
-        return;
-      }
-      if (normalized.ageSafety) setAgeSafety(normalized.ageSafety);
-      if (normalized.councilAverage != null) {
-        setPreviewCouncilAvg(Number(normalized.councilAverage));
-      }
-      if (normalized.classification) {
-        setPreviewClassification(normalized.classification);
-      }
-
-      const evaluation = {
-        ...(normalized.evaluation ?? {}),
-        council_average: normalized.councilAverage,
-        classification: normalized.classification,
-        classification_text: normalized.classificationText,
-        age_safety: normalized.ageSafety,
-        result: evaluationResult,
-      };
-      setLastEvaluation(evaluation);
-      setScoresSubmitted(true);
-      setPinnedChapter((current) => {
-        const base =
-          current?.id === activeChapter?.id ? current : activeChapter;
-        if (!base) return current;
-        return {
-          ...base,
-          councilAverage: normalized.councilAverage ?? base?.councilAverage ?? null,
-          classification: normalized.classification ?? base?.classification ?? null,
-          classificationText:
-            normalized.classificationText || base?.classificationText || "",
-        };
-      });
-      if (activeChapter?.id) {
-        setSelectedChapterId(activeChapter.id);
-      }
-      const classificationLabel = formatEbClassification(evaluation);
-      const councilAvg = normalized.councilAverage;
-      toast.success(
-        normalized.message
-        || `Đã gửi điểm Hội đồng · ${evaluationResult}${classificationLabel ? ` · ${classificationLabel}` : ""}${councilAvg != null ? ` · ĐTB ${Number(councilAvg).toFixed(1)}` : ""}.`,
-      );
-      if (evaluationResult === "approved") {
-        toast.message(
-          "Tiếp theo: Confirm-publish để mở debut gate. Series chưa published ngay — job sẽ publish khi tới lịch.",
-        );
-      }
-      void loadPending({ silent: true });
-      refresh();
-    } catch (err) {
-      const gate = getEbDebutGateLockFromError(err);
-      if (gate) {
-        setDebutGateLock(gate);
-        toast.error(gate.message);
-        return;
-      }
-      const apiSafety = getEbAgeSafetyFailFromError(err);
-      if (apiSafety) {
-        setAgeSafety(mapAgeSafetyResponse({ age_safety: apiSafety }));
-        toast.error(
-          err?.response?.data?.message
-          || "AGE_SAFETY_FAIL — nội dung vượt mức cho phép theo age rating.",
-        );
-        return;
-      }
-      toast.error(getApiErrorMessage(err, "Không gửi được điểm đánh giá."));
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
   async function handleSaveAssessment() {
     if (!activeChapter?.id) {
       toast.error("Chưa có chapter trong hàng chờ để chấm điểm.");
@@ -1678,6 +1432,12 @@ export default function Eb() {
       rubricId: selectedRubric.id,
     });
 
+    saveCouncilSessionMeta(councilKey, {
+      contentLevels,
+      rubricOverrideId: rubricOverrideId || null,
+      suggestedRubricId: suggestedRubricId || null,
+    });
+
     const updatedRecord = readCouncilSeriesScores(councilKey);
     const keys = scoreFields.map((field) => field.key);
     const aggregate = buildCouncilAggregate(updatedRecord, keys, councilRoster);
@@ -1726,10 +1486,16 @@ export default function Eb() {
 
     refresh();
     toast.success(
-      `Đã lưu nháp ${activeMember?.name ?? "thành viên"} (${aggregate.scoredCount}/${councilRoster.length || 0}). ĐTB chính thức lấy từ BE khi Preview/Nộp.`,
+      `Đã lưu nháp ${activeMember?.name ?? "thành viên"} (${aggregate.scoredCount}/${councilRoster.length || 0}).`,
     );
     if (aggregate.scoredCount >= rosterCount && rosterCount >= EB_COUNCIL_MIN_FOR_PUBLISH) {
       void runPreviewCouncilAverage({ silent: true });
+      if (activeChapter?.id) {
+        toast.message("Hội đồng đã lưu nháp đủ — chuyển sang quyết định đánh giá.");
+        navigate(
+          `/eb/chapter/${encodeURIComponent(activeChapter.id)}/decision`,
+        );
+      }
     }
   }
 
@@ -1990,7 +1756,6 @@ export default function Eb() {
                             setRubricOverrideId(value);
                             setSelectedRubricId(value);
                           }
-                          setScoresSubmitted(false);
                         }}
                       >
                         <SelectTrigger
@@ -2213,10 +1978,27 @@ export default function Eb() {
               </div>
 
               <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
-                <div className="mb-4 flex items-center justify-between gap-3 border-b border-gray-100 pb-3">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-700">
-                    ĐTB Hội đồng
-                  </p>
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-gray-700">
+                      Tiến độ hội đồng
+                    </p>
+                    <p className="mt-1 text-sm text-gray-600">
+                      Đã lưu nháp{" "}
+                      <strong className="tabular-nums text-gray-900">
+                        {savedScoredCount}/{rosterCount || 0}
+                      </strong>
+                      {activeMember ? (
+                        <>
+                          {" "}
+                          · đang nhập:{" "}
+                          <span className="font-medium text-gray-800">
+                            {activeMember.name}
+                          </span>
+                        </>
+                      ) : null}
+                    </p>
+                  </div>
                   <Badge
                     variant="outline"
                     className={cn(
@@ -2228,208 +2010,48 @@ export default function Eb() {
                   </Badge>
                 </div>
 
-                <div className="flex flex-wrap items-end justify-between gap-3">
-                  <div>
-                    <div className="flex items-end gap-2">
-                      <span
-                        className={cn(
-                          "text-3xl font-extrabold tracking-tight tabular-nums",
-                          (previewCouncilAvg != null || councilAggregate.scoredCount > 0)
-                            ? "text-gray-900"
-                            : "text-gray-300",
-                        )}
-                      >
-                        {previewCouncilAvg != null
-                          ? Number(previewCouncilAvg).toFixed(2)
-                          : (councilAggregate.scoredCount > 0
-                            ? councilAggregate.councilAverage.toFixed(1)
-                            : "—")}
-                      </span>
-                      <span className="mb-1 text-sm font-medium text-gray-400">
-                        / {SCORE_MAX}.0
-                      </span>
-                    </div>
-                    <p className="mt-1.5 text-xs text-gray-500">
-                      Đã lưu nháp{" "}
-                      <span className="font-medium text-gray-700">
-                        {councilAggregate.scoredCount}/{councilRoster.length || 0}
-                      </span>
-                      {" "}thành viên
-                      {activeMember ? (
-                        <>
-                          {" "}
-                          · đang nhập:{" "}
-                          <span className="font-medium text-gray-700">
-                            {activeMember.name}
-                          </span>
-                        </>
-                      ) : null}
+                {canOpenDecision ? (
+                  <div className="space-y-2 rounded-xl border border-emerald-100 bg-emerald-50/50 p-3">
+                    <p className="text-xs text-emerald-800">
+                      {isFirstReview
+                        ? "Hội đồng đã lưu nháp đủ. Tiếp tục trang quyết định để chọn kết quả và xác nhận lịch."
+                        : "Series đã chấm trước đó — mở Quick decision (không cần nhập lại điểm hội đồng)."}
                     </p>
-                    {councilClassification.code && councilClassification.note ? (
-                      <p className="mt-1 text-[11px] text-gray-400">
-                        {councilClassification.note}
-                      </p>
-                    ) : null}
+                    <Button
+                      type="button"
+                      className="w-full gap-2 bg-gray-900 text-white hover:bg-black"
+                      onClick={() => {
+                        if (!activeChapter?.id) return;
+                        saveCouncilSessionMeta(councilKey, {
+                          contentLevels,
+                          rubricOverrideId: rubricOverrideId || null,
+                          suggestedRubricId: suggestedRubricId || null,
+                        });
+                        navigate(
+                          `/eb/chapter/${encodeURIComponent(activeChapter.id)}/decision`,
+                        );
+                      }}
+                    >
+                      {isFirstReview
+                        ? "Tiếp tục quyết định đánh giá"
+                        : "Mở quyết định nhanh"}
+                      <ArrowRight className="size-4" />
+                    </Button>
                   </div>
-                  <button
-                    type="button"
-                    disabled={previewLoading || !canSubmitScores}
-                    onClick={() => void runPreviewCouncilAverage()}
-                    className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-2xs transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {previewLoading ? "Đang tính…" : "Cập nhật ĐTB"}
-                  </button>
-                </div>
-
-                <div className="mt-5 space-y-4 rounded-xl border border-gray-100 bg-gray-50/50 p-4">
-                  <h4 className="text-sm font-semibold text-gray-900">
-                    {isFirstReview ? "Quyết định đánh giá" : "Quyết định nhanh"}
-                  </h4>
-
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="eb-evaluation-result" className="text-xs text-gray-600">
-                        Kết quả
-                      </Label>
-                      <Select
-                        value={evaluationResult}
-                        onValueChange={setEvaluationResult}
-                      >
-                        <SelectTrigger
-                          id="eb-evaluation-result"
-                          className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm shadow-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
-                        >
-                          <SelectValue placeholder="Chọn kết quả" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {EB_EVALUATION_RESULTS.map((item) => (
-                            <SelectItem key={item.value} value={item.value}>
-                              {item.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {evaluationResult === "approved" ? (
-                      <div className="space-y-1.5">
-                        <Label htmlFor="eb-eval-schedule" className="text-xs text-gray-600">
-                          Tần suất phát hành
-                        </Label>
-                        <Select
-                          value={publicationSchedule}
-                          onValueChange={setPublicationSchedule}
-                        >
-                          <SelectTrigger
-                            id="eb-eval-schedule"
-                            className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm shadow-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
-                          >
-                            <SelectValue placeholder="Chọn lịch" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {EB_PUBLICATION_SCHEDULES.map((item) => (
-                              <SelectItem key={item.value} value={item.value}>
-                                {item.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    ) : null}
-                  </div>
-
-                  {!isFirstReview ? (
-                    <div className="space-y-1.5">
-                      <Label htmlFor="eb-quick-notes" className="text-xs text-gray-600">
-                        Ghi chú quyết định
-                      </Label>
-                      <Textarea
-                        id="eb-quick-notes"
-                        value={quickNotes}
-                        onChange={(event) => setQuickNotes(event.target.value)}
-                        placeholder="Lý do ngắn gọn…"
-                        className="min-h-16 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm shadow-none focus-visible:border-emerald-500 focus-visible:ring-1 focus-visible:ring-emerald-500"
-                      />
-                    </div>
-                  ) : null}
-                </div>
+                ) : (
+                  <p className="text-[11px] text-gray-400">
+                    {rosterCount < EB_COUNCIL_MIN_FOR_PUBLISH
+                      ? `Cần ít nhất ${EB_COUNCIL_MIN_FOR_PUBLISH} thành viên hội đồng (hiện ${rosterCount}).`
+                      : unscoredMemberNames.length
+                        ? `Chưa lưu nháp: ${unscoredMemberNames.join(", ")}.`
+                        : "Thêm thành viên và lưu nháp điểm từng người trước khi quyết định."}
+                  </p>
+                )}
 
                 {debutGateLock ? (
-                  <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+                  <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                     <p className="font-semibold">Đang khóa debut</p>
                     <p className="mt-1">{debutGateLock.message}</p>
-                    {activeSeriesId ? (
-                      <Button
-                        type="button"
-                        size="sm"
-                        className="mt-2"
-                        onClick={() =>
-                          navigate(
-                            `/eb/chapter/${encodeURIComponent(activeChapter?.id ?? "")}/publish`,
-                          )
-                        }
-                        disabled={!activeChapter?.id}
-                      >
-                        Tới trang xác nhận lịch
-                      </Button>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                <div className="mt-4 space-y-1.5">
-                  <Label htmlFor="eb-evaluation-notes" className="text-xs text-gray-600">
-                    Ghi chú đánh giá (tuỳ chọn)
-                  </Label>
-                  <Textarea
-                    id="eb-evaluation-notes"
-                    value={evaluationNotes}
-                    onChange={(event) => setEvaluationNotes(event.target.value)}
-                    placeholder="Ghi chú kèm theo khi nộp điểm…"
-                    className="min-h-16 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm shadow-none focus-visible:border-emerald-500 focus-visible:ring-1 focus-visible:ring-emerald-500"
-                  />
-                </div>
-
-                {lastEvaluation?.council_average != null ? (
-                  <p className="mt-2 text-[11px] text-gray-400">
-                    Đã nộp · ĐTB{" "}
-                    <strong className="font-medium text-gray-700">
-                      {Number(lastEvaluation.council_average).toFixed(1)}
-                    </strong>
-                    {formatEbClassification(lastEvaluation)
-                      ? ` · ${formatEbClassification(lastEvaluation)}`
-                      : ""}
-                  </p>
-                ) : null}
-
-                {activeChapter?.id ? (
-                  <div className="mt-4 space-y-2">
-                    <button
-                      type="button"
-                      onClick={handleConfirmPublishClick}
-                      title={
-                        canConfirmPublish
-                          ? undefined
-                          : "Cần lưu nháp đủ tất cả thành viên và nộp kết quả chấm trước"
-                      }
-                      className={cn(
-                        "flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-gray-900 py-2.5 text-xs font-medium text-white shadow-xs transition-colors hover:bg-black",
-                        !canConfirmPublish && "opacity-70",
-                      )}
-                    >
-                      <Calendar className="size-3.5" />
-                      Xác nhận lịch phát hành
-                      <ArrowRight className="size-3.5" />
-                    </button>
-                    {!canConfirmPublish ? (
-                      <p className="text-[11px] text-gray-400">
-                        {!allMembersDraftSaved || rosterCount < EB_COUNCIL_MIN_FOR_PUBLISH
-                          ? `Cần lưu nháp đủ hội đồng (${savedScoredCount}/${rosterCount || 0}${
-                            unscoredMemberNames.length
-                              ? ` · thiếu: ${unscoredMemberNames.join(", ")}`
-                              : ""
-                          }).`
-                          : "Cần nộp kết quả chấm trước khi xác nhận lịch."}
-                      </p>
-                    ) : null}
                   </div>
                 ) : null}
               </div>
@@ -2793,21 +2415,13 @@ export default function Eb() {
               </Button>
               <Button
                 type="button"
-                disabled={
-                  submitting
-                  || Boolean(debutGateLock)
-                  || (!isFirstReview
-                    ? !activeSeriesId
-                    : !activeChapter?.id)
-                }
+                disabled={!activeChapter?.id || Boolean(debutGateLock)}
                 title={
                   debutGateLock
                     ? debutGateLock.message
-                    : (!isFirstReview
-                      ? "Gửi quick decision"
-                      : (canSubmitScores
-                        ? undefined
-                        : "Cần lưu nháp đủ điểm tất cả thành viên hội đồng (3–5)"))
+                    : (canOpenDecision
+                      ? "Mở trang quyết định đánh giá"
+                      : "Cần lưu nháp đủ điểm tất cả thành viên hội đồng (3–5)")
                 }
                 className="bg-emerald-600 text-white shadow-xs hover:bg-emerald-700 disabled:opacity-50"
                 onClick={() => {
@@ -2815,12 +2429,20 @@ export default function Eb() {
                     warnMissingCouncilDrafts();
                     return;
                   }
-                  void handleSubmitScores();
+                  if (!activeChapter?.id) return;
+                  saveCouncilSessionMeta(councilKey, {
+                    contentLevels,
+                    rubricOverrideId: rubricOverrideId || null,
+                    suggestedRubricId: suggestedRubricId || null,
+                  });
+                  navigate(
+                    `/eb/chapter/${encodeURIComponent(activeChapter.id)}/decision`,
+                  );
                 }}
               >
-                {submitting
-                  ? "Đang nộp…"
-                  : (isFirstReview ? "Nộp kết quả chấm" : "Gửi quick decision")}
+                {isFirstReview
+                  ? (canSubmitScores ? "Quyết định đánh giá" : "Chưa đủ nháp")
+                  : "Quyết định nhanh"}
               </Button>
             </div>
           </div>
