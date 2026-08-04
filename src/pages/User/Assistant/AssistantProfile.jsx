@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
-  BookOpen,
+  Briefcase,
   Edit,
   ExternalLink,
   Globe,
@@ -9,11 +9,13 @@ import {
   Link2,
   Loader2,
   Save,
+  Sparkles,
   User,
   Users,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import Header from '@/components/User/Header/Header.jsx'
+import WalletTab from '@/components/Wallet/WalletTab.jsx'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import {
@@ -28,21 +30,21 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { AvatarCropDialog } from '@/components/mangaka/AvatarCropDialog.jsx'
 import { CoverCropDialog } from '@/components/mangaka/CoverCropDialog.jsx'
-import WalletTab from '@/components/Wallet/WalletTab.jsx'
 import { getApiErrorMessage, resolveMediaUrl } from '@/api/http.js'
 import {
-  fileToAvatarBase64,
-  mangakaProfileService,
-} from '@/api/mangakaProfile.service.js'
+  fileToBase64 as fileToAvatarBase64,
+  assistantProfileService,
+} from '@/api/assistantProfile.service.js'
 import { getSession, logout, refreshSession, updateSession, ROLES } from '@/lib/auth.js'
 import { cn } from '@/lib/utils'
-import { slugifySeriesTitle } from '@/utils/seriesModel.js'
-import { MANGAKA_NAV_LINKS } from '@/constants/mangakaNav.js'
-import './MangakaProfile.css'
+import '../Mangaka/MangakaProfile.css'
 
 const BIO_MAX = 500
 
-const NAV_LINKS = MANGAKA_NAV_LINKS
+const NAV_LINKS = [
+  { to: '/', label: 'Trang chủ' },
+  { to: '/assistant', label: 'Workspace' },
+]
 
 function emptySocialLinks() {
   return { facebook: '', twitter: '', website: '' }
@@ -62,7 +64,6 @@ function emptyForm() {
   }
 }
 
-/** Thêm ?t= để tránh browser cache ảnh avatar sau khi upload. */
 function withAvatarCacheBust(url) {
   const value = String(url ?? '').trim()
   if (!value || /^(data:|blob:)/i.test(value)) return value
@@ -111,7 +112,7 @@ function getInitials(name = '') {
       .filter(Boolean)
       .slice(-2)
       .map((w) => w[0]?.toUpperCase() ?? '')
-      .join('') || 'M'
+      .join('') || 'A'
   )
 }
 
@@ -126,13 +127,13 @@ function formatJoined(value) {
   })
 }
 
-export default function MangakaProfile() {
+export default function AssistantProfile() {
   const navigate = useNavigate()
   const { authorId } = useParams()
   const sessionUser = getSession()
   const isPublicView = Boolean(authorId)
   const isOwnEditable =
-    !isPublicView && sessionUser?.role === ROLES.MANGAKA
+    !isPublicView && sessionUser?.role === ROLES.ASSISTANT
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -142,7 +143,7 @@ export default function MangakaProfile() {
   const [draft, setDraft] = useState(emptyForm)
   const [stats, setStats] = useState(null)
   const [joinedAt, setJoinedAt] = useState(null)
-  const [seriesList, setSeriesList] = useState([])
+  const [cooperations, setCooperations] = useState([])
   const [avatarPreview, setAvatarPreview] = useState('')
   const [coverPreview, setCoverPreview] = useState('')
   const [avatarCropOpen, setAvatarCropOpen] = useState(false)
@@ -153,16 +154,18 @@ export default function MangakaProfile() {
   const loadProfile = useCallback(async () => {
     setLoading(true)
     try {
+      // BE spec VI: Assistant profile dùng /assistant/profile riêng.
+      // Không fallback sang mangakaProfileService (BE chỉ chấp nhận role Mangaka).
       const payload = isPublicView
-        ? await mangakaProfileService.getPublicProfile(authorId)
-        : await mangakaProfileService.getProfile()
+        ? null
+        : await assistantProfileService.getProfile()
 
       const next = payloadToForm(payload, sessionUser)
       setForm(next)
       setDraft(next)
-      setStats(payload.stats)
-      setJoinedAt(payload.user?.joinedAt ?? null)
-      setSeriesList(Array.isArray(payload.series) ? payload.series : [])
+      setStats(payload?.stats ?? null)
+      setJoinedAt(payload?.user?.joinedAt ?? null)
+      setCooperations(Array.isArray(payload?.series) ? payload.series : [])
       setAvatarPreview('')
       setCoverPreview('')
     } catch (err) {
@@ -173,15 +176,15 @@ export default function MangakaProfile() {
         setDraft(fallback)
         setStats(null)
         setJoinedAt(null)
-        setSeriesList([])
+        setCooperations([])
       } else {
-        toast.error(getApiErrorMessage(err, 'Không tải được hồ sơ Mangaka.'))
+        toast.error(getApiErrorMessage(err, 'Không tải được hồ sơ Assistant.'))
         if (!isPublicView) {
           const fallback = payloadToForm({ user: {} }, sessionUser)
           setForm(fallback)
           setDraft(fallback)
         }
-        setSeriesList([])
+        setCooperations([])
       }
     } finally {
       setLoading(false)
@@ -199,13 +202,13 @@ export default function MangakaProfile() {
     async function bootstrap() {
       if (!sessionUser) return
       const user = getSession()
-      if (user && user.role !== ROLES.MANGAKA) {
+      // Token có nhưng sessionStorage role chưa đúng → refresh từ /auth/me trước.
+      if (user && user.role !== ROLES.ASSISTANT) {
         try {
           const fresh = await refreshSession()
           if (cancelled) return
-          if (!fresh || fresh.role !== ROLES.MANGAKA) {
-            const fallback =
-              fresh?.role === ROLES.ASSISTANT ? '/assistant/profile' : '/'
+          if (!fresh || fresh.role !== ROLES.ASSISTANT) {
+            const fallback = fresh?.role === ROLES.MANGAKA ? '/mangaka/profile' : '/'
             navigate(fallback, { replace: true })
             return
           }
@@ -227,14 +230,14 @@ export default function MangakaProfile() {
   }, [authorId, isPublicView, sessionUser?.id, sessionUser?.role, navigate])
 
   const initials = useMemo(() => getInitials(form.fullName), [form.fullName])
-  const featured = seriesList.slice(0, 3)
+  const featured = cooperations.slice(0, 3)
   const displayAvatar = avatarPreview || form.avatarUrl
 
   const tagline = useMemo(() => {
     const bio = String(form.bio ?? '').trim()
-    if (!bio) return 'Mangaka trên MangaHub'
+    if (!bio) return 'Assistant trên MangaHub'
     const first = bio.split(/[\n.!?]/)[0]?.trim()
-    return first?.slice(0, 80) || 'Mangaka trên MangaHub'
+    return first?.slice(0, 80) || 'Assistant trên MangaHub'
   }, [form.bio])
 
   const socialItems = useMemo(() => {
@@ -251,9 +254,9 @@ export default function MangakaProfile() {
   const coverUrl = useMemo(() => {
     const fromUser = coverPreview || form.coverImageUrl
     if (fromUser) return fromUser
-    const withCover = seriesList.find((s) => s.coverImage)
+    const withCover = cooperations.find((s) => s.coverImage)
     return withCover?.coverImage ? resolveMediaUrl(withCover.coverImage) : null
-  }, [coverPreview, form.coverImageUrl, seriesList])
+  }, [coverPreview, form.coverImageUrl, cooperations])
 
   function openEdit() {
     setDraft({ ...form, avatarBase64: '', coverImageBase64: '' })
@@ -334,11 +337,10 @@ export default function MangakaProfile() {
     const uploadedAvatar = String(draft.avatarBase64 ?? '').trim()
     const uploadedCover = String(draft.coverImageBase64 ?? '').trim()
     try {
-      const updated = await mangakaProfileService.updateProfile(draft)
-      // GET lại để lấy avatar_url / cover_image_url chuẩn từ BE.
+      const updated = await assistantProfileService.updateProfile(draft)
       let payload = updated
       try {
-        payload = await mangakaProfileService.getProfile()
+        payload = await assistantProfileService.getProfile()
       } catch {
         payload = updated
       }
@@ -350,12 +352,10 @@ export default function MangakaProfile() {
         username: draft.username,
         bio: draft.bio,
         socialLinks: draft.socialLinks,
-        // Không fallback URL cũ nếu vừa upload — tránh hiện ảnh cache cũ.
         avatarUrl: payload?.user?.avatarUrl || '',
         coverImageUrl: payload?.user?.coverImageUrl || '',
       })
 
-      // Nếu BE chưa trả URL: giữ preview base64 để UI không trống.
       if (!next.avatarUrl && uploadedAvatar.startsWith('data:image')) {
         next.avatarUrl = uploadedAvatar
         setAvatarPreview(uploadedAvatar)
@@ -373,8 +373,8 @@ export default function MangakaProfile() {
       setDraft({ ...next, avatarBase64: '', coverImageBase64: '' })
       setStats(payload.stats ?? updated.stats)
       setJoinedAt(payload.user?.joinedAt ?? updated.user?.joinedAt ?? joinedAt)
-      if (Array.isArray(payload.series)) setSeriesList(payload.series)
-      else if (Array.isArray(updated.series)) setSeriesList(updated.series)
+      if (Array.isArray(payload.series)) setCooperations(payload.series)
+      else if (Array.isArray(updated.series)) setCooperations(updated.series)
 
       updateSession({
         name: next.fullName,
@@ -384,7 +384,7 @@ export default function MangakaProfile() {
         socialLinks: next.socialLinks,
       })
       setEditOpen(false)
-      toast.success('Đã cập nhật hồ sơ Mangaka.')
+      toast.success('Đã cập nhật hồ sơ Assistant.')
     } catch (err) {
       toast.error(getApiErrorMessage(err, 'Không lưu được hồ sơ.'))
     } finally {
@@ -423,8 +423,6 @@ export default function MangakaProfile() {
       </div>
     )
   }
-
-  const seriesLinkBase = isOwnEditable ? '/mangaka/series' : null
 
   return (
     <div className="mk-profile flex min-h-screen flex-col bg-[#fafafa]">
@@ -465,7 +463,7 @@ export default function MangakaProfile() {
                       className="bg-[#6f3cff] hover:bg-[#5a2fd6]"
                       asChild
                     >
-                      <Link to="/mangaka">+ Workspace</Link>
+                      <Link to="/assistant">+ Workspace</Link>
                     </Button>
                   </>
                 ) : null}
@@ -484,12 +482,13 @@ export default function MangakaProfile() {
                   </AvatarFallback>
                 </Avatar>
                 <h1 className="mt-4 text-3xl font-bold tracking-tight text-zinc-900 sm:text-4xl">
-                  {form.fullName || 'Mangaka'}
+                  {form.fullName || 'Assistant'}
                 </h1>
                 {form.username ? (
                   <p className="mt-0.5 text-sm text-zinc-400">@{form.username}</p>
                 ) : null}
-                <p className="mt-1 text-base text-zinc-500">
+                <p className="mt-1 flex items-center justify-center gap-1.5 text-base text-zinc-500">
+                  <Sparkles className="size-4 text-violet-500" />
                   <span className="text-zinc-400">is</span> {tagline}
                 </p>
                 <ul className="mt-4 flex flex-wrap items-center justify-center gap-2">
@@ -523,7 +522,7 @@ export default function MangakaProfile() {
               <nav className="mk-profile__tabs" aria-label="Profile sections">
                 {[
                   { id: 'home', label: 'Home' },
-                  { id: 'series', label: 'Series' },
+                  { id: 'cooperations', label: 'Hợp tác' },
                   { id: 'about', label: 'About' },
                   { id: 'wallet', label: 'Ví' },
                 ].map((item) => (
@@ -542,18 +541,18 @@ export default function MangakaProfile() {
 
           <div className="page-container mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_340px]">
             <div className="min-w-0 space-y-8">
-              {(tab === 'home' || tab === 'series') && (
+              {(tab === 'home' || tab === 'cooperations') && (
                 <section className="space-y-4">
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">
-                    Featured
+                    Hợp tác nổi bật
                   </p>
                   {featured.length === 0 ? (
                     <div className="mk-profile__card flex flex-col items-center gap-3 py-12 text-center">
-                      <BookOpen className="size-8 text-zinc-300" />
-                      <p className="text-sm text-zinc-500">Chưa có series để nổi bật.</p>
+                      <Briefcase className="size-8 text-zinc-300" />
+                      <p className="text-sm text-zinc-500">Chưa có series hợp tác.</p>
                       {isOwnEditable ? (
                         <Button size="sm" variant="outline" asChild>
-                          <Link to="/mangaka">Tạo series</Link>
+                          <Link to="/assistant">Đi đến Workspace</Link>
                         </Button>
                       ) : null}
                     </div>
@@ -566,7 +565,7 @@ export default function MangakaProfile() {
                               <img src={s.coverImage} alt="" className="size-full object-cover" />
                             ) : (
                               <div className="flex size-full items-center justify-center bg-zinc-100 text-zinc-400">
-                                <BookOpen className="size-8" />
+                                <Briefcase className="size-8" />
                               </div>
                             )}
                             <span className="mk-profile__feature-badge">Series</span>
@@ -584,17 +583,6 @@ export default function MangakaProfile() {
                           </div>
                         </>
                       )
-                      if (seriesLinkBase) {
-                        return (
-                          <Link
-                            key={s.id}
-                            to={`${seriesLinkBase}/${s.slug || slugifySeriesTitle(s.title)}`}
-                            className="mk-profile__feature group"
-                          >
-                            {inner}
-                          </Link>
-                        )
-                      }
                       return (
                         <div key={s.id} className="mk-profile__feature">
                           {inner}
@@ -616,7 +604,7 @@ export default function MangakaProfile() {
                     <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-zinc-700">
                       {form.bio.trim()
                         ? form.bio
-                        : `Xin chào! Mình là ${form.fullName || 'Mangaka'}.`}
+                        : `Xin chào! Mình là ${form.fullName || 'Assistant'} — chuyên bổ sung phần vẽ ngoại cảnh và hỗ trợ Mangaka.`}
                     </p>
                     {(hasAnySocial || isOwnEditable) ? (
                       <ul className="flex flex-wrap gap-2 border-t border-zinc-100 pt-4">
@@ -665,13 +653,13 @@ export default function MangakaProfile() {
                 </section>
               ) : null}
 
-              {tab === 'series' && seriesList.length > 3 ? (
+              {tab === 'cooperations' && cooperations.length > 3 ? (
                 <section className="space-y-3">
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">
-                    All series
+                    Tất cả hợp tác
                   </p>
                   <div className="grid gap-3 sm:grid-cols-2">
-                    {seriesList.slice(3).map((s) => {
+                    {cooperations.slice(3).map((s) => {
                       const card = (
                         <>
                           <div className="aspect-[16/9] bg-zinc-100">
@@ -685,15 +673,7 @@ export default function MangakaProfile() {
                           </div>
                         </>
                       )
-                      return seriesLinkBase ? (
-                        <Link
-                          key={s.id}
-                          to={`${seriesLinkBase}/${s.slug || slugifySeriesTitle(s.title)}`}
-                          className="mk-profile__card overflow-hidden transition hover:shadow-md"
-                        >
-                          {card}
-                        </Link>
-                      ) : (
+                      return (
                         <div key={s.id} className="mk-profile__card overflow-hidden">
                           {card}
                         </div>
@@ -719,12 +699,16 @@ export default function MangakaProfile() {
                 <div className="space-y-4 p-5">
                   <h2 className="text-xl font-bold text-zinc-900">
                     {isPublicView
-                      ? `Series của ${form.fullName || 'Mangaka'}`
-                      : `Hồ sơ ${form.fullName || 'Mangaka'}`}
+                      ? `Hồ sơ ${form.fullName || 'Assistant'}`
+                      : `Hồ sơ ${form.fullName || 'Assistant'}`}
                   </h2>
                   <p className="text-sm text-zinc-500">
                     Tham gia từ {formatJoined(joinedAt)}.
                   </p>
+                  <div className="flex items-center gap-2 rounded-lg bg-violet-50 px-3 py-2 text-sm text-violet-700">
+                    <Sparkles className="size-4" />
+                    <span className="font-medium">Assistant</span>
+                  </div>
                   <div className="space-y-2">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
                       Social links
@@ -758,15 +742,10 @@ export default function MangakaProfile() {
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <MiniStat
-                      label="Series"
-                      value={stats?.totalSeries ?? seriesList.length}
+                      label="Hợp tác"
+                      value={stats?.totalSeries ?? cooperations.length}
                     />
-                    <MiniStat label="Published" value={stats?.published ?? 0} />
-                    <MiniStat label="Drafts" value={stats?.drafts ?? 0} />
-                    <MiniStat
-                      label="Followers"
-                      value={stats?.followersCount ?? 0}
-                    />
+                    <MiniStat label="Chapter" value={stats?.chapters ?? 0} />
                   </div>
                   {isOwnEditable ? (
                     <Button
@@ -791,7 +770,7 @@ export default function MangakaProfile() {
       )}
 
       <footer className="border-t border-zinc-200/80 py-6 text-center text-xs text-zinc-400">
-        © {new Date().getFullYear()} {form.fullName || 'Mangaka'} · MangaHub
+        © {new Date().getFullYear()} {form.fullName || 'Assistant'} · MangaHub
       </footer>
 
       {isOwnEditable ? (
@@ -803,18 +782,18 @@ export default function MangakaProfile() {
               </DialogHeader>
               <form onSubmit={handleSave} className="space-y-4">
                 <div className="space-y-1.5">
-                  <Label htmlFor="mk-full-name">Họ tên</Label>
+                  <Label htmlFor="asst-full-name">Họ tên</Label>
                   <Input
-                    id="mk-full-name"
+                    id="asst-full-name"
                     value={draft.fullName}
                     onChange={(e) => patch('fullName', e.target.value)}
                     maxLength={80}
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="mk-cover-file">Ảnh bìa (cover)</Label>
+                  <Label htmlFor="asst-cover-file">Ảnh bìa (cover)</Label>
                   <Input
-                    id="mk-cover-file"
+                    id="asst-cover-file"
                     type="file"
                     accept="image/*"
                     onChange={(e) => void handleCoverFile(e)}
@@ -831,9 +810,9 @@ export default function MangakaProfile() {
                   ) : null}
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="mk-avatar-file">Ảnh đại diện</Label>
+                  <Label htmlFor="asst-avatar-file">Ảnh đại diện</Label>
                   <Input
-                    id="mk-avatar-file"
+                    id="asst-avatar-file"
                     type="file"
                     accept="image/*"
                     onChange={(e) => void handleAvatarFile(e)}
@@ -851,13 +830,13 @@ export default function MangakaProfile() {
                 </div>
                 <div className="space-y-1.5">
                   <div className="flex justify-between text-xs text-muted-foreground">
-                    <Label htmlFor="mk-bio">Tiểu sử</Label>
+                    <Label htmlFor="asst-bio">Tiểu sử</Label>
                     <span>
                       {draft.bio.length}/{BIO_MAX}
                     </span>
                   </div>
                   <Textarea
-                    id="mk-bio"
+                    id="asst-bio"
                     value={draft.bio}
                     onChange={(e) => patch('bio', e.target.value.slice(0, BIO_MAX))}
                     rows={4}
@@ -866,9 +845,9 @@ export default function MangakaProfile() {
                 <div className="space-y-3 rounded-lg border border-zinc-100 p-3">
                   <p className="text-sm font-medium text-zinc-800">Liên kết mạng xã hội</p>
                   <div className="space-y-1.5">
-                    <Label htmlFor="mk-social-facebook">Facebook</Label>
+                    <Label htmlFor="asst-social-facebook">Facebook</Label>
                     <Input
-                      id="mk-social-facebook"
+                      id="asst-social-facebook"
                       type="text"
                       placeholder="https://facebook.com/..."
                       value={draft.socialLinks?.facebook ?? ''}
@@ -876,9 +855,9 @@ export default function MangakaProfile() {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="mk-social-twitter">Twitter / X</Label>
+                    <Label htmlFor="asst-social-twitter">Twitter / X</Label>
                     <Input
-                      id="mk-social-twitter"
+                      id="asst-social-twitter"
                       type="text"
                       placeholder="https://x.com/..."
                       value={draft.socialLinks?.twitter ?? ''}
@@ -886,9 +865,9 @@ export default function MangakaProfile() {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="mk-social-website">Website</Label>
+                    <Label htmlFor="asst-social-website">Website</Label>
                     <Input
-                      id="mk-social-website"
+                      id="asst-social-website"
                       type="text"
                       placeholder="https://..."
                       value={draft.socialLinks?.website ?? ''}

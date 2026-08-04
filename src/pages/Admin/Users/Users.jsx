@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Ban, CheckCircle, Eye, Loader2, Plus, Search, Trash2, UserCog } from 'lucide-react'
+import { Ban, CheckCircle, Eye, Loader2, Plus, Search, Trash2, UserCog, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/api/index.js'
+import UserFinancialDialog from './UserFinancialDialog.jsx'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -84,7 +85,6 @@ function CreateUserDialog({ open, onClose, onCreated }) {
         <form onSubmit={handleSubmit}>
           <DialogHeader>
             <DialogTitle>Thêm người dùng</DialogTitle>
-            <DialogDescription>Tạo tài khoản mới qua POST /admin/users-legacy</DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-4">
             <div className="space-y-2">
@@ -260,6 +260,7 @@ export default function Users() {
   const [manageUserId, setManageUserId] = useState(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [lockTarget, setLockTarget] = useState(null)
+  const [financialUser, setFinancialUser] = useState(null)
 
   useEffect(() => {
     loadUsers()
@@ -401,6 +402,15 @@ export default function Users() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setFinancialUser(user)}
+                          title="Xem tài chính"
+                        >
+                          <Wallet className="size-3.5" />
+                          Tài chính
+                        </Button>
                         <Button size="sm" variant="outline" onClick={() => setManageUserId(user.id)}>
                           <UserCog className="size-3.5" />
                           Quản lý
@@ -441,6 +451,13 @@ export default function Users() {
         open={manageUserId !== null}
         onClose={() => setManageUserId(null)}
         onUpdated={loadUsers}
+      />
+
+      <UserFinancialDialog
+        key={financialUser?.id ?? 'none'}
+        user={financialUser}
+        open={financialUser !== null}
+        onClose={() => setFinancialUser(null)}
       />
 
       <Dialog

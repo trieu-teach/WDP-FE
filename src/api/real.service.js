@@ -522,4 +522,166 @@ export const realService = {
 
   deleteComment: (commentId) =>
     instance.delete(`/admin/comments/${commentId}`).then(unwrap),
+
+  // ===== Finance — Summary & Timeline =====
+
+  /**
+   * GET /admin/finance/summary — Tổng hợp tài chính toàn platform.
+   * Response BE spec 2026-08-04:
+   *   total_circulation_coin_display / total_circulation_coin
+   *   total_revenue_all_time_coin_display / total_revenue_all_time_coin
+   *   total_withdrawn_vnd
+   *   total_platform_coin_display / total_platform_coin
+   *   pending_withdrawals: { count, coin_display, coin }
+   */
+  getFinanceSummary: () => instance.get('/admin/finance/summary').then(unwrap),
+
+  /**
+   * GET /admin/finance/revenue-timeline — Doanh thu + withdrawal theo ngày.
+   * Query: days (default 30)
+   * Response BE spec 2026-08-04:
+   *   points: [{ date, revenue_coin_display, withdrawal_coin_display }]
+   *   summary: { total_revenue_coin_display, total_withdrawal_coin_display, net_flow_coin_display }
+   */
+  getRevenueTimeline: (params = {}) => instance
+    .get('/admin/finance/revenue-timeline', { params: { days: params.days ?? 30 } })
+    .then(unwrap),
+
+  // ===== Finance — Revenue & Dashboard =====
+
+  /**
+   * GET /admin/revenue/stats — Thống kê doanh thu toàn hệ thống.
+   * Response:
+   *   revenue_by_status: { pending, available, withdrawn } → { total_coin, total_vnd, count }
+   *   wallet_summary: { total_coin_in_wallets, total_pending_revenue, total_available_revenue, total_revenue, total_withdrawn, reader_wallets_with_balance }
+   *   withdrawal_by_status: { count, total_vnd }
+   *   top_series: [{ total_coin, total_vnd, purchases }]
+   */
+  getRevenueStats: () => instance.get('/admin/revenue/stats').then(unwrap),
+
+  /**
+   * GET /admin/revenue/hub?days=30 — Platform Revenue Hub.
+   * Query: days (default 30)
+   * Response:
+   *   config: { platform_fee_percent, coin_to_vnd_rate }
+   *   overall: { platform_fee_coin, platform_fee_vnd, gross_coin, net_coin, chapters_sold }
+   *   today / this_month / last_month / period: { revenue_coin, revenue_vnd, platform_fee_coin, platform_fee_vnd, purchases }
+   *   withdrawal_pending: { coin, vnd, count }
+   *   withdrawal_completed: { coin, vnd, count }
+   *   monthly_revenue: [{ month, revenue_coin, revenue_vnd }]
+   *   top_series: [{ series_id, series_name, platform_fee_coin, platform_fee_vnd, purchases }]
+   */
+  getRevenueHub: (params = {}) => {
+    const query = {}
+    if (params.days) query.days = Number(params.days)
+    return instance.get('/admin/revenue/hub', { params: query }).then(unwrap)
+  },
+
+  /**
+   * GET /admin/dashboard/finance?limit=10 — Dashboard xếp hạng tài chính.
+   * Query: limit (default 10)
+   * Response:
+   *   top_mangaka: [{ user_id, username, full_name, avatar_url, role, total_coin_display, total_coin, total_vnd, total_gross_coin, total_platform_fee_coin, chapters_sold, withdrawn_coin_display, withdrawn_coin }]
+   *   top_assistant: [...] same shape
+   *   top_reader: [{ user_id, username, full_name, avatar_url, role, total_coin_spent_display, total_coin_spent, chapters_purchased }]
+   *   top_series_chapters: [{ series_id, series_name, total_coin, total_vnd, purchases }]
+   *   top_series_fees: [...] same shape + platform_fee_coin
+   *   coin_to_vnd_rate: number
+   */
+  getDashboardFinance: (params = {}) => {
+    const query = {}
+    if (params.limit) query.limit = Number(params.limit)
+    return instance.get('/admin/dashboard/finance', { params: query }).then(unwrap)
+  },
+
+  // ===== Finance — Payments =====
+
+  /**
+   * GET /admin/payments — Danh sách giao dịch nạp tiền PayOS.
+   * Query: status, page (default 1), limit (default 20)
+   * Response:
+   *   items: [{ _id, user_id, coin_package_id, vnd_amount, coin_amount, status, payment_id, createdAt }]
+   *   total: number
+   *   summary: { total_vnd, total_coin, count }  ← tổng tất cả paid
+   */
+  getPayments: (params = {}) => {
+    const query = { page: 1, limit: 20 }
+    if (params.page) query.page = Number(params.page)
+    if (params.limit) query.limit = Number(params.limit)
+    if (params.status) query.status = params.status
+    return instance
+      .get('/admin/payments', { params: query })
+      .then((res) => {
+        const data = unwrap(res)
+        return {
+          items: Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [],
+          total: Number(data?.total ?? 0),
+          summary: data?.summary ?? null,
+        }
+      })
+  },
+
+  // ===== Finance — User Financial Details =====
+
+  /**
+   * GET /admin/users/:id/financials — Chi tiết tài chính từng user.
+   * Reader: wallet, deposits (history ≤50), total_vnd, total_coin,
+   *         purchases (history ≤50), total_spent,
+   *         transaction_summary: [{ _id, total }]
+   *         financial_summary: { current_coin, total_deposit, total_purchase, total_refund }
+   * Mangaka/Assistant: wallet, bank_account, revenue (≤100),
+   *   revenue_by_status: { pending, available, withdrawn },
+   *   withdrawals (≤100), withdrawals_by_status,
+   *   total_withdrawn_vnd, wallet_transactions,
+   *   collaboration_revenue: [...], revenue_by_series: [...],
+   *   financial_summary: { pending_revenue, available_balance, total_revenue, total_withdrawal, total_refund }
+   */
+  getUserFinancials: (userId) => instance.get(`/admin/users/${userId}/financials`).then(unwrap),
+
+  /**
+   * GET /admin/users/:id/financials/transactions — Lịch sử biến động ví.
+   * Query: type (Deposit|Purchase|Revenue|Withdrawal|Refund), from_date, to_date,
+   *        sort (asc|desc, default desc), page (default 1), limit (default 50, max 200)
+   * Response:
+   *   items: [{ _id, type, amount, coin_amount, balance_after, description,
+   *            createdAt, chapter_id?, payment_id?, revenue_id?, withdrawal_id? }]
+   *   total: number, page: number, pages: number
+   */
+  getUserFinancialsTransactions: (userId, params = {}) => {
+    const query = { page: 1, limit: 50 }
+    if (params.type) query.type = params.type
+    if (params.from_date) query.from_date = params.from_date
+    if (params.to_date) query.to_date = params.to_date
+    if (params.sort) query.sort = params.sort
+    if (params.page) query.page = Number(params.page)
+    if (params.limit) {
+      query.limit = Math.min(Number(params.limit), 200)
+    }
+    return instance.get(`/admin/users/${userId}/financials/transactions`, { params: query }).then(unwrap)
+  },
+
+  // ===== Coin Packages =====
+
+  /**
+   * GET /admin/coin-packages — Danh sách gói coin.
+   * Response: items: [{ _id, vnd_price, coin_amount, bonus_coin, display_order, is_active }]
+   */
+  getCoinPackages: () => instance.get('/admin/coin-packages').then(unwrap),
+
+  /**
+   * POST /admin/coin-packages — Tạo gói coin.
+   * Body: { vnd_price, coin_amount, bonus_coin, display_order, is_active }
+   */
+  createCoinPackage: (data) => instance.post('/admin/coin-packages', data).then(unwrap),
+
+  /**
+   * PATCH /admin/coin-packages/:id — Cập nhật gói coin.
+   * Body: partial of create fields.
+   */
+  updateCoinPackage: (id, data) => instance.patch(`/admin/coin-packages/${id}`, data).then(unwrap),
+
+  /**
+   * DELETE /admin/coin-packages/:id — Xoá gói coin.
+   */
+  deleteCoinPackage: (id) => instance.delete(`/admin/coin-packages/${id}`).then(unwrap),
 }

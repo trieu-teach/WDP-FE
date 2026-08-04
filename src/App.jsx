@@ -8,6 +8,7 @@ import Chapters from '@/pages/Admin/Chapters/Chapters.jsx'
 import Users from '@/pages/Admin/Users/Users.jsx'
 import Profile from '@/pages/Admin/Profile/Profile.jsx'
 import Rankings from '@/pages/Admin/Rankings/Rankings.jsx'
+import Finance from '@/pages/Admin/Finance/Finance.jsx'
 import PublicationCalendar from '@/pages/Admin/PublicationCalendar/PublicationCalendar.jsx'
 import EndRequests from '@/pages/Admin/EndRequests/EndRequests.jsx'
 import AdminNotifications from '@/pages/Admin/Notifications/AdminNotifications.jsx'
@@ -31,6 +32,7 @@ import MangakaAssistantReview from '@/pages/User/Mangaka/MangakaAssistantReview.
 import MangakaAssistantReviewDetail from '@/pages/User/Mangaka/MangakaAssistantReviewDetail.jsx'
 import MangakaProfile from '@/pages/User/Mangaka/MangakaProfile.jsx'
 import MangakaEndRequests from '@/pages/User/Mangaka/MangakaEndRequests.jsx'
+import AssistantProfile from '@/pages/User/Assistant/AssistantProfile.jsx'
 import TantouHub from '@/pages/User/Tantou/TantouHub.jsx'
 import TantouEditor from '@/pages/User/Tantou/TantouEditor.jsx'
 import SessionBootstrap from '@/components/auth/SessionBootstrap.jsx'
@@ -108,6 +110,8 @@ export default function App() {
         <Route path="/mangaka/series/:seriesSlug" element={<SeriesUploadDetail />} />
         <Route path="/mangaka/series/:seriesSlug/chapter/:chapterId" element={<SeriesUploadDetail />} />
         <Route path="/assistant" element={<Assistant />} />
+        <Route path="/assistant/profile" element={<AssistantProfile />} />
+        <Route path="/assistant/profile/:authorId" element={<AssistantProfile />} />
         <Route path="/eb" element={<Eb />} />
         <Route path="/eb/series/:seriesId" element={<EbSeriesDetail />} />
         <Route path="/eb/chapter/:chapterId" element={<Eb />} />
@@ -125,6 +129,7 @@ export default function App() {
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="rankings" element={<Rankings />} />
+          <Route path="finance" element={<Finance />} />
           <Route path="publication-calendar" element={<PublicationCalendar />} />
           <Route path="manga" element={<AdminManga />} />
           <Route path="chapters" element={<Chapters />} />

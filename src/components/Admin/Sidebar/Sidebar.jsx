@@ -13,6 +13,7 @@ import {
   Trophy,
   UserCircle,
   Users as UsersIcon,
+  Wallet,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -22,6 +23,7 @@ const NAV_ITEMS = [
     links: [
       { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
       { id: 'rankings', label: 'Bảng xếp hạng', icon: Trophy },
+      { id: 'finance', label: 'Tài chính', icon: Wallet },
       { id: 'publication-calendar', label: 'Lịch phát hành', icon: Calendar },
       { id: 'manga', label: 'Quản lý truyện', icon: BookOpen },
     ],
