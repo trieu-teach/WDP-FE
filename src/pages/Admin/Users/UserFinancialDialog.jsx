@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ArrowUpRight,
+  Banknote,
   BookOpen,
   CircleDollarSign,
   Coins,
   Copy,
   Inbox,
+  Loader2,
   RefreshCw,
   Sparkles,
   TrendingUp,
@@ -19,7 +21,6 @@ import {
   AvatarFallback,
   AvatarImage,
 } from '@/components/ui/avatar'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -27,7 +28,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import {
   Tabs,
@@ -36,6 +46,14 @@ import {
   TabsTrigger,
 } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
+import { getBackendOrigin } from '@/api/http.js'
+import {
+  formatCoinStringWithUnit,
+  formatVnd,
+  getByPath,
+  pickCoinDisplay,
+  pickVndDisplay,
+} from '@/utils/coinFormatter.js'
 
 /* ---------- formatters ---------- */
 
@@ -77,27 +95,44 @@ function initialsOf(name = '') {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
 }
 
+function resolveMediaUrl(url) {
+  if (!url) return ''
+  const value = String(url).trim()
+  if (!value) return ''
+  if (/^(data:|blob:|https?:)/i.test(value)) return value
+  const origin = getBackendOrigin()
+  return value.startsWith('/') ? `${origin}${value}` : `${origin}/${value}`
+}
+
 /* ---------- shared atoms ---------- */
+
+const WITHDRAWAL_STATUS_LABELS = {
+  pending: 'Đang chờ',
+  approved: 'Đã duyệt',
+  completed: 'Đã chi trả hoàn tất',
+  rejected: 'Từ chối',
+  cancelled: 'Đã huỷ',
+}
 
 function StatusBadge({ status }) {
   const map = {
     pending: {
-      label: 'Chờ duyệt',
+      label: WITHDRAWAL_STATUS_LABELS.pending,
       cls: 'bg-amber-100 text-amber-700 ring-1 ring-inset ring-amber-200/60 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/30',
       dot: 'bg-amber-500',
     },
     approved: {
-      label: 'Đã duyệt',
+      label: WITHDRAWAL_STATUS_LABELS.approved,
       cls: 'bg-blue-100 text-blue-700 ring-1 ring-inset ring-blue-200/60 dark:bg-blue-500/15 dark:text-blue-300 dark:ring-blue-500/30',
       dot: 'bg-blue-500',
     },
     completed: {
-      label: 'Hoàn tất',
+      label: WITHDRAWAL_STATUS_LABELS.completed,
       cls: 'bg-emerald-100 text-emerald-700 ring-1 ring-inset ring-emerald-200/60 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/30',
       dot: 'bg-emerald-500',
     },
     rejected: {
-      label: 'Từ chối',
+      label: WITHDRAWAL_STATUS_LABELS.rejected,
       cls: 'bg-rose-100 text-rose-700 ring-1 ring-inset ring-rose-200/60 dark:bg-rose-500/15 dark:text-rose-300 dark:ring-rose-500/30',
       dot: 'bg-rose-500',
     },
@@ -110,9 +145,8 @@ function StatusBadge({ status }) {
       label: 'Thất bại',
       cls: 'bg-rose-100 text-rose-700 ring-1 ring-inset ring-rose-200/60 dark:bg-rose-500/15 dark:text-rose-300 dark:ring-rose-500/30',
       dot: 'bg-rose-500',
-    },
-    cancelled: {
-      label: 'Đã huỷ',
+    },    cancelled: {
+      label: WITHDRAWAL_STATUS_LABELS.cancelled,
       cls: 'bg-zinc-100 text-zinc-700 ring-1 ring-inset ring-zinc-200/60 dark:bg-zinc-500/15 dark:text-zinc-300 dark:ring-zinc-500/30',
       dot: 'bg-zinc-500',
     },
@@ -297,77 +331,379 @@ function KpiTile({ label, value, hint, icon: Icon, tone = 'violet' }) {
   )
 }
 
-/* ---------- top series chart (CSS-only) ---------- */
+/* ---------- top series (period-driven) ---------- */
 
-function TopSeriesChart({ series = [] }) {
-  if (series.length === 0) {
-    return <EmptyState icon={TrendingUp} title="Chưa có dữ liệu doanh thu" hint="Khi có giao dịch, top series sẽ hiển thị ở đây." />
+const TOP_SERIES_PERIOD_OPTIONS = [
+  { value: 'month', label: 'Tháng' },
+  { value: 'quarter', label: 'Quý' },
+  { value: 'year', label: 'Năm' },
+]
+
+function todayParts() {
+  const now = new Date()
+  return {
+    year: now.getFullYear(),
+    month: now.getMonth() + 1,
+    quarter: Math.floor(now.getMonth() / 3) + 1,
   }
-  // BE revenue_by_series: ưu tiên *_coin_display > *_coin > raw.
-  const sorted = [...series]
-    .map((s) => ({
-      id: s.series_id ?? s.id,
-      name: s.series_name ?? s.name ?? '—',
-      availableCoin: parseDisplay(s,
-        'available_coin_display', 'by_status.available_coin_display',
-        'available_coin', 'by_status.available_coin',
-        'available',
-      ),
-      pendingCoin: parseDisplay(s,
-        'pending_coin_display', 'by_status.pending_coin_display',
-        'pending_coin', 'by_status.pending_coin',
-        'pending',
-      ),
-      totalCoin: parseDisplay(s,
-        'total_coin_display', 'total_coin',
-        'total',
-      ),
-    }))
-    .sort((a, b) => b.totalCoin - a.totalCoin)
-    .slice(0, 5)
-  // Bar metric: sort theo availableCoin (sorted trên đã sort by total; ta sort lại để hiển thị)
-  const sortedByAvailable = [...sorted].sort((a, b) => b.availableCoin - a.availableCoin)
-  const max = Math.max(1, ...sortedByAvailable.map((s) => s.availableCoin))
+}
+
+function buildTopSeriesPeriodLabel(period, year, month, quarter) {
+  if (period === 'month') return `Tháng ${month}/${year}`
+  if (period === 'quarter') return `Quý ${quarter}/${year}`
+  if (period === 'year') return `Năm ${year}`
+  return ''
+}
+
+function PeriodSeriesRow({ item, max }) {
+  const gross = parseDisplay(item, [
+    'gross_revenue_coin_display',
+    'gross_revenue_coin',
+  ])
+  const creator = parseDisplay(item, [
+    'creator_revenue_coin_display',
+    'creator_revenue_coin',
+  ])
+  const chapters = Number(item.chapters_sold ?? 0)
+  const pct = max > 0 ? Math.max(2, (gross / max) * 100) : 2
+  const thumb = resolveMediaUrl(item.thumbnail ?? item.cover_image_url)
+  const initials = (item.series_name ?? '?').slice(0, 2).toUpperCase()
+  return (
+    <li className="flex items-start gap-3 px-4 py-3">
+      <div className={cn(
+        'flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-semibold text-muted-foreground',
+      )}>
+        {item.rank ?? '—'}
+      </div>
+      <Avatar size="sm" className="size-9 shrink-0">
+        {thumb ? <AvatarImage src={thumb} alt={item.series_name ?? ''} /> : null}
+        <AvatarFallback className="bg-muted text-xs font-semibold">
+          {initials}
+        </AvatarFallback>
+      </Avatar>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-2">
+          <p className="truncate text-sm font-medium">{item.series_name ?? '—'}</p>
+          <p className="shrink-0 text-sm font-semibold tabular-nums">
+            {formatCoinStringWithUnit(item.gross_revenue_coin_display ?? gross.toFixed(2))}
+          </p>
+        </div>
+        <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-full rounded-full bg-gradient-to-r from-violet-500 to-violet-400"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          Nhà sáng tạo {formatCompact(creator)} · {chapters} lượt mua chương
+        </p>
+      </div>
+    </li>
+  )
+}
+
+function TopSeriesPeriod({ userId, role, data }) {
+  const today = todayParts()
+  const [period, setPeriod] = useState('month')
+  const [year, setYear] = useState(today.year)
+  const [month, setMonth] = useState(today.month)
+  const [quarter, setQuarter] = useState(today.quarter)
+  const [items, setItems] = useState([])
+  const [periodSummary, setPeriodSummary] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(false)
+
+  const roleNormalized = String(role ?? '').toLowerCase()
+  const canLoadTopSeries = roleNormalized === 'mangaka' || roleNormalized === 'assistant'
+
+  const loadTopSeries = useCallback(async () => {
+    if (!canLoadTopSeries || !userId) return
+    setLoading(true)
+    setError(false)
+    try {
+      const params = { period, year }
+      if (period === 'month') params.month = month
+      if (period === 'quarter') params.quarter = quarter
+      const res = await api.getUserFinancialTopSeries(userId, params)
+      setItems(Array.isArray(res?.top_series) ? res.top_series : [])
+      setPeriodSummary(res?.summary ?? null)
+    } catch (err) {
+      console.warn('Không tải được top series:', err)
+      // Fallback: revenue_by_series nếu endpoint mới không khả dụng.
+      const fallback = Array.isArray(data?.revenue_by_series) ? data.revenue_by_series : []
+      setItems(fallback)
+      setPeriodSummary(null)
+      setError(true)
+    } finally {
+      setLoading(false)
+    }
+    // data?.revenue_by_series được đọc trong fallback nhưng KHÔNG phải dep của load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canLoadTopSeries, userId, period, year, month, quarter])
+
+  useEffect(() => {
+    Promise.resolve().then(() => loadTopSeries())
+  }, [loadTopSeries])
+
+  if (!canLoadTopSeries) return null
+
+  const label = buildTopSeriesPeriodLabel(period, year, month, quarter)
+  const max = items.reduce((m, s) => {
+    const v = parseDisplay(s, [
+      'gross_revenue_coin_display',
+      'gross_revenue_coin',
+    ])
+    return v > m ? v : m
+  }, 0)
+  const creatorRevenue = parseDisplay(periodSummary, [
+    'creator_revenue_coin_display',
+    'creator_revenue_coin',
+  ])
+  const chaptersSold = Number(periodSummary?.chapters_sold ?? 0)
+  const seriesCount = Number(periodSummary?.series_count ?? items.length)
 
   return (
-    <div className="space-y-3">
-      {sortedByAvailable.map((s, i) => {
-        const pct = (s.availableCoin / max) * 100
-        return (
-          <div key={s.id ?? i} className="flex items-center gap-3">
-            <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-semibold text-muted-foreground">
-              {i + 1}
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-2">
-                <p className="truncate text-sm font-medium">{s.name}</p>
-                <p className="shrink-0 text-sm font-semibold tabular-nums">
-                  {formatFullCoin(s.availableCoin)}
-                </p>
-              </div>
-              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400"
-                  style={{ width: `${Math.max(6, pct)}%` }}
-                />
-              </div>
-              {s.pendingCoin > 0 ? (
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  + <span className="font-medium text-foreground">{formatFullCoin(s.pendingCoin)}</span> đang chờ duyệt
-                </p>
-              ) : null}
-            </div>
-          </div>
-        )
-      })}
+    <div className="rounded-xl border bg-card p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold">Truyện có doanh thu cao nhất · {label}</p>
+          <p className="text-xs text-muted-foreground">
+            Nhà sáng tạo {formatCompact(creatorRevenue)} · {chaptersSold} lượt mua chương · {seriesCount} truyện
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={period} onValueChange={setPeriod}>
+            <SelectTrigger className="h-8 w-28">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TOP_SERIES_PERIOD_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={String(year)} onValueChange={(v) => setYear(Number(v))}>
+            <SelectTrigger className="h-8 w-24">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {Array.from({ length: 6 }, (_, i) => today.year - i).map((y) => (
+                <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {period === 'month' ? (
+            <Select value={String(month)} onValueChange={(v) => setMonth(Number(v))}>
+              <SelectTrigger className="h-8 w-24">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                  <SelectItem key={m} value={String(m)}>T{m}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : null}
+          {period === 'quarter' ? (
+            <Select value={String(quarter)} onValueChange={(v) => setQuarter(Number(v))}>
+              <SelectTrigger className="h-8 w-28">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {[1, 2, 3, 4].map((q) => (
+                  <SelectItem key={q} value={String(q)}>Quý {q}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : null}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => Promise.resolve().then(() => loadTopSeries())}
+            disabled={loading}
+            title="Tải lại"
+          >
+            <RefreshCw className={cn('size-4', loading && 'animate-spin')} />
+          </Button>
+        </div>
+      </div>
+      {loading ? (
+        <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" />
+          Đang tải...
+        </div>
+      ) : items.length === 0 ? (
+        <EmptyState icon={TrendingUp} title="Chưa có doanh thu theo kỳ" hint="Khi có doanh thu, top series sẽ hiển thị ở đây." />
+      ) : (
+        <ul className="divide-y rounded-lg border bg-card">
+          {items.map((s, i) => (
+            <PeriodSeriesRow
+              key={s.series_id ?? s.id ?? i}
+              item={s}
+              max={max}
+            />
+          ))}
+        </ul>
+      )}
+      {error ? (
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          Endpoint top-series chưa khả dụng — đang hiển thị dữ liệu revenue_by_series fallback.
+        </p>
+      ) : null}
     </div>
   )
 }
 
-/* ---------- bank card ----------
- * BE chưa có endpoint rút tiền (2026-08-04) → tạm không render UI này.
- * Code tham khảo giữ trong git history, sẽ phục hồi khi BE sẵn sàng.
- */
+/* ---------- bank info card ---------- */
+
+function BankInfoCard({ bankInfo }) {
+  if (!bankInfo) {
+    return (
+      <EmptyState
+        icon={Banknote}
+        title="Chưa có thông tin ngân hàng"
+        hint="Creator cần cập nhật trước khi yêu cầu rút tiền."
+      />
+    )
+  }
+  const hasAccount = Boolean(bankInfo.has_account_number ?? bankInfo.hasAccountNumber)
+  const masked = String(
+    bankInfo.account_number_masked ?? bankInfo.accountNumberMasked ?? '',
+  ).trim()
+  return (
+    <dl className="space-y-2 rounded-xl border bg-card p-4 text-sm">
+      <div className="flex items-center justify-between gap-2">
+        <dt className="text-xs uppercase tracking-wide text-muted-foreground">Ngân hàng</dt>
+        <dd className="font-medium text-foreground">{bankInfo.bank_name || bankInfo.bankName || '—'}</dd>
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <dt className="text-xs uppercase tracking-wide text-muted-foreground">Chủ tài khoản</dt>
+        <dd className="font-medium text-foreground">
+          {bankInfo.account_holder || bankInfo.accountHolder || '—'}
+        </dd>
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <dt className="text-xs uppercase tracking-wide text-muted-foreground">Số tài khoản</dt>
+        <dd className="font-mono text-foreground">
+          {masked || (hasAccount ? '••••••' : '—')}
+        </dd>
+      </div>
+    </dl>
+  )
+}
+
+/* ---------- withdrawals list ---------- */
+
+function WithdrawalList({ items = [] }) {
+  if (items.length === 0) {
+    return (
+      <EmptyState
+        icon={Wallet}
+        title="Chưa có yêu cầu rút tiền"
+        hint="Lịch sử rút tiền sẽ hiển thị tại đây."
+      />
+    )
+  }
+  return (
+    <ul className="divide-y rounded-xl border bg-card">
+      {items.slice(0, 20).map((w, i) => {
+        const amount = String(w.coin_amount_coin_display ?? w.coin_display ?? w.coin_amount ?? '0.00')
+        const vnd = pickVndDisplay(w, [
+          'vnd_amount_display',
+          'vnd_amount',
+          'amount_vnd',
+        ]).number
+        const bank = w.bank_snapshot ?? w.bankSnapshot ?? null
+        const masked = String(
+          bank?.account_number_masked ?? bank?.bank_account_number_masked ?? '',
+        ).trim()
+        return (
+          <li key={w._id ?? w.id ?? i} className="space-y-1 px-4 py-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold tabular-nums text-foreground">
+                  {formatCoinStringWithUnit(amount)}
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  {formatVnd(vnd)} · {formatDate(w.createdAt ?? w.created_at)}
+                </p>
+              </div>
+              <StatusBadge status={w.status} />
+            </div>
+            {bank ? (
+              <p className="truncate text-[11px] text-muted-foreground">
+                {bank.bank_name || '—'} · {bank.account_holder || '—'} ·{' '}
+                <span className="font-mono">{masked || '—'}</span>
+              </p>
+            ) : null}
+            {w.note ? (
+              <p className="text-[11px] text-muted-foreground">Ghi chú: {w.note}</p>
+            ) : null}
+            {w.admin_note ? (
+              <p className="text-[11px] text-muted-foreground">Admin: {w.admin_note}</p>
+            ) : null}
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+/* ---------- collaboration revenue share ---------- */
+
+function CollaborationTable({ rows = [] }) {
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        icon={Sparkles}
+        title="Chưa có dữ liệu hợp tác"
+        hint="Khi có doanh thu hợp tác, bảng phân chia sẽ hiển thị tại đây."
+      />
+    )
+  }
+  return (
+    <div className="overflow-hidden rounded-xl border bg-card">
+      <table className="w-full text-sm">
+        <thead className="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+          <tr>
+            <th className="px-3 py-2 text-left">Series</th>
+            <th className="px-3 py-2 text-left">Vai trò</th>
+            <th className="px-3 py-2 text-right">Coin</th>
+            <th className="px-3 py-2 text-right">Tỉ lệ</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y">
+          {rows.map((row, i) => {
+            const coin = pickCoinDisplay(row, [
+              'share_coin_display',
+              'coin_amount_coin_display',
+              'share_coin',
+              'coin_amount_coin',
+              'share',
+            ]).number
+            const rate = Number(row.share_percent ?? row.sharePercent ?? 0)
+            return (
+              <tr key={row.series_id ?? row.id ?? i}>
+                <td className="px-3 py-2">
+                  <p className="font-medium">{row.series_name ?? row.name ?? '—'}</p>
+                </td>
+                <td className="px-3 py-2 text-muted-foreground">
+                  {row.role ?? row.contribution_role ?? '—'}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  {formatFullCoin(coin)}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  {Number.isFinite(rate) && rate > 0 ? `${rate.toFixed(1)}%` : '—'}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
 
 /* ---------- activity timeline ---------- */
 
@@ -422,122 +758,77 @@ function TimelineItem({ icon: Icon, tone = 'violet', title, subtitle, right, rig
   )
 }
 
-/* ---------- field accessors (BE ground truth 04/08/2026) ----------
- *  BE /admin/users/:id/financials trả raw CoinUnit (integer) cho MỌI tiền.
- *  - Reader: data.financial_summary.{ current_coin, total_deposit, total_purchase, total_refund, total_revenue, total_withdrawal }
- *            data.deposits.history     (Payment list, có coin_amount, amount_vnd, coin_package_id.name, status)
- *            data.purchases.history    (PurchasedChapter list, có price, chapter_id.{chapter_number, series_id.name})
- *            data.transaction_summary  (WalletTransaction aggregate by type)
- *  - Mangaka/Assistant: thêm
- *            data.bank_info.{ bank_name, account_holder, bank_account_number, has_bank_info }
- *            data.revenue_by_series[] = { series_id, series_name, total_coin, by_status.{pending_coin, available_coin, withdrawn_coin} }
- *            data.withdrawals.history  (có coin_amount, vnd_amount, status, bank_snapshot)
- *  - KHÔNG có field topup_history / purchase_history / refund_history / amount_coin / net_coin.
- *
- *  Helper dưới đây đọc cả shape cũ + mới để còn tương thích nếu BE đổi.
- */
-function pickField(obj, ...keys) {
-  if (!obj || typeof obj !== 'object') return undefined
+/* ---------- field accessors ---------- */
+function parseDisplay(raw, keys) {
   for (const k of keys) {
-    if (obj[k] !== undefined && obj[k] !== null) return obj[k]
-  }
-  return undefined
-}
-
-function parseDisplay(raw, ...keys) {
-  const v = pickField(raw, ...keys)
-  if (v == null) return 0
-  if (typeof v === 'string') {
-    const n = Number(v.trim())
-    return Number.isFinite(n) ? n : 0
-  }
-  return Number(v) || 0
-}
-
-function getSummary(readerOrCreators, summary) {
-  const s = summary && typeof summary === 'object' ? summary : {}
-  if (readerOrCreators === 'reader') {
-    return {
-      currentCoin: parseDisplay(s,
-        'current_coin_display', 'current_coin',
-        'balance_coin_display', 'balance_coin', 'balance',
-      ),
-      totalDeposit: parseDisplay(s,
-        'total_deposit_display', 'total_deposited_display',
-        'total_deposit_coin_display', 'total_deposited_coin_display',
-        'total_deposit_coin', 'total_deposited_coin',
-        'total_deposit', 'total_deposited',
-      ),
-      totalPurchase: parseDisplay(s,
-        'total_purchase_display', 'total_spent_display',
-        'total_purchase_coin_display', 'total_spent_coin_display',
-        'total_purchase_coin', 'total_spent_coin',
-        'total_purchase', 'total_spent',
-      ),
-      totalRefund: parseDisplay(s,
-        'total_refund_display',
-        'total_refund_coin_display', 'total_refund',
-      ),
-      pendingRevenue: parseDisplay(s,
-        'pending_revenue_display',
-        'pending_revenue_coin_display', 'pending_revenue_coin',
-        'pending_revenue',
-      ),
-      availableBalance: parseDisplay(s,
-        'available_balance_display',
-        'available_balance_coin_display', 'available_balance_coin',
-        'available_balance',
-      ),
-      depositCount: Number(pickField(readerOrCreators === 'reader' ? s : {}, 'topup_count') ?? 0),
-      purchaseCount: Number(pickField(s, 'purchase_count') ?? 0),
-      raw: s,
+    const v = getByPath(raw, k)
+    if (v == null || v === '') continue
+    if (typeof v === 'string') {
+      const n = Number(v.trim())
+      return Number.isFinite(n) ? n : 0
     }
+    if (typeof v === 'number' && Number.isFinite(v)) return v
   }
-  return {
-    currentCoin: parseDisplay(s,
-      'current_coin_display', 'current_coin',
-      'balance_coin_display', 'balance_coin', 'balance',
-    ),
-    pendingRevenue: parseDisplay(s,
-      'pending_revenue_display',
-      'pending_revenue_coin_display', 'pending_revenue_coin',
-      'pending_balance_display', 'pending_balance_coin_display', 'pending_balance',
-      'pending_revenue',
-    ),
-    availableBalance: parseDisplay(s,
-      'available_balance_display',
-      'available_balance_coin_display', 'available_balance_coin',
-      'available_balance',
-    ),
-    totalRevenue: parseDisplay(s,
-      'total_revenue_display',
-      'total_revenue_coin_display', 'total_revenue_coin',
-      'total_revenue',
-    ),
-    totalDeposit: parseDisplay(s,
-      'total_deposit_display', 'total_deposited_display',
-      'total_deposit_coin_display', 'total_deposited_coin_display',
-      'total_deposit_coin', 'total_deposited_coin',
-      'total_deposit', 'total_deposited',
-    ),
-    totalPurchase: parseDisplay(s,
-      'total_purchase_display', 'total_spent_display',
-      'total_purchase_coin_display', 'total_spent_coin_display',
-      'total_purchase_coin', 'total_spent_coin',
-      'total_purchase', 'total_spent',
-    ),
-    totalRefund: parseDisplay(s,
-      'total_refund_display',
-      'total_refund_coin_display', 'total_refund',
-    ),
-    raw: s,
-  }
+  return 0
+}
+
+/* ---------- revenue history → timeline ---------- */
+function buildRevenueActivity(revenues = []) {
+  if (!Array.isArray(revenues) || revenues.length === 0) return []
+  return revenues.map((r, i) => {
+    const coin = parseDisplay(r, [
+      'coin_amount_coin_display',
+      'coin_amount_coin',
+      'coin_display',
+      'coin_amount',
+      'amount',
+    ])
+    const seriesName = r.series_name ?? r.series?.name ?? 'Series'
+    const chapterNumber = r.chapter_number ?? r.chapter?.chapter_number
+    const ts = r.createdAt ?? r.created_at ?? r.paid_at ?? r.updated_at
+    const status = r.status ?? null
+    return {
+      key: `rev-${r._id ?? r.id ?? i}`,
+      icon: BookOpen,
+      tone: status === 'pending' ? 'amber' : 'emerald',
+      title: `Doanh thu · ${seriesName}${chapterNumber != null ? ` · Chapter ${chapterNumber}` : ''}`,
+      subtitle: status ? `Trạng thái: ${status}` : 'Đã ghi nhận',
+      right: `+ ${formatFullCoin(coin)}`,
+      rightTone: 'in',
+      meta: formatRelative(ts),
+    }
+  })
 }
 
 /* ---------- views ---------- */
 
 function ReaderView({ data }) {
-  const summary = getSummary('reader', data?.financial_summary ?? data?.summary ?? {})
+  const summary = (() => {
+    const s = data?.financial_summary ?? data?.summary ?? {}
+    return {
+      currentCoin: parseDisplay(s, [
+        'current_coin_display', 'current_coin',
+        'balance_coin_display', 'balance_coin', 'balance',
+      ]),
+      totalDeposit: parseDisplay(s, [
+        'total_deposit_display', 'total_deposited_display',
+        'total_deposit_coin_display', 'total_deposited_coin_display',
+        'total_deposit_coin', 'total_deposited_coin',
+        'total_deposit', 'total_deposited',
+      ]),
+      totalPurchase: parseDisplay(s, [
+        'total_purchase_display', 'total_spent_display',
+        'total_purchase_coin_display', 'total_spent_coin_display',
+        'total_purchase_coin', 'total_spent_coin',
+        'total_purchase', 'total_spent',
+      ]),
+      totalRefund: parseDisplay(s, [
+        'total_refund_display',
+        'total_refund_coin_display', 'total_refund',
+      ]),
+      raw: s,
+    }
+  })()
   const deposits = useMemo(
     () =>
       Array.isArray(data?.deposits?.history)
@@ -561,7 +852,6 @@ function ReaderView({ data }) {
     [data]
   )
   const refunds = useMemo(() => {
-    // BE không trả refund_history riêng; lấy từ transaction_summary.
     const txSum = Array.isArray(data?.transaction_summary) ? data.transaction_summary : []
     const refundRow = txSum.find((r) => r._id === 'Refund' || r.type === 'Refund')
     return refundRow ? [refundRow] : []
@@ -575,11 +865,11 @@ function ReaderView({ data }) {
     const items = []
     deposits.forEach((t, i) => {
       const packageName = t.coin_package_id?.name ?? t.package_name ?? t.package ?? t.description ?? 'Nạp coin'
-      const coinAmount = parseDisplay(t,
+      const coinAmount = parseDisplay(t, [
         'coin_display', 'coin_amount_display',
         'coin_amount_coin_display', 'coin_amount_coin',
         'coin_amount', 'coin', 'amount',
-      )
+      ])
       const ts = t.createdAt ?? t.created_at ?? t.time
       items.push({
         key: `top-${t._id ?? t.id ?? i}`,
@@ -596,7 +886,7 @@ function ReaderView({ data }) {
     purchases.forEach((p, i) => {
       const seriesName = p.chapter_id?.series_id?.name ?? p.series_name ?? p.manga_title ?? 'Mua chapter'
       const chapterNumber = p.chapter_id?.chapter_number ?? p.chapter_number
-      const priceRaw = parseDisplay(p, 'price_coin_display', 'price_display', 'price_coin', 'price', 'amount')
+      const priceRaw = parseDisplay(p, ['price_coin_display', 'price_display', 'price_coin', 'price', 'amount'])
       const ts = p.purchased_at ?? p.createdAt ?? p.created_at ?? p.time
       items.push({
         key: `buy-${p._id ?? p.id ?? i}`,
@@ -617,7 +907,7 @@ function ReaderView({ data }) {
         title: 'Hoàn coin',
         subtitle: r.reason ?? 'Hoàn tiền từ hệ thống',
         meta: `${r.total_coin_display ?? r.total_coin ?? r.total ?? 0} coin tổng`,
-        right: `+ ${formatFullCoin(parseDisplay(r, 'total_coin_display', 'total_coin', 'total'))}`,
+        right: `+ ${formatFullCoin(parseDisplay(r, ['total_coin_display', 'total_coin', 'total']))}`,
         rightTone: 'in',
       })
     )
@@ -703,7 +993,7 @@ function ReaderView({ data }) {
                     tone="emerald"
                     title={t.coin_package_id?.name ?? t.package_name ?? t.package ?? t.description ?? 'Nạp coin'}
                     subtitle={formatDate(t.createdAt ?? t.created_at ?? t.time)}
-                    right={`+ ${formatFullCoin(parseDisplay(t, 'coin_display', 'coin_amount_display', 'coin_amount_coin_display', 'coin_amount_coin', 'coin_amount', 'coin', 'amount'))}`}
+                    right={`+ ${formatFullCoin(parseDisplay(t, ['coin_display', 'coin_amount_display', 'coin_amount_coin_display', 'coin_amount_coin', 'coin_amount', 'coin', 'amount']))}`}
                     rightTone="in"
                     meta={<StatusBadge status={t.status} />}
                   />
@@ -733,7 +1023,7 @@ function ReaderView({ data }) {
                           : '—'
                     }
                     meta={formatDate(p.purchased_at ?? p.createdAt ?? p.created_at ?? p.time)}
-                    right={`− ${formatFullCoin(parseDisplay(p, 'price_coin_display', 'price_display', 'price_coin_display', 'price_display', 'price_coin', 'price', 'price_coin', 'amount'))}`}
+                    right={`− ${formatFullCoin(parseDisplay(p, ['price_coin_display', 'price_display', 'price_coin', 'price', 'amount']))}`}
                     rightTone="out"
                   />
                 ))}
@@ -748,8 +1038,75 @@ function ReaderView({ data }) {
   )
 }
 
-function EarnView({ data }) {
-  const summary = getSummary('creator', data?.financial_summary ?? data?.summary ?? {})
+function EarnView({ data, userId, role, transactions, transactionsPagination, transactionsTotal, onChangeTxParams, txLoading }) {
+  const s = data?.financial_summary ?? data?.summary ?? {}
+
+  // ---- Revenue status: data.revenues.by_status (mới) → data.revenue_by_status (cũ) ----
+  const revenuesRoot = data?.revenues
+  const byStatus =
+    revenuesRoot && typeof revenuesRoot === 'object' && revenuesRoot.by_status
+      ? revenuesRoot.by_status
+      : (data?.revenue_by_status && typeof data.revenue_by_status === 'object'
+        ? data.revenue_by_status
+        : {})
+
+  // ---- Cooperation: data.cooperation_revenue_share (mới) → data.collaboration_revenue (cũ) ----
+  const collaborations = useMemo(
+    () =>
+      Array.isArray(data?.cooperation_revenue_share)
+        ? data.cooperation_revenue_share
+        : Array.isArray(data?.collaboration_revenue)
+          ? data.collaboration_revenue
+          : [],
+    [data]
+  )
+
+  const summary = {
+    pendingBalance: pickCoinDisplay(s, [
+      'pending_revenue_display',
+      'pending_revenue_coin_display',
+      'pending_balance_display',
+      'pending_balance_coin_display',
+      'pending_revenue_coin',
+      'pending_balance_coin',
+      'pending_revenue',
+      'pending_balance',
+    ]).number,
+    availableBalance: pickCoinDisplay(s, [
+      'available_balance_display',
+      'available_balance_coin_display',
+      'available_balance_coin',
+      'available_balance',
+    ]).number,
+    totalRevenue: pickCoinDisplay(s, [
+      'total_revenue_display',
+      'total_revenue_coin_display',
+      'total_revenue_coin',
+      'total_revenue',
+    ]).number,
+    totalWithdrawal: pickCoinDisplay(s, [
+      'total_withdrawal_display',
+      'total_withdrawal_coin_display',
+      'total_withdrawal_coin',
+      'total_withdrawal',
+      'total_withdrawn_coin_display',
+      'total_withdrawn_coin',
+      'total_withdrawn',
+    ]).number,
+  }
+
+  // ---- Revenue history: data.revenues.history → timeline thật ----
+  const revenueHistory = useMemo(
+    () =>
+      Array.isArray(revenuesRoot?.history)
+        ? revenuesRoot.history
+        : Array.isArray(data?.revenue?.history)
+          ? data.revenue.history
+          : [],
+    [revenuesRoot, data]
+  )
+
+  // ---- revenue_by_series: chỉ dùng làm fallback khi endpoint top-series không khả dụng ----
   const bySeries = useMemo(
     () =>
       Array.isArray(data?.revenue_by_series)
@@ -760,46 +1117,62 @@ function EarnView({ data }) {
     [data]
   )
 
-  // BE: available_balance / pending_revenue (raw integer).
-  // Map về Coin cho UI.
+  const statusDisplay = {
+    pending: pickCoinDisplay(byStatus, [
+      'pending_coin_display',
+      'pending_coin',
+      'pending',
+    ]),
+    available: pickCoinDisplay(byStatus, [
+      'available_coin_display',
+      'available_coin',
+      'available',
+    ]),
+    withdrawn: pickCoinDisplay(byStatus, [
+      'withdrawn_coin_display',
+      'withdrawn_coin',
+      'withdrawn',
+    ]),
+  }
+
+  const withdrawals = useMemo(
+    () =>
+      Array.isArray(data?.withdrawals?.history)
+        ? data.withdrawals.history
+        : Array.isArray(data?.withdrawals)
+          ? data.withdrawals
+          : [],
+    [data]
+  )
+
+  const bankInfo = data?.bank_info ?? data?.bankInfo ?? null
+  const withdrawalsTotal =
+    Number(data?.withdrawals?.total ?? data?.withdrawal_count ?? 0) ||
+    Number(transactionsTotal ?? 0)
+
   const available = Number(summary.availableBalance ?? 0)
-  const pending = Number(summary.pendingRevenue ?? 0)
+  const pending = Number(summary.pendingBalance ?? 0)
   const total = available + pending
   const pct = total > 0 ? (available / total) * 100 : 100
 
-  const activity = useMemo(() => {
-    const items = []
-    bySeries.forEach((s, i) => {
-      // BE revenue_by_series: ưu tiên *_coin_display > *_coin > raw.
-      const availableCoin = parseDisplay(s,
-        'available_coin_display', 'by_status.available_coin_display',
-        'available_coin', 'by_status.available_coin',
-        'available',
-      )
-      const pendingCoin = parseDisplay(s,
-        'pending_coin_display', 'by_status.pending_coin_display',
-        'pending_coin', 'by_status.pending_coin',
-        'pending',
-      )
-      const totalCoin = parseDisplay(s,
-        'total_coin_display', 'total_coin',
-        'total',
-      ) || (availableCoin + pendingCoin)
-      if (totalCoin > 0) {
-        items.push({
-          key: `earn-${s.series_id ?? s.id ?? i}`,
-          icon: BookOpen,
-          tone: 'emerald',
-          title: `Doanh thu · ${s.series_name ?? s.name ?? '—'}`,
-          subtitle: `Tổng ${formatCompact(totalCoin)} · Pending ${formatCompact(pendingCoin)}`,
-          meta: formatRelative(s.last_paid_at ?? s.updated_at) || null,
-          right: `+ ${formatFullCoin(totalCoin)}`,
-          rightTone: 'in',
-        })
-      }
-    })
-    return items.slice(0, 12)
-  }, [bySeries])
+  const activity = useMemo(() => buildRevenueActivity(revenueHistory), [revenueHistory])
+
+  // Series có doanh thu — đếm trên revenue_by_series (fallback) HOẶC top series hiện tại.
+  const seriesWithRevenue = useMemo(() => {
+    if (Array.isArray(bySeries) && bySeries.length > 0) {
+      return bySeries.filter((s) => {
+        const totalCoin = parseDisplay(s, [
+          'total_coin_display',
+          'total_coin',
+          'total',
+        ])
+        return totalCoin > 0
+      }).length
+    }
+    return revenueHistory.length > 0
+      ? new Set(revenueHistory.map((r) => r.series_id ?? r.series?.id)).size
+      : 0
+  }, [bySeries, revenueHistory])
 
   return (
     <div className="space-y-5">
@@ -811,6 +1184,9 @@ function EarnView({ data }) {
         ratio={{ pct }}
       />
 
+      {/* KPI: Available & Pending đã hiển thị ở HeroCard → tránh trùng.
+          Chỉ giữ các metric có ý nghĩa khác: tổng kiếm, đã chi trả hoàn tất,
+          coin đã đưa vào yêu cầu rút, số series có doanh thu. */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiTile
           label="Tổng kiếm"
@@ -820,42 +1196,88 @@ function EarnView({ data }) {
           tone="violet"
         />
         <KpiTile
-          label="Số series"
-          value={bySeries.length}
-          hint="Đang phát hành"
-          icon={BookOpen}
+          label="Đã chi trả hoàn tất"
+          value={summary.totalWithdrawal}
+          hint="Withdrawal đã hoàn tất"
+          icon={ArrowUpRight}
           tone="emerald"
+        />
+        <KpiTile
+          label="Coin đã đưa vào yêu cầu rút"
+          value={statusDisplay.withdrawn.number}
+          hint={statusDisplay.withdrawn.display}
+          icon={Wallet}
+          tone="blue"
+        />
+        <KpiTile
+          label="Series có doanh thu"
+          value={seriesWithRevenue}
+          hint="Đã phát sinh doanh thu"
+          icon={BookOpen}
+          tone="amber"
         />
       </div>
 
-      <div className="rounded-xl border bg-card p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <div>
-            <p className="text-sm font-semibold">Top series kiếm coin</p>
-            <p className="text-xs text-muted-foreground">
-              Sắp xếp theo tổng coin
+      {/* Bank info + progress thay cho Phân bổ doanh thu */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+            Thông tin ngân hàng
+          </p>
+          <BankInfoCard bankInfo={bankInfo} />
+        </div>
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+            Phân bổ doanh thu
+          </p>
+          <div className="rounded-xl border bg-card p-4">
+            <div className="flex items-center justify-between text-sm">
+              <span className="font-medium">Đang chờ duyệt</span>
+              <span className="tabular-nums">{formatFullCoin(pending)}</span>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-zinc-200/60 dark:bg-zinc-800/60">
+              <div
+                className="h-full rounded-full bg-amber-500"
+                style={{ width: `${total > 0 ? Math.min(100, (pending / total) * 100) : 0}%` }}
+              />
+            </div>
+            <div className="mt-3 flex items-center justify-between text-sm">
+              <span className="font-medium">Có thể rút</span>
+              <span className="tabular-nums">{formatFullCoin(available)}</span>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-zinc-200/60 dark:bg-zinc-800/60">
+              <div
+                className="h-full rounded-full bg-emerald-500"
+                style={{ width: `${total > 0 ? Math.min(100, (available / total) * 100) : 0}%` }}
+              />
+            </div>
+            <p className="mt-3 text-[11px] text-muted-foreground">
+              Coin đã đưa vào yêu cầu rút: <strong className="text-foreground">{formatFullCoin(statusDisplay.withdrawn.number)}</strong>
             </p>
           </div>
-          <Badge variant="outline" className="font-mono">
-            {bySeries.length}
-          </Badge>
         </div>
-        <TopSeriesChart series={bySeries} />
       </div>
 
-      <Tabs defaultValue="activity" className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
+      {/* ===== Tab Doanh thu (Top series theo kỳ — DUY NHẤT) ===== */}
+      <Tabs defaultValue="revenue" className="w-full">
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="revenue">Doanh thu</TabsTrigger>
           <TabsTrigger value="activity">Hoạt động</TabsTrigger>
-          <TabsTrigger value="series">Doanh thu ({bySeries.length})</TabsTrigger>
+          <TabsTrigger value="withdrawals">Rút tiền ({withdrawals.length})</TabsTrigger>
+          <TabsTrigger value="transactions">Biến động ví</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="revenue">
+          <TopSeriesPeriod userId={userId} role={role} data={data} />
+        </TabsContent>
 
         <TabsContent value="activity">
           <div className="rounded-xl border bg-card">
             {activity.length === 0 ? (
               <EmptyState
                 icon={Sparkles}
-                title="Chưa có hoạt động"
-                hint="Doanh thu từ các series sẽ hiển thị tại đây."
+                title="Chưa có hoạt động doanh thu"
+                hint="Khi có doanh thu, lịch sử sẽ hiển thị tại đây."
               />
             ) : (
               <ul className="divide-y px-4">
@@ -867,12 +1289,202 @@ function EarnView({ data }) {
           </div>
         </TabsContent>
 
-        <TabsContent value="series">
-          <div className="rounded-xl border bg-card p-4">
-            <TopSeriesChart series={bySeries} />
+        <TabsContent value="withdrawals">
+          <div className="space-y-4">
+            <p className="text-[11px] text-muted-foreground">
+              {withdrawalsTotal > 0
+                ? `${withdrawalsTotal} yêu cầu rút (BE cung cấp tổng)`
+                : `${withdrawals.length} yêu cầu đang hiển thị`}
+            </p>
+            <WithdrawalList items={withdrawals} />
+            {collaborations.length > 0 ? (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                  Phân chia doanh thu hợp tác
+                </p>
+                <CollaborationTable rows={collaborations} />
+              </div>
+            ) : null}
           </div>
         </TabsContent>
+
+        <TabsContent value="transactions">
+          <PaginatedTransactions
+            rows={transactions}
+            pagination={transactionsPagination}
+            onChangeParams={onChangeTxParams}
+            loading={txLoading}
+            fallback={null}
+          />
+        </TabsContent>
       </Tabs>
+    </div>
+  )
+}
+
+/* ---------- paginated transactions ---------- */
+
+const TX_TYPE_OPTIONS = [
+  { value: 'all', label: 'Tất cả' },
+  { value: 'Deposit', label: 'Nạp Coin' },
+  { value: 'Purchase', label: 'Mua chapter' },
+  { value: 'Revenue', label: 'Doanh thu' },
+  { value: 'Withdrawal', label: 'Rút Coin' },
+  { value: 'Refund', label: 'Hoàn tiền' },
+]
+
+function PaginatedTransactions({
+  rows,
+  pagination,
+  onChangeParams,
+  loading,
+}) {
+  const [type, setType] = useState('all')
+  const [sort, setSort] = useState('desc')
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
+
+  // Đồng bộ filters với BE qua callback — CHỈ set state, KHÔNG gọi API bên trong.
+  useEffect(() => {
+    onChangeParams?.({
+      type: type === 'all' ? undefined : type,
+      sort,
+      from_date: fromDate || undefined,
+      to_date: toDate || undefined,
+      page: 1,
+    })
+  }, [type, sort, fromDate, toDate, onChangeParams])
+
+  const list = Array.isArray(rows) ? rows : []
+  const page = pagination?.page ?? 1
+  const pages = pagination?.pages ?? 1
+  const total = pagination?.total ?? list.length
+
+  return (
+    <div className="space-y-3 rounded-xl border bg-card p-4">
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+        <div className="space-y-1">
+          <Label htmlFor="tx-type" className="text-xs">Loại</Label>
+          <Select value={type} onValueChange={setType}>
+            <SelectTrigger id="tx-type" className="h-8">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TX_TYPE_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="tx-sort" className="text-xs">Sắp xếp</Label>
+          <Select value={sort} onValueChange={setSort}>
+            <SelectTrigger id="tx-sort" className="h-8">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="desc">Mới nhất</SelectItem>
+              <SelectItem value="asc">Cũ nhất</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="tx-from" className="text-xs">Từ ngày</Label>
+          <Input
+            id="tx-from"
+            type="date"
+            value={fromDate}
+            onChange={(e) => setFromDate(e.target.value)}
+            className="h-8"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="tx-to" className="text-xs">Đến ngày</Label>
+          <Input
+            id="tx-to"
+            type="date"
+            value={toDate}
+            onChange={(e) => setToDate(e.target.value)}
+            className="h-8"
+          />
+        </div>
+      </div>
+
+      <p className="text-xs text-muted-foreground">{total} giao dịch</p>
+
+      {loading ? (
+        <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" />
+          Đang tải...
+        </div>
+      ) : list.length === 0 ? (
+        <EmptyState icon={Wallet} title="Chưa có giao dịch" />
+      ) : (
+        <ul className="divide-y rounded-lg border bg-card">
+          {list.map((entry, i) => {
+            const amount = pickCoinDisplay(entry, [
+              'coin_amount_coin_display',
+              'coin_amount_coin',
+              'coin_display',
+              'coin_amount',
+              'amount',
+            ])
+            const direction =
+              entry.direction === 'in'
+                ? 'in'
+                : entry.direction === 'out'
+                  ? 'out'
+                  : entry.type === 'Purchase' || entry.type === 'Withdrawal'
+                    ? 'out'
+                    : 'in'
+            const rightClass =
+              direction === 'in'
+                ? 'text-emerald-600 dark:text-emerald-400'
+                : 'text-rose-600 dark:text-rose-400'
+            return (
+              <li
+                key={entry._id ?? entry.id ?? i}
+                className="flex items-center justify-between gap-3 px-4 py-2 text-sm"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-medium">
+                    {entry.description ?? entry.type ?? '—'}
+                  </p>
+                  <p className="truncate text-[11px] text-muted-foreground">
+                    {entry.type ?? '—'} · {formatDate(entry.createdAt ?? entry.created_at)}
+                  </p>
+                </div>
+                <span className={cn('shrink-0 font-semibold tabular-nums', rightClass)}>
+                  {direction === 'in' ? '+' : '−'}
+                  {formatCoinStringWithUnit(amount.display)}
+                </span>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+
+      {pages > 1 ? (
+        <div className="flex items-center justify-end gap-2 text-xs">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={page <= 1 || loading}
+            onClick={() => onChangeParams?.({ page: page - 1 })}
+          >
+            Trước
+          </Button>
+          <span>Trang {page} / {pages}</span>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={page >= pages || loading}
+            onClick={() => onChangeParams?.({ page: page + 1 })}
+          >
+            Sau
+          </Button>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -949,37 +1561,115 @@ export default function UserFinancialDialog({ user, open, onClose }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-
-  const load = useCallback(() => {
-    const id = user?.id
-    if (!id) return
-    setLoading(true)
-    setError('')
-    api
-      .getUserFinancials(id)
-      .then((res) => setData(res))
-      .catch((err) => {
-        const msg = err?.response?.data?.message || 'Không tải được dữ liệu tài chính'
-        setError(msg)
-        toast.error(msg)
-      })
-      .finally(() => setLoading(false))
-  }, [user?.id])
-
-  useEffect(() => {
-    if (!open || !user?.id) return
-    let cancelled = false
-    const run = () => {
-      if (cancelled) return
-      load()
-    }
-    run()
-    return () => { cancelled = true }
-  }, [open, user?.id, load])
+  const [transactions, setTransactions] = useState([])
+  const [txPagination, setTxPagination] = useState(null)
+  const [txTotal, setTxTotal] = useState(0)
+  const [txParams, setTxParams] = useState({ page: 1, limit: 50 })
+  const [txLoading, setTxLoading] = useState(false)
 
   const role = user?.role ?? data?.user_role ?? data?.role ?? ''
   const roleNormalized = String(role).toLowerCase()
   const fetchedAt = data?.fetched_at ?? data?.last_sync ?? null
+
+  /* =========================================================
+   * Effect financial detail — chỉ phụ thuộc open + user.id.
+   * ========================================================= */
+  useEffect(() => {
+    if (!open || !user?.id) return
+    let cancelled = false
+    Promise.resolve()
+      .then(async () => {
+        setLoading(true)
+        setError('')
+        try {
+          const res = await api.getUserFinancials(user.id)
+          if (!cancelled) setData(res)
+        } catch (err) {
+          if (cancelled) return
+          const msg = err?.response?.data?.message || 'Không tải được dữ liệu tài chính'
+          setError(msg)
+          toast.error(msg)
+        } finally {
+          if (!cancelled) setLoading(false)
+        }
+      })
+    return () => { cancelled = true }
+  }, [open, user?.id])
+
+  /* =========================================================
+   * Effect transactions — phụ thuộc open, user.id, role và txParams.
+   * Đổi txParams KHÔNG gọi lại getUserFinancials.
+   * Reader KHÔNG render paginated transactions → KHÔNG gọi endpoint.
+   * ========================================================= */
+  useEffect(() => {
+    if (!open || !user?.id) return
+    if (roleNormalized !== 'mangaka' && roleNormalized !== 'assistant') {
+      Promise.resolve().then(() => {
+        setTransactions([])
+        setTxPagination(null)
+        setTxTotal(0)
+        setTxLoading(false)
+      })
+      return
+    }
+    let cancelled = false
+    Promise.resolve()
+      .then(async () => {
+        setTxLoading(true)
+        try {
+          const res = await api.getUserFinancialsTransactions(user.id, txParams)
+          const list = Array.isArray(res?.transactions)
+            ? res.transactions
+            : Array.isArray(res?.items)
+              ? res.items
+              : Array.isArray(res?.data)
+                ? res.data
+                : Array.isArray(res)
+                  ? res
+                  : []
+          if (cancelled) return
+          setTransactions(list)
+          setTxPagination(res?.pagination ?? null)
+          setTxTotal(Number(res?.pagination?.total ?? list.length))
+        } catch {
+          if (cancelled) return
+          setTransactions([])
+          setTxPagination(null)
+          setTxTotal(0)
+        } finally {
+          if (!cancelled) setTxLoading(false)
+        }
+      })
+    return () => { cancelled = true }
+  }, [open, user?.id, roleNormalized, txParams])
+
+  const onChangeTxParams = useCallback(
+    (next) => {
+      // CHỈ set state, KHÔNG gọi API bên trong callback.
+      setTxParams((prev) => ({ ...prev, ...next }))
+    },
+    [],
+  )
+
+  const handleRefresh = useCallback(() => {
+    const id = user?.id
+    if (!id) return
+    // Re-trigger cả financial detail + transactions.
+    setData(null)
+    setLoading(true)
+    Promise.resolve()
+      .then(async () => {
+        try {
+          const res = await api.getUserFinancials(id)
+          setData(res)
+        } catch (err) {
+          const msg = err?.response?.data?.message || 'Không tải được dữ liệu tài chính'
+          toast.error(msg)
+        } finally {
+          setLoading(false)
+        }
+      })
+  }, [user])
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose?.()}>
@@ -997,7 +1687,7 @@ export default function UserFinancialDialog({ user, open, onClose }) {
             user={user}
             role={role}
             fetchedAt={fetchedAt}
-            onRefresh={load}
+            onRefresh={handleRefresh}
             loading={loading}
           />
           <button
@@ -1032,7 +1722,7 @@ export default function UserFinancialDialog({ user, open, onClose }) {
                   <p className="text-sm font-medium">Không tải được dữ liệu</p>
                   <p className="truncate text-xs opacity-80">{error}</p>
                 </div>
-                <Button size="sm" variant="outline" onClick={load}>
+                <Button size="sm" variant="outline" onClick={handleRefresh}>
                   Thử lại
                 </Button>
               </div>
@@ -1041,7 +1731,16 @@ export default function UserFinancialDialog({ user, open, onClose }) {
             ) : roleNormalized === 'reader' ? (
               <ReaderView data={data} />
             ) : roleNormalized === 'mangaka' || roleNormalized === 'assistant' ? (
-              <EarnView data={data} />
+              <EarnView
+                data={data}
+                userId={user.id}
+                role={role}
+                transactions={transactions}
+                transactionsPagination={txPagination}
+                transactionsTotal={txTotal}
+                onChangeTxParams={onChangeTxParams}
+                txLoading={txLoading}
+              />
             ) : (
               <UnknownRoleView role={role} />
             )}

@@ -9,6 +9,7 @@ import Users from '@/pages/Admin/Users/Users.jsx'
 import Profile from '@/pages/Admin/Profile/Profile.jsx'
 import Rankings from '@/pages/Admin/Rankings/Rankings.jsx'
 import Finance from '@/pages/Admin/Finance/Finance.jsx'
+import AdminWithdrawals from '@/pages/Admin/Withdrawals/AdminWithdrawals.jsx'
 import PublicationCalendar from '@/pages/Admin/PublicationCalendar/PublicationCalendar.jsx'
 import EndRequests from '@/pages/Admin/EndRequests/EndRequests.jsx'
 import AdminNotifications from '@/pages/Admin/Notifications/AdminNotifications.jsx'
@@ -130,6 +131,7 @@ export default function App() {
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="rankings" element={<Rankings />} />
           <Route path="finance" element={<Finance />} />
+          <Route path="withdrawals" element={<AdminWithdrawals />} />
           <Route path="publication-calendar" element={<PublicationCalendar />} />
           <Route path="manga" element={<AdminManga />} />
           <Route path="chapters" element={<Chapters />} />

@@ -126,3 +126,69 @@ export function formatDateTime(value) {
     minute: '2-digit',
   })
 }
+
+/**
+ * Đọc giá trị từ object theo dot path — vd: "by_status.available_coin_display".
+ * Trả về `undefined` nếu bất kỳ segment nào không tồn tại.
+ */
+export function getByPath(obj, path) {
+  if (obj == null || path == null) return undefined
+  const segments = String(path).split('.').filter(Boolean)
+  if (segments.length === 0) return undefined
+  let cur = obj
+  for (const seg of segments) {
+    if (cur == null || typeof cur !== 'object') return undefined
+    cur = cur[seg]
+  }
+  return cur
+}
+
+/**
+ * Helper dùng chung để lấy giá trị coin display ưu tiên.
+ * Thứ tự ưu tiên (tham số `keys`):
+ *   1. *_coin_display (string) — render trực tiếp, KHÔNG parse rồi reformat.
+ *   2. *_coin (number)         — fallback number.
+ *   3. raw CoinUnit            — CHỈ dùng khi không có display field.
+ *
+ * Trả về { display, number }:
+ *   - display: string hiển thị (giữ nguyên "2.40"), fallback "0.00".
+ *   - number: number để tính toán (parse từ string).
+ */
+export function pickCoinDisplay(obj, keys = []) {
+  if (!obj || typeof obj !== 'object') {
+    return { display: '0.00', number: 0 }
+  }
+  for (const k of keys) {
+    const v = getByPath(obj, k)
+    if (v == null || v === '') continue
+    if (typeof v === 'string') {
+      return { display: v, number: parseCoinString(v) }
+    }
+    if (typeof v === 'number' && Number.isFinite(v)) {
+      return { display: v.toFixed(2), number: v }
+    }
+  }
+  return { display: '0.00', number: 0 }
+}
+
+/**
+ * Helper dùng chung để lấy string số VND.
+ * Nếu BE trả *_vnd_display → ưu tiên; fallback *_vnd (number).
+ */
+export function pickVndDisplay(obj, keys = []) {
+  if (!obj || typeof obj !== 'object') {
+    return { display: 0, number: 0 }
+  }
+  for (const k of keys) {
+    const v = getByPath(obj, k)
+    if (v == null || v === '') continue
+    if (typeof v === 'string') {
+      const n = parseCoinString(v)
+      return { display: n, number: n }
+    }
+    if (typeof v === 'number' && Number.isFinite(v)) {
+      return { display: v, number: v }
+    }
+  }
+  return { display: 0, number: 0 }
+}

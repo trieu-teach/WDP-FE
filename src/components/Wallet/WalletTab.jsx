@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Loader2, Wallet, ArrowDownLeft, ArrowUpRight, Receipt, Clock } from 'lucide-react'
+import { Loader2, Wallet, ArrowDownLeft, ArrowUpRight, Receipt, Clock, Building2, RefreshCcw } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -17,16 +17,18 @@ import {
   walletService,
   LEDGER_TYPES,
   ledgerTypeLabel,
-  isInflow,
+  resolveDirection,
 } from '@/api/wallet.service.js'
+import { bankInformationService } from '@/api/bankInformation.service.js'
 import {
-  formatCoins as formatCoinValue,
   formatCoinString,
   formatCoinStringWithUnit,
   formatVnd,
   formatDateTime,
 } from '@/utils/coinFormatter.js'
 import { cn } from '@/lib/utils'
+import BankInformationForm from '@/components/Wallet/BankInformationForm.jsx'
+import WithdrawalPanel from '@/components/Wallet/WithdrawalPanel.jsx'
 
 /* ---------- Filter options theo BE spec (type PascalCase) ---------- */
 const LEDGER_FILTER_OPTIONS = [
@@ -35,6 +37,7 @@ const LEDGER_FILTER_OPTIONS = [
   { value: LEDGER_TYPES.REFUND, label: 'Hoàn tiền' },
   { value: LEDGER_TYPES.DEPOSIT, label: 'Nạp Coin' },
   { value: LEDGER_TYPES.PURCHASE, label: 'Mua chapter' },
+  { value: LEDGER_TYPES.WITHDRAWAL, label: 'Rút Coin' },
 ]
 
 function SummaryCard({ label, value, hint, icon: Icon, tone = 'default' }) {
@@ -63,11 +66,14 @@ function SummaryCard({ label, value, hint, icon: Icon, tone = 'default' }) {
 }
 
 function LedgerRow({ entry }) {
-  const inflow = entry.direction === 'in' || isInflow(entry.type)
+  const direction = resolveDirection(entry) ?? (entry.type === LEDGER_TYPES.WITHDRAWAL ? 'out' : null)
+  const inflow = direction === 'in'
   const AmountIcon = inflow ? ArrowDownLeft : ArrowUpRight
   const amountColor = inflow ? 'text-emerald-700' : 'text-rose-700'
   const amountPrefix = inflow ? '+' : '-'
-  const display = entry.amountCoinDisplay || String(Math.abs(entry.amountCoin))
+  // BE trả sẵn *_display — render trực tiếp để giữ nguyên "2.40".
+  const display = String(entry.amountCoinDisplay ?? entry.amountCoinString ?? '0.00')
+  const amountNumber = Math.abs(Number(display.replace(',', '.')) || Number(entry.amountCoin) || 0)
   return (
     <li className="flex items-center justify-between gap-3 border-b border-zinc-100 py-3 last:border-b-0">
       <div className="flex min-w-0 items-start gap-3">
@@ -88,7 +94,7 @@ function LedgerRow({ entry }) {
       </div>
       <div className="shrink-0 text-right">
         <div className={cn('text-sm font-semibold tabular-nums', amountColor)}>
-          {amountPrefix}{formatCoinString(Math.abs(parseFloat(display) || 0))}
+          {amountPrefix}{formatCoinString(amountNumber.toFixed(2))}
         </div>
         {entry.vndAmount > 0 ? (
           <div className="text-[11px] tabular-nums text-zinc-400">{formatVnd(entry.vndAmount)}</div>
@@ -100,10 +106,34 @@ function LedgerRow({ entry }) {
 
 export default function WalletTab() {
   const [summary, setSummary] = useState(null)
-  const [ledger, setLedger] = useState({ items: [], pagination: { page: 1, limit: 20, total: 0, pages: 1 } })
+  const [ledger, setLedger] = useState({
+    items: [],
+    pagination: { page: 1, limit: 20, total: 0, pages: 1 },
+  })
+  const [bankInfo, setBankInfo] = useState(null)
+  const [bankLoading, setBankLoading] = useState(true)
+  const [bankError, setBankError] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [ledgerType, setLedgerType] = useState('all')
+  const [refreshTick, setRefreshTick] = useState(0)
+
+  /**
+   * GET /profile — single source of truth cho bankInfo.
+   * Lưu ý: không truyền role vào service — endpoint BE cố định là /profile.
+   */
+  const loadBankInfo = useCallback(async () => {
+    setBankLoading(true)
+    setBankError('')
+    try {
+      const info = await bankInformationService.get()
+      setBankInfo(info)
+    } catch (err) {
+      setBankError(getApiErrorMessage(err, 'Không tải được thông tin ngân hàng.'))
+    } finally {
+      setBankLoading(false)
+    }
+  }, [])
 
   const loadAll = useCallback(async () => {
     setLoading(true)
@@ -124,7 +154,30 @@ export default function WalletTab() {
 
   useEffect(() => {
     void loadAll()
-  }, [loadAll])
+  }, [loadAll, refreshTick])
+
+  // Tách riêng useEffect cho bankInfo để tránh gọi GET /profile mỗi lần refresh wallet summary.
+  useEffect(() => {
+    void loadBankInfo()
+  }, [loadBankInfo])
+
+  /**
+   * Sau khi BankInformationForm lưu thành công:
+   *  - cập nhật bankInfo/hasBankInfo ngay lập tức (để WithdrawalPanel mở khoá);
+   *  - refresh wallet summary + transactions (số dư có thể đã thay đổi).
+   */
+  const handleBankSaved = useCallback(
+    (updated) => {
+      if (updated && typeof updated === 'object') {
+        setBankInfo(updated)
+      } else {
+        // Fallback: refetch /profile nếu form không trả về data.
+        void loadBankInfo()
+      }
+      setRefreshTick((t) => t + 1)
+    },
+    [loadBankInfo],
+  )
 
   const filteredLedger = ledgerType === 'all'
     ? ledger.items
@@ -156,15 +209,28 @@ export default function WalletTab() {
   const pendingCoinDisplay = summary?.pendingBalanceCoinDisplay ?? '0.00'
   const earningsCoinDisplay = summary?.lifetimeEarningsCoinDisplay ?? '0.00'
   const withdrawnCoinDisplay = summary?.lifetimeWithdrawnCoinDisplay ?? '0.00'
-  const availableCoin = summary?.availableBalanceCoin ?? 0
-  const rate = summary?.coinToVndRate ?? 100
-  const availableVnd = summary?.availableBalanceVnd ?? Math.round(availableCoin * rate)
-  const pendingVnd = summary?.pendingBalanceVnd ?? Math.round((summary?.pendingBalanceCoin ?? 0) * rate)
-  const earningsVnd = summary?.lifetimeEarningsVnd ?? Math.round((summary?.lifetimeEarningsCoin ?? 0) * rate)
-  const withdrawnVnd = summary?.lifetimeWithdrawnVnd ?? Math.round((summary?.lifetimeWithdrawnCoin ?? 0) * rate)
+  const availableVnd = summary?.availableBalanceVnd ?? 0
+  const pendingVnd = summary?.pendingBalanceVnd ?? 0
+  const earningsVnd = summary?.lifetimeEarningsVnd ?? 0
+  const withdrawnVnd = summary?.lifetimeWithdrawnVnd ?? 0
+
+  const hasBankInfo = Boolean(bankInfo?.hasBankInfo)
 
   return (
     <div className="space-y-6">
+      <div className="flex items-center justify-end">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => setRefreshTick((t) => t + 1)}
+          disabled={loading}
+        >
+          <RefreshCcw className={cn('size-4', loading && 'animate-spin')} />
+          Làm mới
+        </Button>
+      </div>
+
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <SummaryCard
           label="Số dư khả dụng"
@@ -194,6 +260,48 @@ export default function WalletTab() {
         />
       </div>
 
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Building2 className="size-4 text-zinc-500" />
+              <CardTitle className="text-base">Thông tin ngân hàng</CardTitle>
+            </div>
+            <CardDescription>
+              Cần thiết để rút Coin về tài khoản.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <BankInformationForm
+              bankInfo={bankInfo}
+              bankLoading={bankLoading}
+              bankError={bankError}
+              onSaved={handleBankSaved}
+              onReload={loadBankInfo}
+            />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <ArrowUpRight className="size-4 text-zinc-500" />
+              <CardTitle className="text-base">Yêu cầu rút tiền</CardTitle>
+            </div>
+            <CardDescription>
+              Hệ thống tự rút toàn bộ số dư khả dụng.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <WithdrawalPanel
+              summary={summary}
+              hasBankInfo={hasBankInfo}
+              onChanged={() => setRefreshTick((t) => t + 1)}
+            />
+          </CardContent>
+        </Card>
+      </div>
+
       <Card>
         <CardHeader>
           <div className="flex items-center gap-2">
@@ -201,7 +309,7 @@ export default function WalletTab() {
             <CardTitle className="text-base">Lịch sử giao dịch</CardTitle>
           </div>
           <CardDescription>
-            {formatCoinValue(ledger.pagination.total)} giao dịch
+            {ledger.pagination.total} giao dịch
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -226,7 +334,10 @@ export default function WalletTab() {
             <ScrollArea className="max-h-96 pr-2">
               <ul className="divide-y divide-zinc-100">
                 {filteredLedger.map((entry) => (
-                  <LedgerRow key={entry.id ?? `${entry.createdAt}-${entry.amountCoin}`} entry={entry} />
+                  <LedgerRow
+                    key={entry.id ?? `${entry.createdAt}-${entry.amountCoin}`}
+                    entry={entry}
+                  />
                 ))}
               </ul>
             </ScrollArea>
