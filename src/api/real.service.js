@@ -522,4 +522,300 @@ export const realService = {
 
   deleteComment: (commentId) =>
     instance.delete(`/admin/comments/${commentId}`).then(unwrap),
+
+  // ===== Finance — Revenue Analytics =====
+
+  /**
+   * GET /admin/finance/revenue-analytics — Doanh thu theo tháng / quý / năm.
+   * Query:
+   *   period=month|quarter|year (required)
+   *   year (required)
+   *   month nếu period=month
+   *   quarter nếu period=quarter
+   *   limit (default 10, max 50)
+   *
+   * Response BE spec 2026-08-05:
+   *   { success: true, data: {
+   *       filter: { period, year, month?, quarter?, limit },
+   *       config: { platform_fee_percent, coin_to_vnd_rate, ... },
+   *       summary: { gross_revenue_coin_display, gross_revenue_coin,
+   *                  mangaka_revenue_coin_display, mangaka_revenue_coin,
+   *                  assistant_revenue_coin_display, assistant_revenue_coin,
+   *                  platform_fee_coin_display, platform_fee_coin,
+   *                  platform_fee_vnd_display, platform_fee_vnd,
+   *                  chapters_sold },
+   *       points: [{ label, date, gross_revenue_coin_display, gross_revenue_coin,
+   *                  mangaka_revenue_coin_display, mangaka_revenue_coin,
+   *                  assistant_revenue_coin_display, assistant_revenue_coin,
+   *                  platform_fee_coin_display, platform_fee_coin,
+   *                  platform_fee_vnd_display, platform_fee_vnd,
+   *                  chapters_sold }],
+   *       top_series: [{ rank, series_id, series_name, series_slug?, thumbnail?,
+   *                     author_name?, chapters_sold, gross_revenue_coin_display,
+   *                     gross_revenue_coin, creator_revenue_coin_display,
+   *                     creator_revenue_coin, platform_fee_coin_display,
+   *                     platform_fee_coin, platform_fee_vnd_display, platform_fee_vnd }]
+   *   } }
+   *
+   * Fallback: nếu BE không wrap envelope, service vẫn đọc được root fields (backward compat).
+   *
+   * Service KHÔNG dùng generic unwrap() ra mảng — trả nguyên root envelope
+   * { filter, config, summary, points, top_series } cho component dùng trực tiếp.
+   */
+  getRevenueAnalytics: (params = {}) => {
+    const query = {}
+    const allowedPeriods = ['month', 'quarter', 'year']
+    const period = allowedPeriods.includes(params.period) ? params.period : 'month'
+    query.period = period
+    if (params.year != null) query.year = Number(params.year)
+    if (period === 'month' && params.month != null) query.month = Number(params.month)
+    if (period === 'quarter' && params.quarter != null) query.quarter = Number(params.quarter)
+    // BE: default 10, min 1, max 50.
+    if (params.limit != null) query.limit = Math.min(Math.max(1, Number(params.limit)), 50)
+    return instance.get('/admin/finance/revenue-analytics', { params: query }).then((res) => {
+      const payload =
+        res?.success !== undefined && res?.data !== undefined ? res.data : res
+      const root = payload && typeof payload === 'object' ? payload : {}
+      return {
+        filter: root.filter ?? null,
+        config: root.config ?? null,
+        summary: root.summary ?? null,
+        points: Array.isArray(root.points) ? root.points : [],
+        top_series: Array.isArray(root.top_series) ? root.top_series : [],
+      }
+    })
+  },
+
+  // ===== Finance — User Financial Details =====
+
+  /**
+   * GET /admin/users/:id/financials — Chi tiết tài chính từng user.
+   * Reader: wallet, deposits (history ≤50), total_vnd, total_coin,
+   *         purchases (history ≤50), total_spent,
+   *         transaction_summary: [{ _id, total }]
+   *         financial_summary: { current_coin, total_deposit, total_purchase, total_refund }
+   * Mangaka/Assistant: wallet, bank_account,
+   *   revenues: { history, by_status, total } (≤100),
+   *   withdrawals (≤100), withdrawals_by_status,
+   *   total_withdrawn_vnd,
+   *   cooperation_revenue_share: [...], revenue_by_series: [...],
+   *   financial_summary: { pending_revenue, available_balance, total_revenue, total_withdrawal, total_refund }
+   */
+  getUserFinancials: (userId) => instance.get(`/admin/users/${userId}/financials`).then(unwrap),
+
+  /**
+   * GET /admin/users/:id/financials/top-series — Top series theo kỳ.
+   * Query: period (month|quarter|year, default 'month'), year, month?, quarter?, limit (default 10, max 50)
+   * Response BE spec 2026-08-05:
+   *   { success: true, data: {
+   *       user: { id, full_name, role },
+   *       filter: { period, year, month?, quarter? },
+   *       summary: { creator_revenue_coin_display, creator_revenue_coin,
+   *                  chapters_sold, series_count },
+   *       top_series: [{ rank, series_id, series_name, chapters_sold,
+   *                     gross_revenue_coin_display, gross_revenue_coin,
+   *                     creator_revenue_coin_display, creator_revenue_coin,
+   *                     platform_fee_coin_display, platform_fee_coin,
+   *                     platform_fee_vnd_display, platform_fee_vnd }]
+   *   } }
+   *
+   * Fallback: nếu BE không wrap envelope, service vẫn đọc được root fields (backward compat).
+   *
+   * Service KHÔNG dùng generic unwrap() ra mảng — giữ nguyên root envelope.
+   */
+  getUserFinancialTopSeries: (userId, params = {}) => {
+    const query = {}
+    const allowedPeriods = ['month', 'quarter', 'year']
+    const period = allowedPeriods.includes(params.period) ? params.period : 'month'
+    query.period = period
+    if (params.year != null) query.year = Number(params.year)
+    if (period === 'month' && params.month != null) query.month = Number(params.month)
+    if (period === 'quarter' && params.quarter != null) query.quarter = Number(params.quarter)
+    // BE: default 10, min 1, max 50.
+    if (params.limit != null) query.limit = Math.min(Math.max(1, Number(params.limit)), 50)
+    return instance
+      .get(`/admin/users/${userId}/financials/top-series`, { params: query })
+      .then((res) => {
+        const payload =
+          res?.success !== undefined && res?.data !== undefined ? res.data : res
+        const root = payload && typeof payload === 'object' ? payload : {}
+        return {
+          user: root.user ?? null,
+          filter: root.filter ?? null,
+          summary: root.summary ?? null,
+          top_series: Array.isArray(root.top_series) ? root.top_series : [],
+        }
+      })
+  },
+
+  /**
+   * GET /admin/dashboard/finance?limit=10 — Dashboard xếp hạng tài chính.
+   * Query: limit (default 10)
+   * Response:
+   *   top_mangaka: [{ user_id, username, full_name, avatar_url, role, total_coin_display, total_coin, total_vnd, total_gross_coin, total_platform_fee_coin, chapters_sold, withdrawn_coin_display, withdrawn_coin }]
+   *   top_assistant: [...] same shape
+   *   top_reader: [{ user_id, username, full_name, avatar_url, role, total_coin_spent_display, total_coin_spent, chapters_purchased }]
+   *   top_series_chapters: [{ series_id, series_name, total_coin, total_vnd, purchases }]
+   *   top_series_fees: [...] same shape + platform_fee_coin
+   *   coin_to_vnd_rate: number
+   */
+  getDashboardFinance: (params = {}) => {
+    const query = {}
+    if (params.limit) query.limit = Number(params.limit)
+    return instance.get('/admin/dashboard/finance', { params: query }).then(unwrap)
+  },
+
+  // ===== Finance — Payments =====
+
+  /**
+   * GET /admin/payments — Danh sách giao dịch nạp tiền PayOS.
+   * Query: status, page (default 1), limit (default 20)
+   * Response BE 2026-08-04:
+   *   { success, data: [], pagination: {}, summary: { total_vnd, total_coin, total_coin_display, count } }
+   *
+   * Service KHÔNG gọi generic unwrap() ra mảng — giữ nguyên summary/pagination để
+   * Finance page dùng trực tiếp BE summary (không tự cộng items từ một page).
+   */
+  getPayments: (params = {}) => {
+    const query = { page: 1, limit: 20 }
+    if (params.page) query.page = Number(params.page)
+    if (params.limit) query.limit = Number(params.limit)
+    if (params.status) query.status = params.status
+    return instance.get('/admin/payments', { params: query }).then((res) => {
+      // res đã là unwrapped data nếu BE wrap { success, data, pagination, summary }.
+      const root = res && typeof res === 'object' ? res : {}
+      const list = Array.isArray(root.data)
+        ? root.data
+        : Array.isArray(root.items)
+          ? root.items
+          : []
+      return {
+        items: list,
+        pagination: root.pagination ?? null,
+        summary: root.summary ?? null,
+        success: root.success ?? true,
+      }
+    })
+  },
+
+  // ===== Coin Packages =====
+
+  /**
+   * GET /admin/users/:id/financials/transactions — Lịch sử biến động ví.
+   * Query: type (Deposit|Purchase|Revenue|Withdrawal|Refund), from_date, to_date,
+   *        sort (asc|desc, default desc), page (default 1), limit (default 50, max 200)
+   * Response:
+   *   items: [{ _id, type, amount, coin_amount, balance_after, description,
+   *            createdAt, chapter_id?, payment_id?, revenue_id?, withdrawal_id? }]
+   *   total: number, page: number, pages: number
+   */
+  getUserFinancialsTransactions: (userId, params = {}) => {
+    const query = { page: 1, limit: 50 }
+    if (params.type) query.type = params.type
+    if (params.from_date) query.from_date = params.from_date
+    if (params.to_date) query.to_date = params.to_date
+    if (params.sort) query.sort = params.sort
+    if (params.page) query.page = Number(params.page)
+    if (params.limit) {
+      query.limit = Math.min(Number(params.limit), 200)
+    }
+    return instance.get(`/admin/users/${userId}/financials/transactions`, { params: query }).then(unwrap)
+  },
+
+  // ===== Coin Packages =====
+
+  /**
+   * GET /admin/coin-packages — Danh sách gói coin.
+   * Response: items: [{ _id, vnd_price, coin_amount, bonus_coin, display_order, is_active }]
+   */
+  getCoinPackages: () => instance.get('/admin/coin-packages').then(unwrap),
+
+  /**
+   * POST /admin/coin-packages — Tạo gói coin.
+   * Body: { vnd_price, coin_amount, bonus_coin, display_order, is_active }
+   */
+  createCoinPackage: (data) => instance.post('/admin/coin-packages', data).then(unwrap),
+
+  /**
+   * PATCH /admin/coin-packages/:id — Cập nhật gói coin.
+   * Body: partial of create fields.
+   */
+  updateCoinPackage: (id, data) => instance.patch(`/admin/coin-packages/${id}`, data).then(unwrap),
+
+  /**
+   * DELETE /admin/coin-packages/:id — Xoá gói coin.
+   */
+  deleteCoinPackage: (id) => instance.delete(`/admin/coin-packages/${id}`).then(unwrap),
+
+  // ===== Withdrawals (Admin) =====
+
+  /**
+   * GET /withdrawals/admin/all?status=&page=&limit=
+   * Response BE 2026-08-04:
+   *   {
+   *     success: true,
+   *     data: [...],
+   *     pagination: { total, page, limit, pages },
+   *     stats: {
+   *       pending_count, pending_coin,
+   *       approved_count, approved_coin,
+   *       completed_count, completed_coin,
+   *       rejected_count, rejected_coin,
+   *       cancelled_count, cancelled_coin,
+   *     }
+   *   }
+   *
+   * Service KHÔNG dùng generic unwrap() — giữ nguyên envelope { data, pagination, stats }
+   * rồi wrap lại thành { items, pagination, stats, success } cho component.
+   * Tránh gọi unwrap() làm mất pagination/stats.
+   */
+  listAdminWithdrawals: (params = {}) => {
+    const query = { page: 1, limit: 20 }
+    if (params.page) query.page = Number(params.page)
+    if (params.limit) query.limit = Number(params.limit)
+    if (params.status) query.status = params.status
+    // Cố ý KHÔNG gửi `search` — BE hiện không hỗ trợ và FE đã loại bỏ chức năng tìm kiếm.
+    return instance.get('/withdrawals/admin/all', { params: query }).then((res) => {
+      const root = res && typeof res === 'object' ? res : {}
+      const list = Array.isArray(root.data)
+        ? root.data
+        : Array.isArray(root.items)
+          ? root.items
+          : []
+      return {
+        items: list,
+        pagination: root.pagination ?? null,
+        stats: root.stats ?? null,
+        success: root.success ?? true,
+      }
+    })
+  },
+
+  /** GET /withdrawals/admin/:id */
+  getAdminWithdrawal: (id) =>
+    instance.get(`/withdrawals/admin/${id}`).then(unwrap),
+
+  /** PATCH /withdrawals/admin/:id/approve */
+  approveWithdrawal: (id, payload = {}) => {
+    const body = {}
+    const note = String(payload?.admin_note ?? '').trim()
+    if (note) body.admin_note = note
+    return instance.patch(`/withdrawals/admin/${id}/approve`, body).then(unwrap)
+  },
+
+  /** PATCH /withdrawals/admin/:id/reject */
+  rejectWithdrawal: (id, payload = {}) => {
+    const body = {}
+    const note = String(payload?.admin_note ?? '').trim()
+    if (note) body.admin_note = note
+    return instance.patch(`/withdrawals/admin/${id}/reject`, body).then(unwrap)
+  },
+
+  /** PATCH /withdrawals/admin/:id/complete */
+  completeWithdrawal: (id, payload = {}) => {
+    const body = {}
+    const note = String(payload?.admin_note ?? '').trim()
+    if (note) body.admin_note = note
+    return instance.patch(`/withdrawals/admin/${id}/complete`, body).then(unwrap)
+  },
 }

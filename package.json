@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --experimental-test-module-mocks --test tests/coinFormatter.test.js tests/wallet.service.test.js tests/bankInformation.service.test.js tests/adminWithdrawals.service.test.js tests/adminFinanceAnalytics.service.test.js tests/userFinancialTopSeries.service.test.js tests/userFinancialDialog.contract.test.js tests/financeFilter.test.js tests/financeUiLabels.test.js"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.1.11",
