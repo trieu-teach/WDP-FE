@@ -497,7 +497,7 @@ export default function LayerStackPanel({
       </div>
 
       {/* Finalize footer */}
-      <div className="rounded-xl border border-slate-700/60 bg-slate-800/50 p-3">
+      <div className="shrink-0 rounded-xl border border-slate-700/60 bg-slate-800/50 p-3">
         <div className="mb-2 flex items-center justify-between">
           <div className="flex items-center gap-1.5">
             <div className="flex size-6 items-center justify-center rounded-md bg-indigo-600 text-white">

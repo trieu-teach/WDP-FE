@@ -2,33 +2,19 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   ArrowRight,
-  BookOpen,
   Brush,
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
-  Home as HomeIcon,
   Layers,
-  LayoutDashboard,
-  LogOut,
   PenTool,
-  Search,
   Sparkles,
-  User,
 } from 'lucide-react'
 import Footer from '@/components/User/Footer/Footer.jsx'
+import Header from '@/components/User/Header/Header.jsx'
 import { WelcomeBackPill } from '@/components/layout/WelcomeBackPill.jsx'
 import { LoginRequiredDialog } from '@/components/auth/LoginRequiredDialog.jsx'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { getRolePath, logout, ROLES, ROLE_LABELS } from '@/lib/auth.js'
+import { getRolePath, logout, ROLES } from '@/lib/auth.js'
 import { useLoginRequired } from '@/hooks/useLoginRequired.js'
 import {
   LABEL_EDITOR_BOARD,
@@ -36,8 +22,19 @@ import {
   PATH_EDITOR_BOARD,
   PATH_TANTOU_EDITOR,
 } from '@/constants/roleTerminology.js'
+import { MANGAKA_NAV_LINKS } from '@/constants/mangakaNav.js'
+import { ASSISTANT_NAV_LINKS } from '@/constants/assistantNav.js'
+import { TANTOU_NAV_LINKS } from '@/constants/tantouNav.js'
+import { EB_NAV_LINKS } from '@/constants/ebNav.js'
 import { cn } from '@/lib/utils'
 import './Home.css'
+
+const HOME_PUBLIC_NAV_LINKS = [
+  { to: '/', label: 'Trang chủ' },
+  { href: '#pipeline', label: 'Quy trình' },
+  { href: '#welcome', label: 'Giới thiệu' },
+  { href: '#why', label: 'Tính năng' },
+]
 
 const HERO_SLIDES = [
   {
@@ -176,27 +173,20 @@ export default function Home() {
     open: loginOpen,
     setOpen: setLoginOpen,
     guardClick,
-    guardButton,
     goLogin,
     requireLogin,
     pendingPath,
   } = useLoginRequired()
   const workspacePath = user ? getRolePath(user.role) : null
-  const canOpenProfile = user?.role === ROLES.MANGAKA
-  const profilePath = '/mangaka/profile'
-  const displayName = user?.name || user?.username || 'Tài khoản'
-  const avatarInitials = useMemo(() => {
-    const parts = String(displayName).split(/\s+/).filter(Boolean)
-    if (parts.length >= 2) {
-      return `${parts[0][0] ?? ''}${parts[1][0] ?? ''}`.toUpperCase()
-    }
-    return String(displayName).slice(0, 2).toUpperCase() || 'U'
-  }, [displayName])
-  const roleLabel = user?.role
-    ? (ROLE_LABELS[user.role] ?? String(user.role))
-    : null
-  const identitySubline = user?.email || roleLabel || user?.username || null
   const [heroIndex, setHeroIndex] = useState(0)
+
+  const homeNavLinks = useMemo(() => {
+    if (user?.role === ROLES.MANGAKA) return MANGAKA_NAV_LINKS
+    if (user?.role === ROLES.ASSISTANT) return ASSISTANT_NAV_LINKS
+    if (user?.role === 'editor') return TANTOU_NAV_LINKS
+    if (user?.role === 'eb') return EB_NAV_LINKS
+    return HOME_PUBLIC_NAV_LINKS
+  }, [user?.role])
 
   function handleLogout() {
     logout()
@@ -227,139 +217,11 @@ export default function Home() {
   return (
     <div className="home">
       <WelcomeBackPill />
+      <Header
+        links={homeNavLinks}
+        onLogout={user ? handleLogout : undefined}
+      />
       <div className="home-shell">
-        <header className="home-header">
-          <Link to="/" className="home-header__logo">
-            <span className="home-header__logo-icon">
-              <BookOpen className="size-5" />
-            </span>
-            MangaHub
-          </Link>
-
-          <nav className="home-header__nav">
-            <a href="#pipeline">Quy trình</a>
-            <a href="#welcome">Giới thiệu</a>
-            <a href="#why">Tính năng</a>
-            {workspacePath ? (
-              <Link to={workspacePath}>Workspace</Link>
-            ) : (
-              <button
-                type="button"
-                onClick={() => requireLogin(null)}
-              >
-                Workspace
-              </button>
-            )}
-          </nav>
-
-          <div className="home-header__actions">
-            <button
-              type="button"
-              className="home-header__icon-btn"
-              aria-label="Tìm kiếm"
-              onClick={() => guardButton()}
-            >
-              <Search className="size-4" />
-            </button>
-            {user ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    className="home-header__avatar-btn"
-                    aria-label={`Tài khoản ${displayName}`}
-                  >
-                    <Avatar className="home-header__avatar size-10 ring-2 ring-gray-100 transition hover:ring-red-400">
-                      {user.avatarUrl ? (
-                        <AvatarImage src={user.avatarUrl} alt="" />
-                      ) : null}
-                      <AvatarFallback className="bg-red-600 text-sm font-semibold text-white">
-                        {avatarInitials}
-                      </AvatarFallback>
-                    </Avatar>
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  align="end"
-                  sideOffset={8}
-                  className={cn(
-                    'w-64 rounded-xl border border-gray-100 bg-white p-1.5 shadow-lg',
-                    'focus:outline-none transition-all duration-150',
-                  )}
-                >
-                  <DropdownMenuLabel className="p-0 font-normal">
-                    <div className="flex items-center gap-3 px-2.5 py-2.5">
-                      <Avatar className="size-9 shrink-0 ring-2 ring-gray-100">
-                        {user.avatarUrl ? (
-                          <AvatarImage src={user.avatarUrl} alt="" />
-                        ) : null}
-                        <AvatarFallback className="bg-red-600 text-[11px] font-semibold text-white">
-                          {avatarInitials}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold text-gray-900">
-                          {displayName}
-                        </p>
-                        {identitySubline ? (
-                          <p className="truncate text-xs text-gray-500">
-                            {identitySubline}
-                          </p>
-                        ) : null}
-                      </div>
-                    </div>
-                  </DropdownMenuLabel>
-                  <DropdownMenuSeparator className="my-1 bg-gray-100" />
-                  <DropdownMenuItem
-                    asChild
-                    className="cursor-pointer gap-3 rounded-lg px-3 py-2.5 text-sm text-gray-700 focus:bg-gray-50"
-                  >
-                    <Link to="/">
-                      <HomeIcon className="size-4 text-gray-500" />
-                      Trang chủ
-                    </Link>
-                  </DropdownMenuItem>
-                  {workspacePath ? (
-                    <DropdownMenuItem
-                      asChild
-                      className="cursor-pointer gap-3 rounded-lg px-3 py-2.5 text-sm text-gray-700 focus:bg-gray-50"
-                    >
-                      <Link to={workspacePath}>
-                        <LayoutDashboard className="size-4 text-gray-500" />
-                        Không gian làm việc
-                      </Link>
-                    </DropdownMenuItem>
-                  ) : null}
-                  {canOpenProfile ? (
-                    <DropdownMenuItem
-                      asChild
-                      className="cursor-pointer gap-3 rounded-lg px-3 py-2.5 text-sm text-gray-700 focus:bg-gray-50"
-                    >
-                      <Link to={profilePath}>
-                        <User className="size-4 text-gray-500" />
-                        Hồ sơ cá nhân
-                      </Link>
-                    </DropdownMenuItem>
-                  ) : null}
-                  <DropdownMenuSeparator className="my-1 bg-gray-100" />
-                  <DropdownMenuItem
-                    onClick={handleLogout}
-                    className="cursor-pointer gap-3 rounded-lg px-3 py-2.5 text-sm text-red-600 focus:bg-red-50 focus:text-red-700"
-                  >
-                    <LogOut className="size-4" />
-                    Đăng xuất
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            ) : (
-              <HomeAuthLink to="/register" className="home-header__cta" guardClick={guardClick}>
-                Bắt đầu
-                <ArrowRight className="size-4" />
-              </HomeAuthLink>
-            )}
-          </div>
-        </header>
-
         <section className="home-hero">
           <div className="home-hero__media">
             <img

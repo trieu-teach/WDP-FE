@@ -14,6 +14,7 @@ import {
   Maximize2,
   Plus,
   Star,
+  AlertTriangle,
 } from "lucide-react";
 import Header from "@/components/User/Header/Header.jsx";
 import Footer from "@/components/User/Footer/Footer.jsx";
@@ -47,6 +48,7 @@ import { cn } from "@/lib/utils";
 import { ebEvaluationsService } from "@/api/ebEvaluations.service.js";
 import { ebScoresService } from "@/api/ebScores.service.js";
 import { mangakaProfileService } from "@/api/mangakaProfile.service.js";
+import { seriesService } from "@/api/series.service.js";
 import { getApiErrorMessage } from "@/api/http.js";
 import { updateSeriesEbAssessmentInWorkspace } from "@/utils/mangakaWorkspaceReader.js";
 import { placeholderPageDataUrl } from "@/utils/placeholderPageDataUrl.js";
@@ -618,13 +620,27 @@ export default function Eb() {
   const [rubrics, setRubrics] = useState([DEFAULT_RUBRIC]);
   const [selectedRubricId, setSelectedRubricId] = useState(DEFAULT_RUBRIC.id);
   const [suggestedRubricId, setSuggestedRubricId] = useState("");
-  /** null = dùng gợi ý BE (không gửi rubric_id); string = EB override từ alternatives */
+  /** null = dùng rubric BE gợi ý; string = EB override từ alternatives */
   const [rubricOverrideId, setRubricOverrideId] = useState(null);
+  const [rubricAltTab, setRubricAltTab] = useState("all");
   const [rubricSuggestMeta, setRubricSuggestMeta] = useState({
     reason: "",
     isFallback: false,
+    canSuggest: true,
     seriesInfo: null,
     alternatives: [],
+    sameFamilyAlternatives: [],
+    crossFamilyAlternatives: [],
+    sourceGenres: [],
+    sourceFamily: null,
+    matchedFamilies: [],
+    matchedGenreChips: [],
+    validation: null,
+    debug: null,
+  });
+  const [showRubricDebug, setShowRubricDebug] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return new URLSearchParams(window.location.search).get("debug") === "true";
   });
   const [contentLevels, setContentLevels] = useState(buildEmptyContentLevels);
   const [ageSafety, setAgeSafety] = useState(null);
@@ -949,43 +965,86 @@ export default function Eb() {
   );
   const hasExtension = Boolean(selectedRubric?.hasExtension && extensionKeys.length);
 
+  const visibleRubricAlternatives = useMemo(() => {
+    if (rubricAltTab === "same") return rubricSuggestMeta.sameFamilyAlternatives ?? [];
+    if (rubricAltTab === "cross") return rubricSuggestMeta.crossFamilyAlternatives ?? [];
+    return rubricSuggestMeta.alternatives ?? [];
+  }, [
+    rubricAltTab,
+    rubricSuggestMeta.alternatives,
+    rubricSuggestMeta.crossFamilyAlternatives,
+    rubricSuggestMeta.sameFamilyAlternatives,
+  ]);
+
+  const applySuggestedRubric = useCallback((suggested, seriesId, { toastWarnings = true } = {}) => {
+    if (!suggested?.rubric && suggested?.canSuggest !== false) return;
+
+    if (suggested.rubric) {
+      setSuggestedRubricId(suggested.rubric.id);
+      setSelectedRubricId(suggested.rubric.id);
+    }
+    setRubricOverrideId(null);
+    setRubricAltTab("all");
+    setRubricSuggestMeta({
+      reason: suggested.reason,
+      isFallback: suggested.isFallback,
+      canSuggest: suggested.canSuggest,
+      seriesInfo: suggested.seriesInfo,
+      alternatives: suggested.alternatives ?? [],
+      sameFamilyAlternatives: suggested.sameFamilyAlternatives ?? [],
+      crossFamilyAlternatives: suggested.crossFamilyAlternatives ?? [],
+      sourceGenres: suggested.sourceGenres ?? [],
+      sourceFamily: suggested.sourceFamily,
+      matchedFamilies: suggested.matchedFamilies ?? [],
+      matchedGenreChips: suggested.matchedGenreChips ?? [],
+      validation: suggested.validation,
+      debug: suggested.debug,
+    });
+
+    if (toastWarnings) {
+      for (const warning of suggested.validation?.warnings ?? []) {
+        if (warning?.message) {
+          toast.warning(warning.message, { duration: 7000 });
+        }
+      }
+    }
+
+    setRubrics((prev) => {
+      const byId = new Map(prev.map((r) => [r.id, r]));
+      if (suggested.rubric) byId.set(suggested.rubric.id, suggested.rubric);
+      for (const alt of [
+        ...(suggested.alternatives ?? []),
+        ...(suggested.sameFamilyAlternatives ?? []),
+        ...(suggested.crossFamilyAlternatives ?? []),
+      ]) {
+        byId.set(alt.id, alt);
+      }
+      return [...byId.values()];
+    });
+
+    if (suggested.seriesInfo) {
+      setSeriesContext((prev) => ({
+        ...(prev ?? {}),
+        seriesId: prev?.seriesId || seriesId,
+        ageRating: suggested.seriesInfo.ageRating ?? prev?.ageRating ?? null,
+        genre: suggested.seriesInfo.genre?.length
+          ? suggested.seriesInfo.genre
+          : (prev?.genre ?? []),
+        name: suggested.seriesInfo.name || prev?.name || "",
+      }));
+    }
+  }, []);
+
   useEffect(() => {
     if (!activeSeriesId) return;
     let cancelled = false;
     void (async () => {
       try {
-        const body = await ebEvaluationsService.suggestRubric(activeSeriesId);
+        const body = await ebEvaluationsService.suggestRubric(activeSeriesId, {
+          debug: showRubricDebug,
+        });
         if (cancelled) return;
-        const suggested = mapSuggestedRubricResponse(body);
-        if (!suggested.rubric) return;
-        setSuggestedRubricId(suggested.rubric.id);
-        setRubricOverrideId(null);
-        setRubricSuggestMeta({
-          reason: suggested.reason,
-          isFallback: suggested.isFallback,
-          seriesInfo: suggested.seriesInfo,
-          alternatives: suggested.alternatives ?? [],
-        });
-        setRubrics(() => {
-          const byId = new Map();
-          byId.set(suggested.rubric.id, suggested.rubric);
-          for (const alt of suggested.alternatives ?? []) {
-            byId.set(alt.id, alt);
-          }
-          return [...byId.values()];
-        });
-        setSelectedRubricId(suggested.rubric.id);
-        if (suggested.seriesInfo) {
-          setSeriesContext((prev) => ({
-            ...(prev ?? {}),
-            seriesId: prev?.seriesId || activeSeriesId,
-            ageRating: suggested.seriesInfo.ageRating ?? prev?.ageRating ?? null,
-            genre: suggested.seriesInfo.genre?.length
-              ? suggested.seriesInfo.genre
-              : (prev?.genre ?? []),
-            name: suggested.seriesInfo.name || prev?.name || "",
-          }));
-        }
+        applySuggestedRubric(mapSuggestedRubricResponse(body), activeSeriesId);
       } catch {
         // giữ default khi suggest lỗi
       }
@@ -993,7 +1052,7 @@ export default function Eb() {
     return () => {
       cancelled = true;
     };
-  }, [activeSeriesId]);
+  }, [activeSeriesId, applySuggestedRubric, showRubricDebug]);
 
   useEffect(() => {
     setScores(buildInitialScores(coreScoreKeys));
@@ -1330,6 +1389,7 @@ export default function Eb() {
 
   async function runPreviewCouncilAverage({ silent = false } = {}) {
     const memberScores = buildMemberScoresDraft();
+    const rubricId = rubricOverrideId || suggestedRubricId;
     if (!memberScores.length) {
       if (!silent) toast.error("Cần lưu nháp điểm trước khi xem preview ĐTB.");
       return null;
@@ -1337,7 +1397,7 @@ export default function Eb() {
     if (!silent) setPreviewLoading(true);
     try {
       const res = await ebEvaluationsService.previewCouncilAverage({
-        ...(rubricOverrideId ? { rubric_id: rubricOverrideId } : {}),
+        ...(rubricId ? { rubric_id: rubricId } : {}),
         member_scores: memberScores,
       });
       const mapped = mapEbPreviewCouncilAverageResponse(res);
@@ -1485,17 +1545,15 @@ export default function Eb() {
     });
 
     refresh();
-    toast.success(
-      `Đã lưu nháp ${activeMember?.name ?? "thành viên"} (${aggregate.scoredCount}/${councilRoster.length || 0}).`,
-    );
     if (aggregate.scoredCount >= rosterCount && rosterCount >= EB_COUNCIL_MIN_FOR_PUBLISH) {
       void runPreviewCouncilAverage({ silent: true });
-      if (activeChapter?.id) {
-        toast.message("Hội đồng đã lưu nháp đủ — chuyển sang quyết định đánh giá.");
-        navigate(
-          `/eb/chapter/${encodeURIComponent(activeChapter.id)}/decision`,
-        );
-      }
+      toast.success(
+        "Hội đồng đã lưu nháp đủ — bấm \"Tiếp tục quyết định đánh giá\" khi sẵn sàng.",
+      );
+    } else {
+      toast.success(
+        `Đã lưu nháp ${activeMember?.name ?? "thành viên"} (${aggregate.scoredCount}/${councilRoster.length || 0}).`,
+      );
     }
   }
 
@@ -1541,7 +1599,7 @@ export default function Eb() {
         </section>
       ) : null}
 
-      <main className={cn("page-container flex-1 space-y-8 py-8", isChapterDetail && "pb-28")}>
+      <main className={cn("page-container flex-1 space-y-8 py-8", isChapterDetail && "pb-32")}>
         {isChapterDetail ? (
           <>
             <header className="flex flex-wrap items-center gap-3 border-b border-border/60 pb-4">
@@ -1584,8 +1642,8 @@ export default function Eb() {
                 </CardContent>
               </Card>
             ) : (
-        <section className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[1fr_420px]">
-          <Card className="border-gray-100 shadow-sm">
+        <section className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
+          <Card className="min-w-0 border-gray-100 shadow-sm">
             <CardHeader className="space-y-1 pb-3">
               <CardTitle>Nhập điểm (tài khoản đại diện)</CardTitle>
               <CardDescription>
@@ -1593,7 +1651,7 @@ export default function Eb() {
               </CardDescription>
             </CardHeader>
 
-            <CardContent className="space-y-5">
+            <CardContent className="min-w-0 space-y-5">
               <div className="space-y-3">
                 <Label htmlFor="eb-council-member-name">
                   Thêm thành viên Hội đồng
@@ -1623,49 +1681,52 @@ export default function Eb() {
                   </Button>
                 </div>
                 {councilRoster.length > 0 ? (
-                  <div className="flex flex-wrap gap-2">
+                  <div className="mt-2 flex flex-wrap gap-2">
                     {councilRoster.map((member) => {
                       const scored = councilAggregate.memberRows.find(
                         (row) => row.id === member.id,
                       )?.scored;
+                      const isActive = activeMemberId === member.id;
                       return (
-                        <Button
+                        <button
                           key={member.id}
                           type="button"
-                          size="sm"
-                          variant={activeMemberId === member.id ? "default" : "outline"}
                           className={cn(
-                            activeMemberId === member.id
-                              && "bg-sky-600 text-white hover:bg-sky-700",
+                            "cursor-pointer px-3 py-1.5 text-xs font-medium transition-all rounded-xl",
+                            isActive
+                              ? "bg-emerald-600 text-white shadow-2xs"
+                              : scored
+                                ? "border border-emerald-200/60 bg-emerald-50 text-emerald-700"
+                                : "border border-gray-200 bg-white text-gray-600 hover:bg-gray-50",
                           )}
                           onClick={() => setActiveMemberId(member.id)}
                         >
                           {member.name}
                           {scored ? " · đã chấm" : ""}
-                        </Button>
+                        </button>
                       );
                     })}
                   </div>
                 ) : null}
                 {activeMember ? (
-                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-sky-200/70 bg-sky-500/5 px-3 py-2.5 dark:border-sky-500/30">
-                    <p className="text-sm text-muted-foreground">
+                  <div className="mb-4 flex items-center justify-between gap-2 rounded-xl border border-gray-100 bg-gray-50 p-3 text-xs font-medium text-gray-700">
+                    <p>
                       Đang nhập điểm cho{" "}
-                      <strong className="text-foreground">{activeMember.name}</strong>
+                      <strong className="text-gray-900">{activeMember.name}</strong>
                     </p>
-                    <p className="text-sm">
-                      <span className="text-muted-foreground">Điểm TB cá nhân: </span>
+                    <p>
+                      <span className="text-gray-500">Điểm TB cá nhân: </span>
                       <strong
                         className={cn(
                           "tabular-nums",
                           personalAvgDisplay.muted
-                            ? "text-muted-foreground/70"
-                            : "text-foreground",
+                            ? "text-gray-400"
+                            : "text-gray-900",
                         )}
                       >
                         {personalAvgDisplay.text}
                       </strong>
-                      <span className="text-muted-foreground"> / {SCORE_MAX}</span>
+                      <span className="text-gray-500"> / {SCORE_MAX}</span>
                     </p>
                   </div>
                 ) : null}
@@ -1677,11 +1738,11 @@ export default function Eb() {
                     Rubric chấm điểm
                   </h3>
                   {rubricOverrideId ? (
-                    <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-[11px] font-medium text-amber-800 ring-1 ring-amber-100">
+                    <span className="rounded-md border border-amber-100 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
                       Đã chọn thủ công
                     </span>
                   ) : (
-                    <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-emerald-100">
+                    <span className="rounded-md border border-emerald-100 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-600">
                       Gợi ý tự động
                     </span>
                   )}
@@ -1689,49 +1750,149 @@ export default function Eb() {
 
                 <div className="space-y-3 rounded-2xl border border-gray-100 bg-white p-4 shadow-2xs">
                   <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">
                         Thể loại
                       </p>
-                      <p className="mt-0.5 font-medium text-gray-900">
-                        {(seriesContext?.genre ?? activeChapter?.genre ?? [])[0]
-                          || (selectedRubric?.sourceGenre
-                            && !String(selectedRubric.sourceGenre).startsWith("__")
-                            ? selectedRubric.sourceGenre
-                            : null)
-                          || (selectedRubric?.genreFamily
-                            && !String(selectedRubric.genreFamily).startsWith("__")
-                            ? selectedRubric.genreFamily
-                            : null)
-                          || "Chưa xác định"}
-                        {(seriesContext?.genre ?? []).length > 1
-                          ? ` (+${seriesContext.genre.length - 1})`
-                          : ""}
-                      </p>
+                      {(rubricSuggestMeta.matchedGenreChips?.length
+                        || rubricSuggestMeta.sourceGenres?.length) ? (
+                        <div className="mt-1.5 flex flex-wrap gap-1.5">
+                          {(rubricSuggestMeta.matchedGenreChips?.length
+                            ? rubricSuggestMeta.matchedGenreChips
+                            : (rubricSuggestMeta.sourceGenres ?? []).map((g) => ({
+                                label: rubricSuggestMeta.sourceFamily
+                                  ? `${rubricSuggestMeta.sourceFamily} (${g})`
+                                  : g,
+                              }))
+                          ).map((chip, idx) => (
+                            <span
+                              key={`${chip.label}-${idx}`}
+                              className="inline-flex rounded-lg border border-gray-200/50 bg-gray-100 px-2.5 py-1 text-[11px] font-medium text-gray-700"
+                            >
+                              {chip.label}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="mt-0.5 font-medium text-gray-900">
+                          {(seriesContext?.genre ?? activeChapter?.genre ?? [])[0]
+                            || (selectedRubric?.sourceGenre
+                              && !String(selectedRubric.sourceGenre).startsWith("__")
+                              ? selectedRubric.sourceGenre
+                              : null)
+                            || (selectedRubric?.genreFamily
+                              && !String(selectedRubric.genreFamily).startsWith("__")
+                              ? selectedRubric.genreFamily
+                              : null)
+                            || "Chưa xác định"}
+                          {(seriesContext?.genre ?? []).length > 1
+                            ? ` (+${seriesContext.genre.length - 1})`
+                            : ""}
+                        </p>
+                      )}
+                      {rubricSuggestMeta.sourceFamily ? (
+                        <span className="mt-1.5 inline-flex rounded-lg border border-gray-200/50 bg-gray-100 px-2.5 py-1 text-[11px] font-medium text-gray-700">
+                          {rubricSuggestMeta.sourceFamily}
+                        </span>
+                      ) : null}
                     </div>
                     <div>
                       <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">
                         Độ tuổi series
                       </p>
-                      <p className="mt-0.5 font-medium text-gray-900">
+                      <span className="mt-1.5 inline-flex rounded-lg border border-gray-200/50 bg-gray-100 px-2.5 py-1 text-[11px] font-medium text-gray-700">
                         {seriesContext?.ageRating
                           ?? selectedRubric?.ageRating
                           ?? "All ages"}
-                      </p>
+                      </span>
                     </div>
                     {hasExtension ? (
                       <div>
                         <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">
                           Mở rộng
                         </p>
-                        <p className="mt-0.5 font-medium text-gray-900">
+                        <span className="mt-1.5 inline-flex rounded-lg border border-gray-200/50 bg-gray-100 px-2.5 py-1 text-[11px] font-medium text-gray-700">
                           Có tiêu chí theo thể loại
-                        </p>
+                        </span>
                       </div>
                     ) : null}
                   </div>
 
-                  {rubricSuggestMeta.isFallback || rubricSuggestMeta.reason ? (
+                  {rubricSuggestMeta.canSuggest === false
+                    || (rubricSuggestMeta.validation?.errors?.length > 0) ? (
+                    <div className="space-y-2 rounded-xl border border-red-200 bg-red-50/90 px-3.5 py-2.5 text-xs text-red-900">
+                      <p className="flex items-center gap-1.5 font-semibold">
+                        <AlertTriangle className="size-3.5 shrink-0" />
+                        Không gợi ý được rubric tự động
+                      </p>
+                      {(rubricSuggestMeta.validation?.errors?.length
+                        ? rubricSuggestMeta.validation.errors
+                        : [{ message: rubricSuggestMeta.reason || "Series thiếu genre/độ tuổi khớp ma trận." }]
+                      ).map((err, idx) => (
+                        <div key={`${err.code || "err"}-${idx}`} className="leading-relaxed text-red-800/90">
+                          <p>{err.message}</p>
+                          {err.suggested ? (
+                            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                              <p className="text-red-700/80">
+                                Gợi ý dùng: <strong>{err.suggested}</strong>
+                              </p>
+                              {err.code === "INVALID_AGE_RATING" && activeSeriesId ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 border-red-200 bg-white text-[11px] text-red-800 shadow-none hover:bg-red-50"
+                                  onClick={() => {
+                                    void (async () => {
+                                      try {
+                                        await seriesService.update(activeSeriesId, {
+                                          age_rating: err.suggested,
+                                        });
+                                        toast.success(`Đã cập nhật độ tuổi thành "${err.suggested}"`);
+                                        const body = await ebEvaluationsService.suggestRubric(
+                                          activeSeriesId,
+                                          { debug: showRubricDebug },
+                                        );
+                                        applySuggestedRubric(
+                                          mapSuggestedRubricResponse(body),
+                                          activeSeriesId,
+                                          { toastWarnings: false },
+                                        );
+                                        setSeriesContext((prev) => ({
+                                          ...(prev ?? {}),
+                                          seriesId: prev?.seriesId || activeSeriesId,
+                                          ageRating: err.suggested,
+                                        }));
+                                      } catch (e) {
+                                        toast.error(
+                                          getApiErrorMessage(e)
+                                          || "Không cập nhật được độ tuổi series",
+                                        );
+                                      }
+                                    })();
+                                  }}
+                                >
+                                  Sửa thành {err.suggested}
+                                </Button>
+                              ) : null}
+                            </div>
+                          ) : null}
+                          {err.invalidCombinations?.length ? (
+                            <ul className="mt-1 list-inside list-disc text-[11px] text-red-700/80">
+                              {err.invalidCombinations.map((combo, i) => (
+                                <li key={`${combo.family}-${combo.age_rating}-${i}`}>
+                                  {combo.family} · {combo.age_rating ?? combo.ageRating}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : null}
+                        </div>
+                      ))}
+                      <p className="text-[11px] text-red-700/80">
+                        Hãy chọn rubric thủ công từ danh sách bên dưới hoặc tải lại toàn bộ rubrics.
+                      </p>
+                    </div>
+                  ) : rubricSuggestMeta.isFallback || rubricSuggestMeta.reason ? (
                     <div className="rounded-xl border border-amber-200 bg-amber-50/90 px-3.5 py-2.5 text-xs text-amber-900">
                       <p className="font-semibold">Cần chọn rubric phù hợp</p>
                       <p className="mt-0.5 leading-relaxed text-amber-800/90">
@@ -1741,11 +1902,64 @@ export default function Eb() {
                     </div>
                   ) : null}
 
-                  {rubricSuggestMeta.alternatives?.length > 0 ? (
-                    <div className="space-y-1.5 border-t border-gray-100 pt-3">
-                      <Label htmlFor="eb-rubric-alt" className="text-xs text-gray-600">
-                        Đổi rubric (tuỳ chọn)
-                      </Label>
+                  {(rubricSuggestMeta.sameFamilyAlternatives?.length > 0
+                    || rubricSuggestMeta.crossFamilyAlternatives?.length > 0
+                    || rubricSuggestMeta.alternatives?.length > 0
+                    || rubricSuggestMeta.canSuggest === false) ? (
+                    <div className="space-y-2 border-t border-gray-100 pt-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <Label className="text-xs text-gray-600">
+                          Đổi rubric (tuỳ chọn)
+                        </Label>
+                        {import.meta.env.DEV ? (
+                          <button
+                            type="button"
+                            className="text-[11px] font-medium text-gray-500 underline-offset-2 hover:text-gray-800 hover:underline"
+                            onClick={() => setShowRubricDebug((v) => !v)}
+                          >
+                            {showRubricDebug ? "Tắt debug" : "Bật debug"}
+                          </button>
+                        ) : null}
+                      </div>
+
+                      <div className="flex flex-wrap gap-1 rounded-xl bg-gray-100/70 p-1 text-[11px] font-medium">
+                        {[
+                          { id: "all", label: "Tất cả" },
+                          {
+                            id: "same",
+                            label: "Cùng thể loại, đổi độ tuổi",
+                            count: rubricSuggestMeta.sameFamilyAlternatives?.length ?? 0,
+                          },
+                          {
+                            id: "cross",
+                            label: "Khác thể loại, cùng độ tuổi",
+                            count: rubricSuggestMeta.crossFamilyAlternatives?.length ?? 0,
+                          },
+                        ].map((tab) => (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            className={cn(
+                              "rounded-lg px-2.5 py-1.5 transition-colors",
+                              rubricAltTab === tab.id
+                                ? "bg-white font-semibold text-gray-900 shadow-2xs"
+                                : "text-gray-500 hover:text-gray-800",
+                            )}
+                            onClick={() => setRubricAltTab(tab.id)}
+                          >
+                            {tab.label}
+                            {tab.count != null ? ` (${tab.count})` : ""}
+                          </button>
+                        ))}
+                      </div>
+
+                      {rubricAltTab === "cross"
+                        && (rubricSuggestMeta.crossFamilyAlternatives?.length ?? 0) > 0 ? (
+                        <p className="text-[11px] text-sky-700">
+                          Có thể dùng rubric theo thể loại khác (cùng độ tuổi).
+                        </p>
+                      ) : null}
+
                       <Select
                         value={rubricOverrideId ?? "__auto__"}
                         onValueChange={(value) => {
@@ -1774,7 +1988,7 @@ export default function Eb() {
                               }`
                               : ""}
                           </SelectItem>
-                          {rubricSuggestMeta.alternatives.map((alt) => (
+                          {visibleRubricAlternatives.map((alt) => (
                             <SelectItem key={alt.id} value={alt.id}>
                               {(alt.genreFamily
                                 && !String(alt.genreFamily).startsWith("__")
@@ -1784,8 +1998,29 @@ export default function Eb() {
                               {alt.ageRating ? ` · ${alt.ageRating}` : ""}
                             </SelectItem>
                           ))}
+                          {rubricSuggestMeta.canSuggest === false
+                            ? rubrics
+                              .filter((r) => r.id !== suggestedRubricId
+                                && !visibleRubricAlternatives.some((a) => a.id === r.id))
+                              .map((alt) => (
+                                <SelectItem key={alt.id} value={alt.id}>
+                                  {(alt.genreFamily
+                                    && !String(alt.genreFamily).startsWith("__")
+                                    ? alt.genreFamily
+                                    : alt.name)
+                                    || "Rubric"}
+                                  {alt.ageRating ? ` · ${alt.ageRating}` : ""}
+                                </SelectItem>
+                              ))
+                            : null}
                         </SelectContent>
                       </Select>
+
+                      {showRubricDebug && rubricSuggestMeta.debug ? (
+                        <pre className="max-h-48 overflow-auto rounded-xl border border-gray-200 bg-gray-50 p-2.5 text-[10px] leading-relaxed text-gray-700">
+                          {JSON.stringify(rubricSuggestMeta.debug, null, 2)}
+                        </pre>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
@@ -2011,15 +2246,15 @@ export default function Eb() {
                 </div>
 
                 {canOpenDecision ? (
-                  <div className="space-y-2 rounded-xl border border-emerald-100 bg-emerald-50/50 p-3">
-                    <p className="text-xs text-emerald-800">
+                  <div className="space-y-3 rounded-2xl border border-emerald-100 bg-emerald-50/40 p-4">
+                    <p className="text-xs leading-relaxed text-emerald-800">
                       {isFirstReview
                         ? "Hội đồng đã lưu nháp đủ. Tiếp tục trang quyết định để chọn kết quả và xác nhận lịch."
                         : "Series đã chấm trước đó — mở Quick decision (không cần nhập lại điểm hội đồng)."}
                     </p>
                     <Button
                       type="button"
-                      className="w-full gap-2 bg-gray-900 text-white hover:bg-black"
+                      className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-gray-900 py-3 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-black"
                       onClick={() => {
                         if (!activeChapter?.id) return;
                         saveCouncilSessionMeta(councilKey, {
@@ -2058,7 +2293,7 @@ export default function Eb() {
             </CardContent>
           </Card>
 
-          <aside className="sticky top-20 flex max-h-[calc(100vh-120px)] flex-col self-start">
+          <aside className="sticky top-20 flex min-w-0 max-h-[calc(100vh-120px)] flex-col self-start">
           <Card className="flex min-h-0 flex-1 flex-col overflow-hidden border-gray-100 shadow-sm">
             <CardHeader className="flex shrink-0 flex-row items-center justify-between gap-2 space-y-0 border-b border-gray-100 pb-3">
               <CardTitle className="text-base">Xem trước chapter</CardTitle>
@@ -2383,9 +2618,9 @@ export default function Eb() {
       </main>
 
       {isChapterDetail ? (
-        <div className="pointer-events-none fixed bottom-4 left-1/2 z-40 flex w-[min(100%-1.5rem,720px)] min-w-0 -translate-x-1/2 justify-center sm:min-w-[500px]">
-          <div className="pointer-events-auto flex w-full flex-wrap items-center justify-between gap-4 rounded-2xl border border-gray-200 bg-white/90 px-4 py-3 shadow-lg backdrop-blur-md sm:gap-6 sm:px-6">
-            <p className="text-xs text-gray-600 sm:text-sm">
+        <div className="pointer-events-none fixed bottom-5 left-1/2 z-50 flex w-[min(100%-1.5rem,720px)] min-w-0 -translate-x-1/2 justify-center sm:min-w-[460px]">
+          <div className="pointer-events-auto flex min-w-0 w-full items-center justify-between gap-5 rounded-2xl border border-gray-200/80 bg-white/90 px-5 py-2.5 shadow-xl backdrop-blur-md sm:min-w-[460px]">
+            <p className="min-w-0 truncate text-xs text-gray-600 sm:text-sm">
               Điểm TB cá nhân:{" "}
               <strong
                 className={cn(
@@ -2404,17 +2639,17 @@ export default function Eb() {
                 </>
               ) : null}
             </p>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
               <Button
                 type="button"
-                variant="outline"
-                className="border-gray-200 bg-white shadow-none"
+                className="bg-emerald-600 text-white shadow-xs hover:bg-emerald-700"
                 onClick={() => void handleSaveAssessment()}
               >
                 Lưu nháp
               </Button>
               <Button
                 type="button"
+                variant="outline"
                 disabled={!activeChapter?.id || Boolean(debutGateLock)}
                 title={
                   debutGateLock
@@ -2423,7 +2658,10 @@ export default function Eb() {
                       ? "Mở trang quyết định đánh giá"
                       : "Cần lưu nháp đủ điểm tất cả thành viên hội đồng (3–5)")
                 }
-                className="bg-emerald-600 text-white shadow-xs hover:bg-emerald-700 disabled:opacity-50"
+                className={cn(
+                  "border-gray-200 bg-white text-gray-700 shadow-none hover:bg-gray-50 disabled:opacity-50",
+                  canOpenDecision && "border-gray-300 text-gray-500",
+                )}
                 onClick={() => {
                   if (isFirstReview && !canSubmitScores) {
                     warnMissingCouncilDrafts();

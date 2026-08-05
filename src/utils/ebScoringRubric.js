@@ -1,6 +1,11 @@
 /**
  * EB scoring rubric — FE mirror của BE utils/ebScoringRubric.js
  * Label/hint dùng khi API chỉ trả weights map; source of truth vẫn là BE.
+ *
+ * API (cập nhật):
+ * - has_extensions (boolean) — thay has_extension
+ * - extensions[] — thay extension (object đơn)
+ * - extension_criteria[] — catalog toàn bộ tiêu chí mở rộng (GET /rubrics)
  */
 
 export const EB_SCORE_MAX = 5
@@ -80,8 +85,12 @@ export const EB_CONTENT_LEVEL_LABELS = [
   { value: 3, label: 'Mạnh' },
 ]
 
-/** 7 tiêu chí mở rộng — khớp BE Extension Criteria. */
+/**
+ * Extension criteria catalog — khớp BE Extension Criteria theo genre family.
+ * Legacy keys (humor_timing, romance_chemistry, emotional_impact) giữ để map lịch sử chấm.
+ */
 export const EB_EXTENSION_CRITERIA = [
+  // Romance-Lifestyle
   {
     key: 'character_development',
     label: 'Phát triển nhân vật',
@@ -89,28 +98,90 @@ export const EB_EXTENSION_CRITERIA = [
     shortLabel: 'Nhân vật',
   },
   {
+    key: 'emotional_resonance',
+    label: 'Cộng hưởng cảm xúc',
+    hint: 'Emotional resonance',
+    shortLabel: 'Cảm xúc',
+  },
+  {
+    key: 'romantic_tension',
+    label: 'Căng thẳng lãng mạn',
+    hint: 'Romantic tension',
+    shortLabel: 'Romance',
+  },
+  {
+    key: 'educational_value',
+    label: 'Giá trị giáo dục',
+    hint: 'Educational value',
+    shortLabel: 'Giáo dục',
+  },
+  {
+    key: 'relationship_pacing',
+    label: 'Nhịp độ mối quan hệ',
+    hint: 'Relationship pacing',
+    shortLabel: 'Nhịp romance',
+  },
+  {
+    key: 'confession_moment',
+    label: 'Khoảnh khắc thú nhận',
+    hint: 'Confession moment',
+    shortLabel: 'Thú nhận',
+  },
+  {
+    key: 'everyday_romance',
+    label: 'Lãng mạn đời thường',
+    hint: 'Everyday romance',
+    shortLabel: 'Đời thường',
+  },
+  // Horror-Suspense
+  {
     key: 'atmosphere',
     label: 'Không khí / Tone',
     hint: 'Atmosphere',
     shortLabel: 'Không khí',
   },
   {
+    key: 'pacing_horror',
+    label: 'Nhịp độ kinh dị',
+    hint: 'Horror pacing',
+    shortLabel: 'Nhịp horror',
+  },
+  {
+    key: 'mystery_setup',
+    label: 'Dựng bí ẩn',
+    hint: 'Mystery setup',
+    shortLabel: 'Bí ẩn',
+  },
+  {
+    key: 'fear_impact',
+    label: 'Tác động sợ hãi',
+    hint: 'Fear impact',
+    shortLabel: 'Sợ hãi',
+  },
+  {
+    key: 'psychological_horror',
+    label: 'Kinh dị tâm lý',
+    hint: 'Psychological horror',
+    shortLabel: 'Tâm lý',
+  },
+  {
+    key: 'body_horror',
+    label: 'Kinh dị cơ thể',
+    hint: 'Body horror',
+    shortLabel: 'Body horror',
+  },
+  {
+    key: 'creature_design',
+    label: 'Thiết kế quái vật',
+    hint: 'Creature design',
+    shortLabel: 'Quái vật',
+  },
+  // Action-Adventure
+  {
     key: 'action_choreography',
-    label: 'Biên đạo hành động',
+    label: 'Triển khai hành động',
     hint: 'Action choreography',
     shortLabel: 'Action',
-  },
-  {
-    key: 'humor_timing',
-    label: 'Hài hước & Timing',
-    hint: 'Humor & timing',
-    shortLabel: 'Hài',
-  },
-  {
-    key: 'romance_chemistry',
-    label: 'Hóa học lãng mạn',
-    hint: 'Romance chemistry',
-    shortLabel: 'Romance',
   },
   {
     key: 'world_building',
@@ -119,9 +190,318 @@ export const EB_EXTENSION_CRITERIA = [
     shortLabel: 'Thế giới',
   },
   {
+    key: 'stakes_tension',
+    label: 'Mức độ căng thẳng',
+    hint: 'Stakes & tension',
+    shortLabel: 'Căng thẳng',
+  },
+  {
+    key: 'fight_impact',
+    label: 'Tác động trận đấu',
+    hint: 'Fight impact',
+    shortLabel: 'Trận đấu',
+  },
+  {
+    key: 'power_scaling',
+    label: 'Thang đo sức mạnh',
+    hint: 'Power scaling',
+    shortLabel: 'Power scale',
+  },
+  {
+    key: 'strategy_tactics',
+    label: 'Chiến lược & Chiến thuật',
+    hint: 'Strategy & tactics',
+    shortLabel: 'Chiến thuật',
+  },
+  {
+    key: 'enemy_design',
+    label: 'Thiết kế kẻ địch',
+    hint: 'Enemy design',
+    shortLabel: 'Kẻ địch',
+  },
+  // Comedy
+  {
+    key: 'comedy_timing',
+    label: 'Timing hài',
+    hint: 'Comedy timing',
+    shortLabel: 'Timing',
+  },
+  {
+    key: 'comedy_originality',
+    label: 'Độ sáng tạo hài',
+    hint: 'Comedy originality',
+    shortLabel: 'Sáng tạo',
+  },
+  {
+    key: 'character_comedy',
+    label: 'Hài nhân vật',
+    hint: 'Character comedy',
+    shortLabel: 'Hài NV',
+  },
+  {
+    key: 'wordplay_translation',
+    label: 'Chơi chữ / Dịch thuật',
+    hint: 'Wordplay & translation',
+    shortLabel: 'Chơi chữ',
+  },
+  {
+    key: 'gag_execution',
+    label: 'Triển khai gag',
+    hint: 'Gag execution',
+    shortLabel: 'Gag',
+  },
+  {
+    key: 'absurdity_logic',
+    label: 'Logic phi lý',
+    hint: 'Absurdity logic',
+    shortLabel: 'Phi lý',
+  },
+  {
+    key: 'parody_skills',
+    label: 'Kỹ năng parody',
+    hint: 'Parody skills',
+    shortLabel: 'Parody',
+  },
+  // Fantasy-SciFi
+  {
+    key: 'magic_system',
+    label: 'Hệ thống phép thuật',
+    hint: 'Magic system',
+    shortLabel: 'Phép thuật',
+  },
+  {
+    key: 'technology_logic',
+    label: 'Logic công nghệ',
+    hint: 'Technology logic',
+    shortLabel: 'Công nghệ',
+  },
+  {
+    key: 'mythology_lore',
+    label: 'Thần thoại / Lore',
+    hint: 'Mythology & lore',
+    shortLabel: 'Lore',
+  },
+  {
+    key: 'prophecy_destiny',
+    label: 'Tiên tri & Số phận',
+    hint: 'Prophecy & destiny',
+    shortLabel: 'Số phận',
+  },
+  {
+    key: 'reincarnation_logic',
+    label: 'Logic trùng sinh',
+    hint: 'Reincarnation logic',
+    shortLabel: 'Trùng sinh',
+  },
+  {
+    key: 'foreshadowing',
+    label: 'Che giấu thông tin',
+    hint: 'Foreshadowing',
+    shortLabel: 'Foreshadow',
+  },
+  // Drama-SliceOfLife
+  {
+    key: 'narrative_depth',
+    label: 'Chiều sâu kể chuyện',
+    hint: 'Narrative depth',
+    shortLabel: 'Chiều sâu',
+  },
+  {
+    key: 'relatability',
+    label: 'Độ gần gũi',
+    hint: 'Relatability',
+    shortLabel: 'Gần gũi',
+  },
+  {
+    key: 'iyashikei_healing',
+    label: 'Giá trị chữa lành',
+    hint: 'Iyashikei / healing',
+    shortLabel: 'Chữa lành',
+  },
+  {
+    key: 'ensemble_cast',
+    label: 'Dàn diễn viên',
+    hint: 'Ensemble cast',
+    shortLabel: 'Ensemble',
+  },
+  // Art-Heavy
+  {
+    key: 'line_quality',
+    label: 'Chất lượng nét',
+    hint: 'Line quality',
+    shortLabel: 'Nét',
+  },
+  {
+    key: 'color_harmony',
+    label: 'Hài hòa màu sắc',
+    hint: 'Color harmony',
+    shortLabel: 'Màu',
+  },
+  {
+    key: 'splash_pages',
+    label: 'Trang splash',
+    hint: 'Splash pages',
+    shortLabel: 'Splash',
+  },
+  {
+    key: 'visual_expression',
+    label: 'Biểu đạt hình ảnh',
+    hint: 'Visual expression',
+    shortLabel: 'Hình ảnh',
+  },
+  {
+    key: 'background_detail',
+    label: 'Chi tiết nền',
+    hint: 'Background detail',
+    shortLabel: 'Nền',
+  },
+  {
+    key: 'anatomy_proportion',
+    label: 'Giải phẫu & Tỉ lệ',
+    hint: 'Anatomy & proportion',
+    shortLabel: 'Giải phẫu',
+  },
+  {
+    key: 'cinematography',
+    label: 'Đạo cụ quay phim',
+    hint: 'Cinematography',
+    shortLabel: 'Cinematography',
+  },
+  // Mature-Adult
+  {
+    key: 'maturity_handling',
+    label: 'Xử lý nội dung trưởng thành',
+    hint: 'Maturity handling',
+    shortLabel: 'Trưởng thành',
+  },
+  {
+    key: 'character_complexity',
+    label: 'Độ phức tạp nhân vật',
+    hint: 'Character complexity',
+    shortLabel: 'Phức tạp',
+  },
+  {
+    key: 'psychological_complexity',
+    label: 'Phức tạp tâm lý',
+    hint: 'Psychological complexity',
+    shortLabel: 'Tâm lý',
+  },
+  {
+    key: 'moral_ambiguity',
+    label: 'Đạo đức mơ hồ',
+    hint: 'Moral ambiguity',
+    shortLabel: 'Đạo đức',
+  },
+  {
+    key: 'political_intrigue',
+    label: 'Thâm nhập chính trị',
+    hint: 'Political intrigue',
+    shortLabel: 'Chính trị',
+  },
+  // Sports (family mới)
+  {
+    key: 'sports_specificity',
+    label: 'Chuyên môn thể thao',
+    hint: 'Sports specificity',
+    shortLabel: 'Chuyên môn',
+  },
+  {
+    key: 'athletic_determination',
+    label: 'Quyết tâm thể thao',
+    hint: 'Athletic determination',
+    shortLabel: 'Quyết tâm',
+  },
+  {
+    key: 'team_dynamics',
+    label: 'Động lực đội nhóm',
+    hint: 'Team dynamics',
+    shortLabel: 'Đội nhóm',
+  },
+  {
+    key: 'match_tension',
+    label: 'Căng thẳng trận đấu',
+    hint: 'Match tension',
+    shortLabel: 'Trận đấu',
+  },
+  {
+    key: 'injury_recovery_realism',
+    label: 'Chấn thương & Hồi phục',
+    hint: 'Injury/recovery realism',
+    shortLabel: 'Hồi phục',
+  },
+  // Mystery-Thriller (family mới)
+  {
+    key: 'clue_fairness',
+    label: 'Công bằng manh mối',
+    hint: 'Clue fairness',
+    shortLabel: 'Manh mối',
+  },
+  {
+    key: 'red_herring_balance',
+    label: 'Cân bằng manh mối giả',
+    hint: 'Red herring balance',
+    shortLabel: 'Red herring',
+  },
+  {
+    key: 'detective_reasoning',
+    label: 'Lập luận thám tử',
+    hint: 'Detective reasoning',
+    shortLabel: 'Lập luận',
+  },
+  {
+    key: 'investigation_logic',
+    label: 'Logic điều tra',
+    hint: 'Investigation logic',
+    shortLabel: 'Điều tra',
+  },
+  {
+    key: 'reveal_impact',
+    label: 'Tác động của tiết lộ',
+    hint: 'Revelation impact',
+    shortLabel: 'Tiết lộ',
+  },
+  // Historical (family mới)
+  {
+    key: 'historical_accuracy',
+    label: 'Độ chính xác lịch sử',
+    hint: 'Historical accuracy',
+    shortLabel: 'Chính xác',
+  },
+  {
+    key: 'period_immersion',
+    label: 'Đắm chìm thời đại',
+    hint: 'Period immersion',
+    shortLabel: 'Thời đại',
+  },
+  {
+    key: 'costume_propaganda',
+    label: 'Trang phục & Kiến trúc',
+    hint: 'Costume & architecture',
+    shortLabel: 'Trang phục',
+  },
+  {
+    key: 'political_context',
+    label: 'Bối cảnh chính trị',
+    hint: 'Political/social context',
+    shortLabel: 'Bối cảnh',
+  },
+  // Legacy keys (rubric cũ / lịch sử chấm)
+  {
+    key: 'humor_timing',
+    label: 'Hài hước & Timing',
+    hint: 'Humor & timing (legacy)',
+    shortLabel: 'Hài',
+  },
+  {
+    key: 'romance_chemistry',
+    label: 'Hóa học lãng mạn',
+    hint: 'Romance chemistry (legacy)',
+    shortLabel: 'Romance',
+  },
+  {
     key: 'emotional_impact',
     label: 'Tác động cảm xúc',
-    hint: 'Emotional impact',
+    hint: 'Emotional impact (legacy)',
     shortLabel: 'Cảm xúc',
   },
 ]
@@ -131,6 +511,10 @@ export const EB_EXTENSION_KEYS = EB_EXTENSION_CRITERIA.map((c) => c.key)
 const CRITERIA_BY_KEY = Object.fromEntries(
   [...EB_CORE_SCORE_CRITERIA, ...EB_EXTENSION_CRITERIA].map((c) => [c.key, c]),
 )
+
+function isCoreCriterionKey(key) {
+  return EB_CORE_SCORE_KEYS.includes(key)
+}
 
 export function buildEmptyContentLevels(level = 0) {
   const n = Math.min(EB_CONTENT_LEVEL_MAX, Math.max(0, Number(level) || 0))
@@ -176,18 +560,20 @@ function criteriaListFromWeights(weights, { extensionOnly = false } = {}) {
   const entries = Object.entries(weights)
   return entries
     .filter(([key]) => {
-      const isExt = EB_EXTENSION_KEYS.includes(key)
-      return extensionOnly ? isExt : !isExt
+      const isCore = isCoreCriterionKey(key)
+      return extensionOnly ? !isCore : isCore
     })
     .map(([key, weight]) => {
       const meta = getCriterionMeta(key)
+      const isExtension = !isCoreCriterionKey(key)
       return {
         key,
         label: meta.label,
         hint: meta.hint,
         shortLabel: meta.shortLabel,
+        description: meta.hint,
         weight: Number(weight) || 0,
-        isExtension: EB_EXTENSION_KEYS.includes(key),
+        isExtension,
       }
     })
 }
@@ -196,14 +582,45 @@ function attachWeightPct(list, totalWeight) {
   const total = totalWeight > 0
     ? totalWeight
     : list.reduce((sum, item) => sum + (Number(item.weight) || 0), 0)
-  // BE WEIGHT_MATRIX dùng điểm % (tổng ~90–100) — hiển thị thẳng weight làm %
-  const looksLikePercentMatrix = total >= 50 && total <= 150
+  // BE WEIGHT_MATRIX dùng điểm % (tổng ~90–150 khi có nhiều extensions) — hiển thị thẳng weight làm %
+  const looksLikePercentMatrix = total >= 50 && total <= 200
   return list.map((item) => ({
     ...item,
     weightPct: looksLikePercentMatrix
       ? Number(item.weight) || 0
       : (total > 0 ? Math.round(((Number(item.weight) || 0) / total) * 1000) / 10 : 0),
   }))
+}
+
+/** Chuẩn hóa 1 phần tử extension từ API (extensions[] | extension | extension_criteria). */
+function mapExtensionItem(item, weights = {}) {
+  if (!item || typeof item !== 'object') return null
+  const key = String(item.key ?? item.criterion ?? item.id ?? '').trim()
+  if (!key || isCoreCriterionKey(key)) return null
+  const meta = getCriterionMeta(key)
+  const description = String(
+    item.description ?? item.hint ?? meta.hint ?? '',
+  ).trim()
+  return {
+    key,
+    label: item.label ?? meta.label,
+    hint: description || meta.hint,
+    shortLabel: item.short_label ?? item.shortLabel ?? meta.shortLabel,
+    description: description || meta.hint,
+    weight: Number(item.weight ?? weights[key] ?? 1) || 1,
+    isExtension: true,
+  }
+}
+
+function resolveExtensionsRaw(raw) {
+  if (Array.isArray(raw?.extensions)) return raw.extensions
+  // Legacy: extension object đơn
+  if (raw?.extension && typeof raw.extension === 'object' && !Array.isArray(raw.extension)) {
+    return [raw.extension]
+  }
+  if (Array.isArray(raw?.extension_criteria)) return raw.extension_criteria
+  if (Array.isArray(raw?.extensionCriteria)) return raw.extensionCriteria
+  return null
 }
 
 /**
@@ -229,36 +646,24 @@ export function mapEbRubric(raw) {
     ?? raw.weightMatrix,
   )
 
-  const extensionFromApi = Array.isArray(raw.extension_criteria)
-    ? raw.extension_criteria
-    : (Array.isArray(raw.extensionCriteria) ? raw.extensionCriteria : null)
+  const extensionFromApi = resolveExtensionsRaw(raw)
 
   let extensionCriteria = extensionFromApi
-    ? extensionFromApi.map((item) => {
-      const key = String(item.key ?? item.criterion ?? item.id ?? '').trim()
-      const meta = getCriterionMeta(key)
-      return {
-        key,
-        label: item.label ?? meta.label,
-        hint: item.hint ?? meta.hint,
-        shortLabel: item.short_label ?? item.shortLabel ?? meta.shortLabel,
-        weight: Number(item.weight ?? weights[key] ?? 1) || 1,
-        isExtension: true,
-      }
-    }).filter((c) => c.key)
+    ? extensionFromApi.map((item) => mapExtensionItem(item, weights)).filter(Boolean)
     : criteriaListFromWeights(weights, { extensionOnly: true })
 
   let coreCriteria = Array.isArray(raw.criteria)
     ? raw.criteria
       .map((item) => {
         const key = String(item.key ?? item.criterion ?? item.id ?? '').trim()
-        if (!key || EB_EXTENSION_KEYS.includes(key)) return null
+        if (!key || !isCoreCriterionKey(key)) return null
         const meta = getCriterionMeta(key)
         return {
           key,
           label: item.label ?? meta.label,
-          hint: item.hint ?? meta.hint,
+          hint: item.description ?? item.hint ?? meta.hint,
           shortLabel: item.short_label ?? item.shortLabel ?? meta.shortLabel,
+          description: item.description ?? item.hint ?? meta.hint,
           weight: Number(item.weight ?? weights[key] ?? 1) || 1,
           isExtension: false,
         }
@@ -269,13 +674,24 @@ export function mapEbRubric(raw) {
   if (!coreCriteria.length) {
     coreCriteria = EB_CORE_SCORE_CRITERIA.map((c) => ({
       ...c,
+      description: c.hint,
       weight: Number(weights[c.key] ?? 1) || 1,
       isExtension: false,
     }))
   }
 
+  // Deduplicate extensions by key (API có thể overlap với weights)
+  const seenExt = new Set()
+  extensionCriteria = extensionCriteria.filter((c) => {
+    if (seenExt.has(c.key)) return false
+    seenExt.add(c.key)
+    return true
+  })
+
   const hasExtension = Boolean(
-    raw.has_extension
+    raw.has_extensions
+    ?? raw.has_extension
+    ?? raw.hasExtensions
     ?? raw.hasExtension
     ?? extensionCriteria.length > 0,
   )
@@ -302,34 +718,59 @@ export function mapEbRubric(raw) {
     ?? [genreFamily, ageRating].filter(Boolean).join(' · ')
     ?? id
 
+  const resolvedExtensions = hasExtension ? extensionCriteria : []
+
   return {
     id,
     name,
     genreFamily,
     ageRating,
+    /** @deprecated dùng hasExtensions — giữ để không phá UI hiện tại */
     hasExtension,
+    hasExtensions: hasExtension,
     weights: {
       ...Object.fromEntries(coreCriteria.map((c) => [c.key, c.weight])),
-      ...(hasExtension
-        ? Object.fromEntries(extensionCriteria.map((c) => [c.key, c.weight]))
-        : {}),
+      ...Object.fromEntries(resolvedExtensions.map((c) => [c.key, c.weight])),
       ...weights,
     },
     totalWeight,
     coreCriteria,
-    extensionCriteria: hasExtension ? extensionCriteria : [],
+    /** @deprecated alias — giữ extensionCriteria cho UI hiện tại */
+    extensionCriteria: resolvedExtensions,
+    extensions: resolvedExtensions,
     scoreFields: [
       ...coreCriteria,
-      ...(hasExtension ? extensionCriteria : []),
+      ...resolvedExtensions,
     ],
     coreKeys: coreCriteria.map((c) => c.key),
-    extensionKeys: hasExtension ? extensionCriteria.map((c) => c.key) : [],
+    extensionKeys: resolvedExtensions.map((c) => c.key),
     sourceGenre: raw.source_genre ?? raw.sourceGenre ?? null,
+    sourceGenres: Array.isArray(raw.source_genres)
+      ? raw.source_genres.map((g) => String(g).trim()).filter(Boolean)
+      : (Array.isArray(raw.sourceGenres)
+        ? raw.sourceGenres.map((g) => String(g).trim()).filter(Boolean)
+        : (raw.source_genre || raw.sourceGenre
+          ? [String(raw.source_genre ?? raw.sourceGenre)]
+          : [])),
     sourceFamily: raw.source_family ?? raw.sourceFamily ?? (genreFamily || null),
     suggested: Boolean(raw.suggested),
     reason: raw.reason ?? '',
     raw,
   }
+}
+
+/** Catalog toàn bộ extension criteria từ GET /rubrics. */
+export function mapEbExtensionCriteriaCatalog(body) {
+  const data = body?.data ?? body ?? {}
+  const list = Array.isArray(data.extension_criteria)
+    ? data.extension_criteria
+    : (Array.isArray(data.extensionCriteria) ? data.extensionCriteria : [])
+  if (!list.length) return EB_EXTENSION_CRITERIA.filter((c) =>
+    !['humor_timing', 'romance_chemistry', 'emotional_impact'].includes(c.key),
+  )
+  return list
+    .map((item) => mapExtensionItem(item, {}))
+    .filter(Boolean)
 }
 
 export function mapEbRubricList(body) {
@@ -342,6 +783,14 @@ export function mapEbRubricList(body) {
   return list.map(mapEbRubric).filter(Boolean)
 }
 
+/** GET /rubrics full payload: rubrics + extension_criteria catalog. */
+export function mapEbRubricsResponse(body) {
+  return {
+    rubrics: mapEbRubricList(body),
+    extensionCriteria: mapEbExtensionCriteriaCatalog(body),
+  }
+}
+
 export function mapSuggestedRubricResponse(body) {
   const data = body?.data ?? body ?? {}
   const rubricRaw = data.suggested_rubric
@@ -349,24 +798,99 @@ export function mapSuggestedRubricResponse(body) {
     ?? data.rubric
     ?? data
   const rubric = mapEbRubric(rubricRaw)
+
+  const mapAltList = (list) =>
+    (Array.isArray(list) ? list : []).map(mapEbRubric).filter(Boolean)
+
+  const sameFamilyAlternatives = mapAltList(
+    rubricRaw?.same_family_alternatives
+    ?? rubricRaw?.sameFamilyAlternatives
+    ?? data.same_family_alternatives
+    ?? data.sameFamilyAlternatives,
+  )
+  const crossFamilyAlternatives = mapAltList(
+    rubricRaw?.cross_family_alternatives
+    ?? rubricRaw?.crossFamilyAlternatives
+    ?? data.cross_family_alternatives
+    ?? data.crossFamilyAlternatives,
+  )
   const alternativesRaw = Array.isArray(data.alternatives)
     ? data.alternatives
     : (Array.isArray(data.alternative_rubrics) ? data.alternative_rubrics : [])
+  const alternatives = alternativesRaw.length
+    ? mapAltList(alternativesRaw)
+    : (() => {
+      const byId = new Map()
+      for (const alt of [...sameFamilyAlternatives, ...crossFamilyAlternatives]) {
+        byId.set(alt.id, alt)
+      }
+      return [...byId.values()]
+    })()
+
+  const validationRaw = data.validation
+    ?? rubricRaw?.validation
+    ?? null
+  const validation = mapSuggestValidation(validationRaw)
+
   const seriesInfoRaw = data.series_info ?? data.seriesInfo ?? null
   const reason = String(
     data.reason
     ?? rubricRaw?.reason
+    ?? validation.errors[0]?.message
     ?? data.message
     ?? '',
   ).trim()
+
   const suggestedFlag = rubricRaw?.suggested
-  const isFallback = suggestedFlag === false || Boolean(reason)
+  const canSuggest = validation.canSuggest
+  const isFallback = canSuggest === false
+    || suggestedFlag === false
+    || Boolean(reason && !canSuggest)
+
+  const sourceGenres = Array.isArray(rubricRaw?.source_genres)
+    ? rubricRaw.source_genres.map((g) => String(g).trim()).filter(Boolean)
+    : (Array.isArray(rubric?.sourceGenres) ? rubric.sourceGenres : [])
+  const sourceFamily = String(
+    rubricRaw?.source_family
+    ?? rubricRaw?.sourceFamily
+    ?? rubric?.sourceFamily
+    ?? rubric?.genreFamily
+    ?? '',
+  ).trim() || null
+
+  const matchedFamilies = validation.normalized.matchedFamilies.length
+    ? validation.normalized.matchedFamilies
+    : (sourceFamily ? [sourceFamily] : [])
+
+  const matchedGenreChips = validation.normalized.matchedGenres.length
+    ? validation.normalized.matchedGenres.map((m) => ({
+        input: m.input,
+        matched: m.matched,
+        family: m.family,
+        label: m.family && m.input
+          ? `${m.family} (${m.input})`
+          : (m.family || m.matched || m.input),
+      }))
+    : sourceGenres.map((g) => ({
+        input: g,
+        matched: g,
+        family: sourceFamily,
+        label: sourceFamily ? `${sourceFamily} (${g})` : g,
+      }))
 
   return {
     rubric,
-    alternatives: alternativesRaw.map(mapEbRubric).filter(Boolean),
+    alternatives,
+    sameFamilyAlternatives,
+    crossFamilyAlternatives,
     reason,
     isFallback,
+    canSuggest,
+    validation,
+    sourceGenres,
+    sourceFamily,
+    matchedFamilies,
+    matchedGenreChips,
     seriesInfo: seriesInfoRaw
       ? {
           id: seriesInfoRaw._id ?? seriesInfoRaw.id ?? null,
@@ -381,14 +905,96 @@ export function mapSuggestedRubricResponse(body) {
     matchedGenre:
       data.matched_genre
       ?? data.matchedGenre
+      ?? sourceGenres[0]
       ?? rubric?.sourceGenre
       ?? null,
     matchedAgeRating:
       data.matched_age_rating
       ?? data.matchedAgeRating
+      ?? validation.normalized.normalizedAgeRating
       ?? rubric?.ageRating
       ?? null,
+    debug: data.debug ?? null,
     raw: data,
+  }
+}
+
+function mapSuggestValidationIssue(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  return {
+    code: String(raw.code ?? '').trim(),
+    message: String(raw.message ?? '').trim(),
+    suggested: raw.suggested != null ? String(raw.suggested) : null,
+    unmatched: Array.isArray(raw.unmatched) ? raw.unmatched : [],
+    invalidCombinations: Array.isArray(raw.invalid_combinations)
+      ? raw.invalid_combinations
+      : (Array.isArray(raw.invalidCombinations) ? raw.invalidCombinations : []),
+  }
+}
+
+/** Chuẩn hóa ValidationReport từ suggest-rubric. */
+export function mapSuggestValidation(raw) {
+  if (!raw || typeof raw !== 'object') {
+    return {
+      valid: true,
+      canSuggest: true,
+      errors: [],
+      warnings: [],
+      normalized: {
+        rawGenres: [],
+        rawAgeRating: null,
+        matchedGenres: [],
+        matchedFamilies: [],
+        unmatchedGenres: [],
+        normalizedAgeRating: null,
+      },
+    }
+  }
+
+  const normalizedRaw = raw.normalized ?? {}
+  const matchedGenres = Array.isArray(normalizedRaw.matched_genres)
+    ? normalizedRaw.matched_genres
+    : (Array.isArray(normalizedRaw.matchedGenres) ? normalizedRaw.matchedGenres : [])
+  const unmatchedGenres = Array.isArray(normalizedRaw.unmatched_genres)
+    ? normalizedRaw.unmatched_genres
+    : (Array.isArray(normalizedRaw.unmatchedGenres) ? normalizedRaw.unmatchedGenres : [])
+
+  return {
+    valid: raw.valid !== false,
+    canSuggest: raw.can_suggest !== false && raw.canSuggest !== false,
+    errors: (Array.isArray(raw.errors) ? raw.errors : [])
+      .map(mapSuggestValidationIssue)
+      .filter(Boolean),
+    warnings: (Array.isArray(raw.warnings) ? raw.warnings : [])
+      .map(mapSuggestValidationIssue)
+      .filter(Boolean),
+    normalized: {
+      rawGenres: Array.isArray(normalizedRaw.raw_genres)
+        ? normalizedRaw.raw_genres
+        : (Array.isArray(normalizedRaw.rawGenres) ? normalizedRaw.rawGenres : []),
+      rawAgeRating:
+        normalizedRaw.raw_age_rating
+        ?? normalizedRaw.rawAgeRating
+        ?? null,
+      matchedGenres: matchedGenres.map((m) => ({
+        input: String(m?.input ?? '').trim(),
+        matched: String(m?.matched ?? '').trim(),
+        family: String(m?.family ?? '').trim(),
+      })),
+      matchedFamilies: Array.isArray(normalizedRaw.matched_families)
+        ? normalizedRaw.matched_families.map((f) => String(f).trim()).filter(Boolean)
+        : (Array.isArray(normalizedRaw.matchedFamilies)
+          ? normalizedRaw.matchedFamilies.map((f) => String(f).trim()).filter(Boolean)
+          : []),
+      unmatchedGenres: unmatchedGenres.map((u) => ({
+        input: String(u?.input ?? '').trim(),
+        normalized: String(u?.normalized ?? '').trim(),
+      })),
+      normalizedAgeRating:
+        normalizedRaw.normalized_age_rating
+        ?? normalizedRaw.normalizedAgeRating
+        ?? null,
+    },
   }
 }
 
@@ -491,7 +1097,7 @@ export function defaultRubricFromCore() {
   return mapEbRubric({
     id: 'default',
     name: 'Mặc định (5 tiêu chí)',
-    has_extension: false,
+    has_extensions: false,
     weights,
     total_weight: EB_CORE_SCORE_KEYS.length,
   })

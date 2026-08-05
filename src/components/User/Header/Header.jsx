@@ -166,8 +166,10 @@ export default function Header({ links = [], onLogout, className, tone = 'defaul
   const location = useLocation()
   const user = getSession()
   const workspacePath = user ? getRolePath(user.role) : null
-  const canOpenProfile = user?.role === ROLES.MANGAKA
-  const profilePath = '/mangaka/profile'
+  const canOpenProfile = user?.role === ROLES.MANGAKA || user?.role === ROLES.ASSISTANT
+  const profilePath = user?.role === ROLES.ASSISTANT
+    ? '/assistant/profile'
+    : '/mangaka/profile'
   const displayName = user?.name || user?.username || 'Tài khoản'
   const initials = useMemo(() => getInitials(displayName), [displayName])
   const roleLabel = user?.role

@@ -19,7 +19,6 @@ import { Button } from '@/components/ui/button'
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -29,12 +28,13 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { AvatarCropDialog } from '@/components/mangaka/AvatarCropDialog.jsx'
 import { CoverCropDialog } from '@/components/mangaka/CoverCropDialog.jsx'
+import WalletTab from '@/components/Wallet/WalletTab.jsx'
 import { getApiErrorMessage, resolveMediaUrl } from '@/api/http.js'
 import {
   fileToAvatarBase64,
   mangakaProfileService,
 } from '@/api/mangakaProfile.service.js'
-import { getSession, logout, updateSession, ROLES } from '@/lib/auth.js'
+import { getSession, logout, refreshSession, updateSession, ROLES } from '@/lib/auth.js'
 import { cn } from '@/lib/utils'
 import { slugifySeriesTitle } from '@/utils/seriesModel.js'
 import { MANGAKA_NAV_LINKS } from '@/constants/mangakaNav.js'
@@ -166,27 +166,63 @@ export default function MangakaProfile() {
       setAvatarPreview('')
       setCoverPreview('')
     } catch (err) {
-      toast.error(getApiErrorMessage(err, 'Không tải được hồ sơ Mangaka.'))
-      if (!isPublicView) {
+      const status = err?.response?.status
+      if (status === 404 || status === 405) {
         const fallback = payloadToForm({ user: {} }, sessionUser)
         setForm(fallback)
         setDraft(fallback)
+        setStats(null)
+        setJoinedAt(null)
+        setSeriesList([])
+      } else {
+        toast.error(getApiErrorMessage(err, 'Không tải được hồ sơ Mangaka.'))
+        if (!isPublicView) {
+          const fallback = payloadToForm({ user: {} }, sessionUser)
+          setForm(fallback)
+          setDraft(fallback)
+        }
+        setSeriesList([])
       }
-      setSeriesList([])
     } finally {
       setLoading(false)
     }
   }, [authorId, isPublicView, sessionUser])
 
+  const [roleChecked, setRoleChecked] = useState(false)
+
   useEffect(() => {
-    if (!isPublicView) {
+    if (isPublicView) {
+      setRoleChecked(true)
+      return
+    }
+    let cancelled = false
+    async function bootstrap() {
       if (!sessionUser) return
-      if (sessionUser.role !== ROLES.MANGAKA) {
-        navigate('/profile', { replace: true })
-        return
+      const user = getSession()
+      if (user && user.role !== ROLES.MANGAKA) {
+        try {
+          const fresh = await refreshSession()
+          if (cancelled) return
+          if (!fresh || fresh.role !== ROLES.MANGAKA) {
+            const fallback =
+              fresh?.role === ROLES.ASSISTANT ? '/assistant/profile' : '/'
+            navigate(fallback, { replace: true })
+            return
+          }
+        } catch {
+          navigate('/login', { replace: true })
+          return
+        }
+      }
+      if (!cancelled) {
+        setRoleChecked(true)
+        void loadProfile()
       }
     }
-    void loadProfile()
+    void bootstrap()
+    return () => {
+      cancelled = true
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authorId, isPublicView, sessionUser?.id, sessionUser?.role, navigate])
 
@@ -376,6 +412,18 @@ export default function MangakaProfile() {
     )
   }
 
+  if (!isPublicView && !roleChecked) {
+    return (
+      <div className="mk-profile flex min-h-screen flex-col bg-[#fafafa]">
+        <Header links={NAV_LINKS} />
+        <main className="flex flex-1 items-center justify-center py-24 text-muted-foreground">
+          <Loader2 className="size-6 animate-spin" />
+          <span className="ml-2">Đang xác thực phiên...</span>
+        </main>
+      </div>
+    )
+  }
+
   const seriesLinkBase = isOwnEditable ? '/mangaka/series' : null
 
   return (
@@ -477,6 +525,7 @@ export default function MangakaProfile() {
                   { id: 'home', label: 'Home' },
                   { id: 'series', label: 'Series' },
                   { id: 'about', label: 'About' },
+                  { id: 'wallet', label: 'Ví' },
                 ].map((item) => (
                   <button
                     key={item.id}
@@ -606,6 +655,15 @@ export default function MangakaProfile() {
                   </div>
                 </section>
               )}
+
+              {tab === 'wallet' && isOwnEditable ? (
+                <section className="space-y-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-400">
+                    Ví của tôi
+                  </p>
+                  <WalletTab />
+                </section>
+              ) : null}
 
               {tab === 'series' && seriesList.length > 3 ? (
                 <section className="space-y-3">
@@ -742,9 +800,6 @@ export default function MangakaProfile() {
             <DialogContent className="scrollbar-hide max-h-[90vh] overflow-y-auto sm:max-w-lg">
               <DialogHeader>
                 <DialogTitle>Chỉnh sửa hồ sơ</DialogTitle>
-                <DialogDescription>
-                  PUT /mangaka/profile — full_name, bio, avatar_base64, cover_image_base64, social_links.
-                </DialogDescription>
               </DialogHeader>
               <form onSubmit={handleSave} className="space-y-4">
                 <div className="space-y-1.5">

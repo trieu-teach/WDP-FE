@@ -453,9 +453,6 @@ function PublicationStatusDialog({ manga, open, onClose, onSaved }) {
               placeholder="VD: Tác giả thông báo tạm dừng 2 tháng"
               rows={3}
             />
-            <p className="text-xs text-muted-foreground">
-              Gửi kèm notification cho author khi đổi trạng thái.
-            </p>
           </div>
         </div>
 

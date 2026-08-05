@@ -1,9 +1,9 @@
 import axios from 'axios'
 
-// Dev: gọi qua Vite proxy (/api) để tránh CORS. Prod: gọi thẳng backend.
-export const API_BASE_URL = import.meta.env.DEV
-  ? '/api'
-  : (import.meta.env.VITE_API_URL ?? 'https://wdp-be-a2qb.onrender.com')
+// BE base URL — BE không dùng prefix /api. Dev & prod đều gọi thẳng backend.
+// Cấu hình VITE_API_URL trong .env (vd: https://wdp-be-a2qb.onrender.com).
+export const API_BASE_URL =
+  import.meta.env.VITE_API_URL ?? 'https://wdp-be-a2qb.onrender.com'
 
 /** Origin backend (không có /api) — dùng ghép URL ảnh `/uploads/...`. */
 export function getBackendOrigin() {

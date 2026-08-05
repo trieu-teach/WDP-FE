@@ -21,6 +21,9 @@ import {
 const PAST_MSG =
   "Không thể chọn thời gian trong quá khứ. Vui lòng chọn thời điểm hiện tại hoặc tương lai.";
 
+const INPUT_CLASS =
+  "h-11 w-full rounded-xl border-gray-200 bg-gray-50/50 px-3.5 py-2.5 text-sm font-medium text-gray-900 shadow-none outline-none transition-all focus-visible:border-emerald-500 focus-visible:bg-white focus-visible:ring-2 focus-visible:ring-emerald-500/20";
+
 type TePublishScheduleDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -121,19 +124,27 @@ export function TePublishScheduleDialog({
         if (!confirming) onOpenChange(next);
       }}
     >
-      <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <span className="flex size-9 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
-                <CalendarClock className="size-4" />
-              </span>
-              Chọn thời điểm phát hành
-            </DialogTitle>
-          </DialogHeader>
+      <DialogContent
+        overlayClassName="bg-black/50 backdrop-blur-xs"
+        className="w-full max-w-md gap-5 rounded-2xl border-gray-100 bg-white p-6 shadow-2xl duration-150 sm:max-w-md"
+      >
+        <DialogHeader className="flex-row items-center gap-3 space-y-0 border-b border-gray-100 pb-4 pr-8 text-left">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
+            <CalendarClock className="size-5" />
+          </span>
+          <DialogTitle className="text-base font-bold text-gray-900">
+            Chọn thời điểm phát hành
+          </DialogTitle>
+        </DialogHeader>
 
-        <div className="grid gap-3 py-1 sm:grid-cols-2">
+        <div className="grid grid-cols-2 gap-3">
           <div className="space-y-2">
-            <Label htmlFor="te-scheduled-publish-date">Ngày</Label>
+            <Label
+              htmlFor="te-scheduled-publish-date"
+              className="text-xs font-semibold text-gray-700"
+            >
+              Ngày
+            </Label>
             <Input
               id="te-scheduled-publish-date"
               type="date"
@@ -141,10 +152,16 @@ export function TePublishScheduleDialog({
               value={dateValue}
               disabled={confirming}
               onChange={(e) => applyDate(e.target.value)}
+              className={INPUT_CLASS}
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="te-scheduled-publish-time">Giờ (HH:mm)</Label>
+            <Label
+              htmlFor="te-scheduled-publish-time"
+              className="text-xs font-semibold text-gray-700"
+            >
+              Giờ (HH:mm)
+            </Label>
             <Input
               id="te-scheduled-publish-time"
               type="time"
@@ -155,24 +172,26 @@ export function TePublishScheduleDialog({
                 dateValue === vietnamDateNow ? getEbVietnamTimeNow() : undefined
               }
               onChange={(e) => applyTime(e.target.value)}
+              className={INPUT_CLASS}
             />
           </div>
         </div>
 
         {preview ? (
-          <p className="text-xs text-muted-foreground">
-            Dự kiến:{" "}
-            <strong className="text-foreground">
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50 p-3 text-xs text-gray-600">
+            <span>Dự kiến</span>
+            <strong className="font-semibold text-gray-900">
               {formatEbScheduledPublishDisplay(preview)}
             </strong>
-          </p>
+          </div>
         ) : null}
 
-        <DialogFooter className="gap-2 sm:justify-end">
+        <DialogFooter className="flex-row items-center justify-end gap-3 pt-2">
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
             disabled={confirming}
+            className="rounded-xl bg-gray-100 px-4 py-2 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-200 hover:text-gray-900"
             onClick={() => onOpenChange(false)}
           >
             Huỷ
@@ -180,7 +199,7 @@ export function TePublishScheduleDialog({
           <Button
             type="button"
             disabled={confirming || !dateValue}
-            className="bg-emerald-600 text-white hover:bg-emerald-700"
+            className="flex cursor-pointer items-center gap-1.5 rounded-xl bg-emerald-600 px-5 py-2 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-emerald-700"
             onClick={handleConfirm}
           >
             {confirming ? "Đang phát hành…" : "Xác nhận phát hành"}

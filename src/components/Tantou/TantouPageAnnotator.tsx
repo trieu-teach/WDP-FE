@@ -356,7 +356,7 @@ export const TantouPageAnnotator = forwardRef<
           className={cn(
             "te-editor__stage te-canvas-viewport relative z-0 flex min-h-0 flex-1 items-start justify-center overflow-y-auto p-3 sm:items-center sm:p-4",
             !fullscreen &&
-              "min-h-[min(68vh,640px)] max-h-[min(78vh,820px)] rounded-xl border border-slate-200 bg-gray-900 shadow-inner",
+              "min-h-[min(52vh,460px)] max-h-[min(70vh,760px)] rounded-xl border border-slate-200 bg-gray-900 shadow-inner",
             fullscreen && "bg-zinc-950",
           )}
         >
