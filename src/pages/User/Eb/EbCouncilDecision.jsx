@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
+  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   Calendar,
@@ -86,6 +87,7 @@ export default function EbCouncilDecision() {
   const [lastEvaluation, setLastEvaluation] = useState(null);
   const [contentLevels, setContentLevels] = useState(buildEmptyContentLevels);
   const [rubricOverrideId, setRubricOverrideId] = useState(null);
+  const [suggestedRubricId, setSuggestedRubricId] = useState(null);
   const [councilTick, setCouncilTick] = useState(0);
 
   const councilKey = String(chapterId ?? "").trim();
@@ -173,6 +175,9 @@ export default function EbCouncilDecision() {
     if (meta?.rubricOverrideId) {
       setRubricOverrideId(String(meta.rubricOverrideId));
     }
+    if (meta?.suggestedRubricId) {
+      setSuggestedRubricId(String(meta.suggestedRubricId));
+    }
   }, [councilKey, councilTick]);
 
   const councilRoster = useMemo(
@@ -241,6 +246,7 @@ export default function EbCouncilDecision() {
   );
 
   const canDecide = isFirstReview ? canSubmitScores : true;
+  const appliedRubricId = rubricOverrideId || suggestedRubricId;
 
   const councilClassification = getEbClassificationStyle(
     previewClassification ?? lastEvaluation?.classification ?? null,
@@ -260,7 +266,7 @@ export default function EbCouncilDecision() {
     }, 400);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isFirstReview, canSubmitScores, councilTick, rubricOverrideId]);
+  }, [isFirstReview, canSubmitScores, councilTick, appliedRubricId]);
 
   function buildMemberScoresDraft() {
     return buildMemberScoresPayload({
@@ -283,7 +289,7 @@ export default function EbCouncilDecision() {
     if (!silent) setPreviewLoading(true);
     try {
       const res = await ebEvaluationsService.previewCouncilAverage({
-        ...(rubricOverrideId ? { rubric_id: rubricOverrideId } : {}),
+        ...(appliedRubricId ? { rubric_id: appliedRubricId } : {}),
         member_scores: memberScores,
       });
       const mapped = mapEbPreviewCouncilAverageResponse(res);
@@ -392,7 +398,7 @@ export default function EbCouncilDecision() {
             result: evaluationResult,
             member_scores: memberScores,
             content_levels: contentLevels,
-            ...(rubricOverrideId ? { rubric_id: rubricOverrideId } : {}),
+            ...(appliedRubricId ? { rubric_id: appliedRubricId } : {}),
             ...(feedbackNotes ? { notes: feedbackNotes } : {}),
             ...(evaluationResult === "approved"
               ? { publication_schedule: publicationSchedule }
@@ -518,13 +524,22 @@ export default function EbCouncilDecision() {
         ? councilAggregate.councilAverage.toFixed(1)
         : "—");
 
+  const showScoreConflictHint =
+    councilClassification.code === "khong_dat" && evaluationResult === "approved";
+
   return (
     <div className="ws-page--eb flex min-h-screen flex-col bg-background">
       <Header links={NAV_LINKS} onLogout={user ? handleLogout : undefined} />
 
-      <main className="page-container flex-1 space-y-6 py-8">
-        <header className="flex flex-wrap items-center gap-3 border-b border-border/60 pb-4">
-          <Button type="button" variant="ghost" size="sm" asChild>
+      <main className="mx-auto w-full max-w-3xl flex-1 space-y-6 px-4 py-8">
+        <header className="flex flex-wrap items-center gap-3 border-b border-gray-100 pb-4">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="-ml-2 h-8 gap-1.5 px-2 text-xs text-gray-600 hover:text-gray-900"
+            asChild
+          >
             <Link to={chapterId ? `/eb/chapter/${encodeURIComponent(chapterId)}` : "/eb"}>
               <ArrowLeft className="size-4" />
               Về trang chấm điểm
@@ -558,10 +573,10 @@ export default function EbCouncilDecision() {
             </div>
           </div>
         ) : (
-          <div className="mx-auto max-w-2xl rounded-2xl border border-gray-100 bg-white p-5 shadow-sm sm:p-6">
+          <div className="w-full rounded-2xl border border-gray-100 bg-white p-5 shadow-sm sm:p-6">
             {isFirstReview ? (
               <>
-                <div className="mb-4 flex items-center justify-between gap-3 border-b border-gray-100 pb-3">
+                <div className="mb-4 flex items-center justify-between gap-3 border-b border-gray-100 pb-4">
                   <p className="text-xs font-semibold uppercase tracking-wider text-gray-700">
                     ĐTB Hội đồng
                   </p>
@@ -581,7 +596,7 @@ export default function EbCouncilDecision() {
                     <div className="flex items-end gap-2">
                       <span
                         className={cn(
-                          "text-3xl font-extrabold tracking-tight tabular-nums",
+                          "text-4xl font-black tracking-tight tabular-nums",
                           (previewCouncilAvg != null || councilAggregate.scoredCount > 0)
                             ? "text-gray-900"
                             : "text-gray-300",
@@ -589,11 +604,11 @@ export default function EbCouncilDecision() {
                       >
                         {scoreDisplay}
                       </span>
-                      <span className="mb-1 text-sm font-medium text-gray-400">
+                      <span className="mb-1.5 text-sm font-medium text-gray-400">
                         / {SCORE_MAX}.0
                       </span>
                     </div>
-                    <p className="mt-1.5 text-xs text-gray-500">
+                    <p className="mt-1 text-xs text-gray-500">
                       Đã lưu nháp{" "}
                       <span className="font-medium text-gray-700">
                         {councilAggregate.scoredCount}/{rosterCount || 0}
@@ -610,7 +625,7 @@ export default function EbCouncilDecision() {
                     type="button"
                     disabled={previewLoading || !canSubmitScores}
                     onClick={() => void runPreviewCouncilAverage()}
-                    className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-2xs transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="cursor-pointer rounded-xl bg-gray-100 px-3.5 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {previewLoading ? "Đang tính…" : "Cập nhật ĐTB"}
                   </button>
@@ -630,10 +645,18 @@ export default function EbCouncilDecision() {
               </div>
             )}
 
-            <div className={cn("space-y-4 rounded-xl border border-gray-100 bg-gray-50/50 p-4", isFirstReview && "mt-5")}>
+            <div className={cn("space-y-4", isFirstReview && "mt-6 border-t border-gray-100 pt-5")}>
               <h4 className="text-sm font-semibold text-gray-900">
                 {isFirstReview ? "Quyết định đánh giá" : "Quyết định nhanh"}
               </h4>
+              {showScoreConflictHint ? (
+                <div className="mb-4 flex items-center gap-2 rounded-xl border border-amber-200/60 bg-amber-50/70 p-3 text-xs text-amber-800">
+                  <AlertTriangle className="size-3.5 shrink-0" />
+                  <span>
+                    ĐTB Hội đồng đang ở mức KHÔNG ĐẠT — cân nhắc chọn revision thay vì duyệt.
+                  </span>
+                </div>
+              ) : null}
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label htmlFor="eb-decision-result" className="text-xs text-gray-600">
@@ -645,7 +668,7 @@ export default function EbCouncilDecision() {
                   >
                     <SelectTrigger
                       id="eb-decision-result"
-                      className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm shadow-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                      className="h-auto w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-sm text-gray-900 shadow-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                     >
                       <SelectValue placeholder="Chọn kết quả" />
                     </SelectTrigger>
@@ -669,7 +692,7 @@ export default function EbCouncilDecision() {
                     >
                       <SelectTrigger
                         id="eb-decision-schedule"
-                        className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm shadow-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                        className="h-auto w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-sm text-gray-900 shadow-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                       >
                         <SelectValue placeholder="Chọn lịch" />
                       </SelectTrigger>
@@ -694,7 +717,7 @@ export default function EbCouncilDecision() {
                     value={quickNotes}
                     onChange={(e) => setQuickNotes(e.target.value)}
                     placeholder="Lý do ngắn gọn…"
-                    className="min-h-16 rounded-xl border border-gray-200 bg-white text-sm shadow-none"
+                    className="min-h-16 rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-sm text-gray-900 shadow-none focus-visible:border-emerald-500 focus-visible:ring-1 focus-visible:ring-emerald-500"
                   />
                 </div>
               ) : null}
@@ -709,12 +732,12 @@ export default function EbCouncilDecision() {
                 value={evaluationNotes}
                 onChange={(e) => setEvaluationNotes(e.target.value)}
                 placeholder="Ghi chú kèm theo khi nộp điểm…"
-                className="min-h-16 rounded-xl border border-gray-200 bg-white text-sm shadow-none"
+                className="min-h-16 rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-sm text-gray-900 shadow-none focus-visible:border-emerald-500 focus-visible:ring-1 focus-visible:ring-emerald-500"
               />
             </div>
 
             {lastEvaluation?.council_average != null ? (
-              <p className="mt-2 text-[11px] text-gray-400">
+              <p className="mt-2 text-center text-[11px] text-gray-400">
                 Đã nộp · ĐTB{" "}
                 <strong className="font-medium text-gray-700">
                   {Number(lastEvaluation.council_average).toFixed(1)}
@@ -725,13 +748,13 @@ export default function EbCouncilDecision() {
               </p>
             ) : null}
 
-            <div className="mt-4 space-y-2">
+            <div className="mt-5">
               <button
                 type="button"
                 disabled={submitting}
                 onClick={() => void handleConfirmClick()}
                 className={cn(
-                  "flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-gray-900 py-2.5 text-xs font-medium text-white shadow-xs transition-colors hover:bg-black disabled:opacity-60",
+                  "flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-gray-900 py-3 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-black disabled:opacity-60",
                   !canDecide && "opacity-70",
                 )}
               >
@@ -746,7 +769,7 @@ export default function EbCouncilDecision() {
                 <ArrowRight className="size-3.5" />
               </button>
               {isFirstReview && !canSubmitScores ? (
-                <p className="text-[11px] text-gray-400">
+                <p className="mt-2 text-center text-[11px] text-gray-400">
                   Cần lưu nháp đủ hội đồng ({councilAggregate.scoredCount}/{rosterCount || 0}
                   {unscoredMemberNames.length
                     ? ` · thiếu: ${unscoredMemberNames.join(", ")}`
@@ -757,11 +780,11 @@ export default function EbCouncilDecision() {
                     : ""}
                 </p>
               ) : scoresSubmitted ? (
-                <p className="text-[11px] text-gray-400">
+                <p className="mt-2 text-center text-[11px] text-gray-400">
                   Đã nộp kết quả — tiếp tục chốt lịch phát hành.
                 </p>
               ) : (
-                <p className="text-[11px] text-gray-400">
+                <p className="mt-2 text-center text-[11px] text-gray-400">
                   {isFirstReview
                     ? "Hội đồng đã lưu nháp đủ. Chọn kết quả rồi nộp để hoàn tất."
                     : "Chọn quick decision rồi nộp — không cần điểm hội đồng lần này."}

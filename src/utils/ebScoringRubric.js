@@ -86,7 +86,7 @@ export const EB_CONTENT_LEVEL_LABELS = [
 ]
 
 /**
- * Extension criteria catalog (26+) — khớp BE Extension Criteria theo genre family.
+ * Extension criteria catalog — khớp BE Extension Criteria theo genre family.
  * Legacy keys (humor_timing, romance_chemistry, emotional_impact) giữ để map lịch sử chấm.
  */
 export const EB_EXTENSION_CRITERIA = [
@@ -115,6 +115,24 @@ export const EB_EXTENSION_CRITERIA = [
     hint: 'Educational value',
     shortLabel: 'Giáo dục',
   },
+  {
+    key: 'relationship_pacing',
+    label: 'Nhịp độ mối quan hệ',
+    hint: 'Relationship pacing',
+    shortLabel: 'Nhịp romance',
+  },
+  {
+    key: 'confession_moment',
+    label: 'Khoảnh khắc thú nhận',
+    hint: 'Confession moment',
+    shortLabel: 'Thú nhận',
+  },
+  {
+    key: 'everyday_romance',
+    label: 'Lãng mạn đời thường',
+    hint: 'Everyday romance',
+    shortLabel: 'Đời thường',
+  },
   // Horror-Suspense
   {
     key: 'atmosphere',
@@ -139,6 +157,24 @@ export const EB_EXTENSION_CRITERIA = [
     label: 'Tác động sợ hãi',
     hint: 'Fear impact',
     shortLabel: 'Sợ hãi',
+  },
+  {
+    key: 'psychological_horror',
+    label: 'Kinh dị tâm lý',
+    hint: 'Psychological horror',
+    shortLabel: 'Tâm lý',
+  },
+  {
+    key: 'body_horror',
+    label: 'Kinh dị cơ thể',
+    hint: 'Body horror',
+    shortLabel: 'Body horror',
+  },
+  {
+    key: 'creature_design',
+    label: 'Thiết kế quái vật',
+    hint: 'Creature design',
+    shortLabel: 'Quái vật',
   },
   // Action-Adventure
   {
@@ -165,6 +201,24 @@ export const EB_EXTENSION_CRITERIA = [
     hint: 'Fight impact',
     shortLabel: 'Trận đấu',
   },
+  {
+    key: 'power_scaling',
+    label: 'Thang đo sức mạnh',
+    hint: 'Power scaling',
+    shortLabel: 'Power scale',
+  },
+  {
+    key: 'strategy_tactics',
+    label: 'Chiến lược & Chiến thuật',
+    hint: 'Strategy & tactics',
+    shortLabel: 'Chiến thuật',
+  },
+  {
+    key: 'enemy_design',
+    label: 'Thiết kế kẻ địch',
+    hint: 'Enemy design',
+    shortLabel: 'Kẻ địch',
+  },
   // Comedy
   {
     key: 'comedy_timing',
@@ -190,6 +244,24 @@ export const EB_EXTENSION_CRITERIA = [
     hint: 'Wordplay & translation',
     shortLabel: 'Chơi chữ',
   },
+  {
+    key: 'gag_execution',
+    label: 'Triển khai gag',
+    hint: 'Gag execution',
+    shortLabel: 'Gag',
+  },
+  {
+    key: 'absurdity_logic',
+    label: 'Logic phi lý',
+    hint: 'Absurdity logic',
+    shortLabel: 'Phi lý',
+  },
+  {
+    key: 'parody_skills',
+    label: 'Kỹ năng parody',
+    hint: 'Parody skills',
+    shortLabel: 'Parody',
+  },
   // Fantasy-SciFi
   {
     key: 'magic_system',
@@ -209,6 +281,24 @@ export const EB_EXTENSION_CRITERIA = [
     hint: 'Mythology & lore',
     shortLabel: 'Lore',
   },
+  {
+    key: 'prophecy_destiny',
+    label: 'Tiên tri & Số phận',
+    hint: 'Prophecy & destiny',
+    shortLabel: 'Số phận',
+  },
+  {
+    key: 'reincarnation_logic',
+    label: 'Logic trùng sinh',
+    hint: 'Reincarnation logic',
+    shortLabel: 'Trùng sinh',
+  },
+  {
+    key: 'foreshadowing',
+    label: 'Che giấu thông tin',
+    hint: 'Foreshadowing',
+    shortLabel: 'Foreshadow',
+  },
   // Drama-SliceOfLife
   {
     key: 'narrative_depth',
@@ -221,6 +311,18 @@ export const EB_EXTENSION_CRITERIA = [
     label: 'Độ gần gũi',
     hint: 'Relatability',
     shortLabel: 'Gần gũi',
+  },
+  {
+    key: 'iyashikei_healing',
+    label: 'Giá trị chữa lành',
+    hint: 'Iyashikei / healing',
+    shortLabel: 'Chữa lành',
+  },
+  {
+    key: 'ensemble_cast',
+    label: 'Dàn diễn viên',
+    hint: 'Ensemble cast',
+    shortLabel: 'Ensemble',
   },
   // Art-Heavy
   {
@@ -247,6 +349,24 @@ export const EB_EXTENSION_CRITERIA = [
     hint: 'Visual expression',
     shortLabel: 'Hình ảnh',
   },
+  {
+    key: 'background_detail',
+    label: 'Chi tiết nền',
+    hint: 'Background detail',
+    shortLabel: 'Nền',
+  },
+  {
+    key: 'anatomy_proportion',
+    label: 'Giải phẫu & Tỉ lệ',
+    hint: 'Anatomy & proportion',
+    shortLabel: 'Giải phẫu',
+  },
+  {
+    key: 'cinematography',
+    label: 'Đạo cụ quay phim',
+    hint: 'Cinematography',
+    shortLabel: 'Cinematography',
+  },
   // Mature-Adult
   {
     key: 'maturity_handling',
@@ -259,6 +379,111 @@ export const EB_EXTENSION_CRITERIA = [
     label: 'Độ phức tạp nhân vật',
     hint: 'Character complexity',
     shortLabel: 'Phức tạp',
+  },
+  {
+    key: 'psychological_complexity',
+    label: 'Phức tạp tâm lý',
+    hint: 'Psychological complexity',
+    shortLabel: 'Tâm lý',
+  },
+  {
+    key: 'moral_ambiguity',
+    label: 'Đạo đức mơ hồ',
+    hint: 'Moral ambiguity',
+    shortLabel: 'Đạo đức',
+  },
+  {
+    key: 'political_intrigue',
+    label: 'Thâm nhập chính trị',
+    hint: 'Political intrigue',
+    shortLabel: 'Chính trị',
+  },
+  // Sports (family mới)
+  {
+    key: 'sports_specificity',
+    label: 'Chuyên môn thể thao',
+    hint: 'Sports specificity',
+    shortLabel: 'Chuyên môn',
+  },
+  {
+    key: 'athletic_determination',
+    label: 'Quyết tâm thể thao',
+    hint: 'Athletic determination',
+    shortLabel: 'Quyết tâm',
+  },
+  {
+    key: 'team_dynamics',
+    label: 'Động lực đội nhóm',
+    hint: 'Team dynamics',
+    shortLabel: 'Đội nhóm',
+  },
+  {
+    key: 'match_tension',
+    label: 'Căng thẳng trận đấu',
+    hint: 'Match tension',
+    shortLabel: 'Trận đấu',
+  },
+  {
+    key: 'injury_recovery_realism',
+    label: 'Chấn thương & Hồi phục',
+    hint: 'Injury/recovery realism',
+    shortLabel: 'Hồi phục',
+  },
+  // Mystery-Thriller (family mới)
+  {
+    key: 'clue_fairness',
+    label: 'Công bằng manh mối',
+    hint: 'Clue fairness',
+    shortLabel: 'Manh mối',
+  },
+  {
+    key: 'red_herring_balance',
+    label: 'Cân bằng manh mối giả',
+    hint: 'Red herring balance',
+    shortLabel: 'Red herring',
+  },
+  {
+    key: 'detective_reasoning',
+    label: 'Lập luận thám tử',
+    hint: 'Detective reasoning',
+    shortLabel: 'Lập luận',
+  },
+  {
+    key: 'investigation_logic',
+    label: 'Logic điều tra',
+    hint: 'Investigation logic',
+    shortLabel: 'Điều tra',
+  },
+  {
+    key: 'reveal_impact',
+    label: 'Tác động của tiết lộ',
+    hint: 'Revelation impact',
+    shortLabel: 'Tiết lộ',
+  },
+  // Historical (family mới)
+  {
+    key: 'historical_accuracy',
+    label: 'Độ chính xác lịch sử',
+    hint: 'Historical accuracy',
+    shortLabel: 'Chính xác',
+  },
+  {
+    key: 'period_immersion',
+    label: 'Đắm chìm thời đại',
+    hint: 'Period immersion',
+    shortLabel: 'Thời đại',
+  },
+  {
+    key: 'costume_propaganda',
+    label: 'Trang phục & Kiến trúc',
+    hint: 'Costume & architecture',
+    shortLabel: 'Trang phục',
+  },
+  {
+    key: 'political_context',
+    label: 'Bối cảnh chính trị',
+    hint: 'Political/social context',
+    shortLabel: 'Bối cảnh',
   },
   // Legacy keys (rubric cũ / lịch sử chấm)
   {

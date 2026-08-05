@@ -620,7 +620,7 @@ export default function Eb() {
   const [rubrics, setRubrics] = useState([DEFAULT_RUBRIC]);
   const [selectedRubricId, setSelectedRubricId] = useState(DEFAULT_RUBRIC.id);
   const [suggestedRubricId, setSuggestedRubricId] = useState("");
-  /** null = dùng gợi ý BE (không gửi rubric_id); string = EB override từ alternatives */
+  /** null = dùng rubric BE gợi ý; string = EB override từ alternatives */
   const [rubricOverrideId, setRubricOverrideId] = useState(null);
   const [rubricAltTab, setRubricAltTab] = useState("all");
   const [rubricSuggestMeta, setRubricSuggestMeta] = useState({
@@ -1389,6 +1389,7 @@ export default function Eb() {
 
   async function runPreviewCouncilAverage({ silent = false } = {}) {
     const memberScores = buildMemberScoresDraft();
+    const rubricId = rubricOverrideId || suggestedRubricId;
     if (!memberScores.length) {
       if (!silent) toast.error("Cần lưu nháp điểm trước khi xem preview ĐTB.");
       return null;
@@ -1396,7 +1397,7 @@ export default function Eb() {
     if (!silent) setPreviewLoading(true);
     try {
       const res = await ebEvaluationsService.previewCouncilAverage({
-        ...(rubricOverrideId ? { rubric_id: rubricOverrideId } : {}),
+        ...(rubricId ? { rubric_id: rubricId } : {}),
         member_scores: memberScores,
       });
       const mapped = mapEbPreviewCouncilAverageResponse(res);
@@ -1544,17 +1545,15 @@ export default function Eb() {
     });
 
     refresh();
-    toast.success(
-      `Đã lưu nháp ${activeMember?.name ?? "thành viên"} (${aggregate.scoredCount}/${councilRoster.length || 0}).`,
-    );
     if (aggregate.scoredCount >= rosterCount && rosterCount >= EB_COUNCIL_MIN_FOR_PUBLISH) {
       void runPreviewCouncilAverage({ silent: true });
-      if (activeChapter?.id) {
-        toast.message("Hội đồng đã lưu nháp đủ — chuyển sang quyết định đánh giá.");
-        navigate(
-          `/eb/chapter/${encodeURIComponent(activeChapter.id)}/decision`,
-        );
-      }
+      toast.success(
+        "Hội đồng đã lưu nháp đủ — bấm \"Tiếp tục quyết định đánh giá\" khi sẵn sàng.",
+      );
+    } else {
+      toast.success(
+        `Đã lưu nháp ${activeMember?.name ?? "thành viên"} (${aggregate.scoredCount}/${councilRoster.length || 0}).`,
+      );
     }
   }
 
@@ -1600,7 +1599,7 @@ export default function Eb() {
         </section>
       ) : null}
 
-      <main className={cn("page-container flex-1 space-y-8 py-8", isChapterDetail && "pb-28")}>
+      <main className={cn("page-container flex-1 space-y-8 py-8", isChapterDetail && "pb-32")}>
         {isChapterDetail ? (
           <>
             <header className="flex flex-wrap items-center gap-3 border-b border-border/60 pb-4">
@@ -1643,8 +1642,8 @@ export default function Eb() {
                 </CardContent>
               </Card>
             ) : (
-        <section className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[1fr_420px]">
-          <Card className="border-gray-100 shadow-sm">
+        <section className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
+          <Card className="min-w-0 border-gray-100 shadow-sm">
             <CardHeader className="space-y-1 pb-3">
               <CardTitle>Nhập điểm (tài khoản đại diện)</CardTitle>
               <CardDescription>
@@ -1652,7 +1651,7 @@ export default function Eb() {
               </CardDescription>
             </CardHeader>
 
-            <CardContent className="space-y-5">
+            <CardContent className="min-w-0 space-y-5">
               <div className="space-y-3">
                 <Label htmlFor="eb-council-member-name">
                   Thêm thành viên Hội đồng
@@ -1682,49 +1681,52 @@ export default function Eb() {
                   </Button>
                 </div>
                 {councilRoster.length > 0 ? (
-                  <div className="flex flex-wrap gap-2">
+                  <div className="mt-2 flex flex-wrap gap-2">
                     {councilRoster.map((member) => {
                       const scored = councilAggregate.memberRows.find(
                         (row) => row.id === member.id,
                       )?.scored;
+                      const isActive = activeMemberId === member.id;
                       return (
-                        <Button
+                        <button
                           key={member.id}
                           type="button"
-                          size="sm"
-                          variant={activeMemberId === member.id ? "default" : "outline"}
                           className={cn(
-                            activeMemberId === member.id
-                              && "bg-sky-600 text-white hover:bg-sky-700",
+                            "cursor-pointer px-3 py-1.5 text-xs font-medium transition-all rounded-xl",
+                            isActive
+                              ? "bg-emerald-600 text-white shadow-2xs"
+                              : scored
+                                ? "border border-emerald-200/60 bg-emerald-50 text-emerald-700"
+                                : "border border-gray-200 bg-white text-gray-600 hover:bg-gray-50",
                           )}
                           onClick={() => setActiveMemberId(member.id)}
                         >
                           {member.name}
                           {scored ? " · đã chấm" : ""}
-                        </Button>
+                        </button>
                       );
                     })}
                   </div>
                 ) : null}
                 {activeMember ? (
-                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-sky-200/70 bg-sky-500/5 px-3 py-2.5 dark:border-sky-500/30">
-                    <p className="text-sm text-muted-foreground">
+                  <div className="mb-4 flex items-center justify-between gap-2 rounded-xl border border-gray-100 bg-gray-50 p-3 text-xs font-medium text-gray-700">
+                    <p>
                       Đang nhập điểm cho{" "}
-                      <strong className="text-foreground">{activeMember.name}</strong>
+                      <strong className="text-gray-900">{activeMember.name}</strong>
                     </p>
-                    <p className="text-sm">
-                      <span className="text-muted-foreground">Điểm TB cá nhân: </span>
+                    <p>
+                      <span className="text-gray-500">Điểm TB cá nhân: </span>
                       <strong
                         className={cn(
                           "tabular-nums",
                           personalAvgDisplay.muted
-                            ? "text-muted-foreground/70"
-                            : "text-foreground",
+                            ? "text-gray-400"
+                            : "text-gray-900",
                         )}
                       >
                         {personalAvgDisplay.text}
                       </strong>
-                      <span className="text-muted-foreground"> / {SCORE_MAX}</span>
+                      <span className="text-gray-500"> / {SCORE_MAX}</span>
                     </p>
                   </div>
                 ) : null}
@@ -1736,11 +1738,11 @@ export default function Eb() {
                     Rubric chấm điểm
                   </h3>
                   {rubricOverrideId ? (
-                    <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-[11px] font-medium text-amber-800 ring-1 ring-amber-100">
+                    <span className="rounded-md border border-amber-100 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
                       Đã chọn thủ công
                     </span>
                   ) : (
-                    <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-emerald-100">
+                    <span className="rounded-md border border-emerald-100 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-600">
                       Gợi ý tự động
                     </span>
                   )}
@@ -1765,7 +1767,7 @@ export default function Eb() {
                           ).map((chip, idx) => (
                             <span
                               key={`${chip.label}-${idx}`}
-                              className="inline-flex rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] font-medium text-gray-800"
+                              className="inline-flex rounded-lg border border-gray-200/50 bg-gray-100 px-2.5 py-1 text-[11px] font-medium text-gray-700"
                             >
                               {chip.label}
                             </span>
@@ -1789,32 +1791,29 @@ export default function Eb() {
                         </p>
                       )}
                       {rubricSuggestMeta.sourceFamily ? (
-                        <p className="mt-1 text-[11px] text-gray-500">
-                          Family chính:{" "}
-                          <span className="font-medium text-gray-700">
-                            {rubricSuggestMeta.sourceFamily}
-                          </span>
-                        </p>
+                        <span className="mt-1.5 inline-flex rounded-lg border border-gray-200/50 bg-gray-100 px-2.5 py-1 text-[11px] font-medium text-gray-700">
+                          {rubricSuggestMeta.sourceFamily}
+                        </span>
                       ) : null}
                     </div>
                     <div>
                       <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">
                         Độ tuổi series
                       </p>
-                      <p className="mt-0.5 font-medium text-gray-900">
+                      <span className="mt-1.5 inline-flex rounded-lg border border-gray-200/50 bg-gray-100 px-2.5 py-1 text-[11px] font-medium text-gray-700">
                         {seriesContext?.ageRating
                           ?? selectedRubric?.ageRating
                           ?? "All ages"}
-                      </p>
+                      </span>
                     </div>
                     {hasExtension ? (
                       <div>
                         <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">
                           Mở rộng
                         </p>
-                        <p className="mt-0.5 font-medium text-gray-900">
+                        <span className="mt-1.5 inline-flex rounded-lg border border-gray-200/50 bg-gray-100 px-2.5 py-1 text-[11px] font-medium text-gray-700">
                           Có tiêu chí theo thể loại
-                        </p>
+                        </span>
                       </div>
                     ) : null}
                   </div>
@@ -2247,15 +2246,15 @@ export default function Eb() {
                 </div>
 
                 {canOpenDecision ? (
-                  <div className="space-y-2 rounded-xl border border-emerald-100 bg-emerald-50/50 p-3">
-                    <p className="text-xs text-emerald-800">
+                  <div className="space-y-3 rounded-2xl border border-emerald-100 bg-emerald-50/40 p-4">
+                    <p className="text-xs leading-relaxed text-emerald-800">
                       {isFirstReview
                         ? "Hội đồng đã lưu nháp đủ. Tiếp tục trang quyết định để chọn kết quả và xác nhận lịch."
                         : "Series đã chấm trước đó — mở Quick decision (không cần nhập lại điểm hội đồng)."}
                     </p>
                     <Button
                       type="button"
-                      className="w-full gap-2 bg-gray-900 text-white hover:bg-black"
+                      className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-gray-900 py-3 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-black"
                       onClick={() => {
                         if (!activeChapter?.id) return;
                         saveCouncilSessionMeta(councilKey, {
@@ -2294,7 +2293,7 @@ export default function Eb() {
             </CardContent>
           </Card>
 
-          <aside className="sticky top-20 flex max-h-[calc(100vh-120px)] flex-col self-start">
+          <aside className="sticky top-20 flex min-w-0 max-h-[calc(100vh-120px)] flex-col self-start">
           <Card className="flex min-h-0 flex-1 flex-col overflow-hidden border-gray-100 shadow-sm">
             <CardHeader className="flex shrink-0 flex-row items-center justify-between gap-2 space-y-0 border-b border-gray-100 pb-3">
               <CardTitle className="text-base">Xem trước chapter</CardTitle>
@@ -2619,9 +2618,9 @@ export default function Eb() {
       </main>
 
       {isChapterDetail ? (
-        <div className="pointer-events-none fixed bottom-4 left-1/2 z-40 flex w-[min(100%-1.5rem,720px)] min-w-0 -translate-x-1/2 justify-center sm:min-w-[500px]">
-          <div className="pointer-events-auto flex w-full flex-wrap items-center justify-between gap-4 rounded-2xl border border-gray-200 bg-white/90 px-4 py-3 shadow-lg backdrop-blur-md sm:gap-6 sm:px-6">
-            <p className="text-xs text-gray-600 sm:text-sm">
+        <div className="pointer-events-none fixed bottom-5 left-1/2 z-50 flex w-[min(100%-1.5rem,720px)] min-w-0 -translate-x-1/2 justify-center sm:min-w-[460px]">
+          <div className="pointer-events-auto flex min-w-0 w-full items-center justify-between gap-5 rounded-2xl border border-gray-200/80 bg-white/90 px-5 py-2.5 shadow-xl backdrop-blur-md sm:min-w-[460px]">
+            <p className="min-w-0 truncate text-xs text-gray-600 sm:text-sm">
               Điểm TB cá nhân:{" "}
               <strong
                 className={cn(
@@ -2640,17 +2639,17 @@ export default function Eb() {
                 </>
               ) : null}
             </p>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
               <Button
                 type="button"
-                variant="outline"
-                className="border-gray-200 bg-white shadow-none"
+                className="bg-emerald-600 text-white shadow-xs hover:bg-emerald-700"
                 onClick={() => void handleSaveAssessment()}
               >
                 Lưu nháp
               </Button>
               <Button
                 type="button"
+                variant="outline"
                 disabled={!activeChapter?.id || Boolean(debutGateLock)}
                 title={
                   debutGateLock
@@ -2659,7 +2658,10 @@ export default function Eb() {
                       ? "Mở trang quyết định đánh giá"
                       : "Cần lưu nháp đủ điểm tất cả thành viên hội đồng (3–5)")
                 }
-                className="bg-emerald-600 text-white shadow-xs hover:bg-emerald-700 disabled:opacity-50"
+                className={cn(
+                  "border-gray-200 bg-white text-gray-700 shadow-none hover:bg-gray-50 disabled:opacity-50",
+                  canOpenDecision && "border-gray-300 text-gray-500",
+                )}
                 onClick={() => {
                   if (isFirstReview && !canSubmitScores) {
                     warnMissingCouncilDrafts();

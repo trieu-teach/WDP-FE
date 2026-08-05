@@ -425,12 +425,8 @@ export default function EbPublish() {
         : "";
       toast.success(
         whenLabel
-          ? `Confirm-publish OK · Series → approved_by_EB / upcoming. Job sẽ set published vào ${whenLabel}. Chapter 1 → pending_assistant (Mangaka/Assistant), không phải EB publish.`
-          : (res?.message
-            || `Series "${seriesName}" đã confirm-publish (approved_by_EB)${res?.council_average != null ? ` · ĐTB ${Number(res.council_average).toFixed(1)}` : ""}. Chapter đầu chuyển pending_assistant — TE publish chapter sau.`),
-      );
-      toast.message(
-        "Series chưa hiện với Reader ngay. Chờ scheduled_publish_at; lịch chapter đầu do TE xử lý sau khi Mangaka/Assistant hoàn tất.",
+          ? `Đã duyệt "${seriesName}" — lên sóng lúc ${whenLabel}. Chapter 1 chuyển Mangaka/Assistant hoàn thiện.`
+          : `Đã duyệt "${seriesName}" — chờ lịch phát hành. Chapter 1 chuyển Mangaka/Assistant hoàn thiện.`,
       );
       navigate("/eb");
     } catch (err) {

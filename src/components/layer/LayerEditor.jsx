@@ -918,8 +918,8 @@ export default function LayerEditor({ chapter, pageId: pageIdProp, task: taskPro
         </div>
 
         {/* Sidebar */}
-        <div className="flex w-96 shrink-0 flex-col border-l border-slate-700/60 bg-slate-950">
-          <div className="scrollbar-hide flex min-h-0 max-h-[calc(100vh-140px)] flex-1 flex-col overflow-y-auto">
+        <div className="flex w-96 shrink-0 flex-col overflow-hidden border-l border-slate-700/60 bg-slate-950">
+          <div className="scrollbar-hide flex min-h-0 flex-1 flex-col overflow-y-auto pb-4">
             {/* Ghi chú Mangaka — chỉ UI đọc, dùng cùng overlayNotes (không đổi 3 nguồn load) */}
             <MangakaNotesPanel
               notes={visibleOverlayNotes}

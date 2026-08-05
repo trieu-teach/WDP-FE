@@ -12,6 +12,8 @@ export const SERIES_GENRES = [
   'Hành Động', 'Võ Thuật', 'Huyền Bí', 'Thể Thao', 'Học Đường', 'Lịch Sử',
   // Genre (other)
   'Phiêu Lưu', 'Hài Hước', 'Lãng Mạn', 'Kinh Dị', 'Siêu Nhiên', 'Bi Kịch',
+  // Mystery-Thriller / Historical (khớp BE suggest-rubric family)
+  'Trinh Thám', 'Kinh Dị-Tâm Lý', 'Xuyên Không',
   // Sub-genres
   'Trùng Sinh', 'Game', 'Viễn Tưởng', 'Khoa Học', 'Truyện Màu',
   // Sensitive
