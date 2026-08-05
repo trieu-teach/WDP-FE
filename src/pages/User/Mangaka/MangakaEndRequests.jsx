@@ -10,9 +10,7 @@ import {
 import { toast } from 'sonner'
 import Header from '@/components/User/Header/Header.jsx'
 import Footer from '@/components/User/Footer/Footer.jsx'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Select,
   SelectContent,
@@ -106,26 +104,28 @@ export default function MangakaEndRequests() {
     <div className="flex min-h-screen flex-col bg-background">
       <Header links={NAV_LINKS} onLogout={handleLogout} />
 
-      <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-8 sm:px-6">
-        <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <Button variant="ghost" size="sm" className="mb-2 -ml-2 gap-1.5" asChild>
-              <Link to="/mangaka">
-                <ArrowLeft className="size-4" />
-                Về workspace
-              </Link>
-            </Button>
-            <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
-              <Flag className="size-6 text-amber-600" />
+      <main className="mx-auto w-full max-w-4xl flex-1 space-y-6 px-4 py-8">
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+          <div className="min-w-0 space-y-1.5">
+            <Link
+              to="/mangaka"
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 transition-colors hover:text-gray-800"
+            >
+              <ArrowLeft className="size-3.5" />
+              Về workspace
+            </Link>
+            <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-gray-900">
+              <Flag className="size-5 shrink-0 text-amber-600" />
               Yêu cầu kết thúc truyện
             </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <p className="text-sm text-gray-500">
               Theo dõi các yêu cầu end series bạn đã gửi ({meta.total})
             </p>
           </div>
-          <div className="flex items-center gap-2">
+
+          <div className="flex shrink-0 items-center gap-2">
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="h-9 w-[150px]">
+              <SelectTrigger className="h-9 w-[140px] rounded-xl border-gray-200 bg-white text-xs shadow-2xs">
                 <SelectValue placeholder="Trạng thái" />
               </SelectTrigger>
               <SelectContent>
@@ -140,7 +140,7 @@ export default function MangakaEndRequests() {
               type="button"
               variant="outline"
               size="sm"
-              className="h-9 gap-1.5"
+              className="flex h-9 items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-700 shadow-2xs transition-colors hover:bg-gray-50"
               onClick={() => void load()}
               disabled={loading}
             >
@@ -151,110 +151,124 @@ export default function MangakaEndRequests() {
         </div>
 
         {loading ? (
-          <Card>
-            <CardContent className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
-              <Loader2 className="size-5 animate-spin" />
-              Đang tải...
-            </CardContent>
-          </Card>
+          <div className="flex items-center justify-center gap-2 rounded-2xl border border-gray-100 bg-white py-16 text-sm text-gray-500 shadow-2xs">
+            <Loader2 className="size-5 animate-spin" />
+            Đang tải...
+          </div>
         ) : items.length === 0 ? (
-          <Card>
-            <CardContent className="py-16 text-center text-muted-foreground">
-              <BookOpen className="mx-auto mb-3 size-10 opacity-30" />
-              Chưa có yêu cầu nào.
-            </CardContent>
-          </Card>
+          <div className="rounded-2xl border border-dashed border-gray-200 bg-white px-6 py-16 text-center shadow-2xs">
+            <BookOpen className="mx-auto mb-3 size-10 text-gray-300" />
+            <p className="text-sm text-gray-500">Chưa có yêu cầu nào.</p>
+          </div>
         ) : (
-          <div className="space-y-3">
+          <div>
             {items.map((item) => {
               const display = getSeriesEndRequestDisplayStatus(item)
+              const awaitingPublish = isApprovedAwaitingFinalPublish(item)
               return (
-              <Card key={item.id} className="overflow-hidden">
-                <CardHeader className="flex flex-row items-start gap-3 space-y-0 pb-3">
-                  <div className="size-14 shrink-0 overflow-hidden rounded-lg bg-muted">
-                    {item.series?.coverImageUrl ? (
-                      <img
-                        src={item.series.coverImageUrl}
-                        alt=""
-                        className="size-full object-cover"
-                      />
-                    ) : (
-                      <div className="flex size-full items-center justify-center text-muted-foreground">
-                        <BookOpen className="size-5 opacity-40" />
-                      </div>
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <CardTitle className="text-base">
-                        {item.series?.name || 'Series'}
-                      </CardTitle>
-                      <Badge
-                        variant="outline"
-                        className={cn('text-[11px]', display.className)}
-                      >
-                        {display.label}
-                      </Badge>
+                <article
+                  key={item.id}
+                  className="mb-4 space-y-3 rounded-2xl border border-gray-100 bg-white p-4 shadow-2xs transition-all hover:border-gray-200"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="h-11 w-11 shrink-0 overflow-hidden rounded-xl bg-gray-100">
+                      {item.series?.coverImageUrl ? (
+                        <img
+                          src={item.series.coverImageUrl}
+                          alt=""
+                          className="size-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex size-full items-center justify-center text-gray-400">
+                          <BookOpen className="size-4 opacity-50" />
+                        </div>
+                      )}
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      Gửi lúc {formatSeriesEndDateTime(item.createdAt)}
-                      {item.plannedFinalChapterNumber != null
-                        ? ` · Chapter dự kiến #${item.plannedFinalChapterNumber}`
-                        : ''}
-                    </p>
+
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <div className="flex items-start justify-between gap-3">
+                        <h2 className="text-base font-bold text-gray-900">
+                          {item.series?.name || 'Series'}
+                        </h2>
+                        <span
+                          className={cn(
+                            'shrink-0 rounded-full border px-3 py-1 text-xs font-medium',
+                            awaitingPublish
+                              ? 'border-blue-100 bg-blue-50 text-blue-700'
+                              : display.className,
+                          )}
+                        >
+                          {display.label}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        Gửi lúc {formatSeriesEndDateTime(item.createdAt)}
+                        {item.plannedFinalChapterNumber != null
+                          ? ` · Chapter dự kiến #${item.plannedFinalChapterNumber}`
+                          : ''}
+                      </p>
+                    </div>
+
+                    {item.status === 'pending' ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8 shrink-0 rounded-xl border-gray-200 text-xs"
+                        disabled={cancellingId === item.id}
+                        onClick={() => void handleCancel(item.id)}
+                      >
+                        {cancellingId === item.id ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : null}
+                        Hủy
+                      </Button>
+                    ) : null}
                   </div>
-                  {item.status === 'pending' ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="shrink-0"
-                      disabled={cancellingId === item.id}
-                      onClick={() => void handleCancel(item.id)}
-                    >
-                      {cancellingId === item.id ? (
-                        <Loader2 className="size-3.5 animate-spin" />
-                      ) : null}
-                      Hủy
-                    </Button>
-                  ) : null}
-                </CardHeader>
-                <CardContent className="space-y-2 pt-0 text-sm">
+
                   {item.reason ? (
-                    <p className="text-muted-foreground">
-                      <span className="font-medium text-foreground">Lý do: </span>
+                    <p className="rounded-xl border border-gray-100 bg-gray-50/70 p-2.5 text-xs text-gray-600">
+                      <span className="font-medium text-gray-800">Lý do: </span>
                       {item.reason}
                     </p>
                   ) : null}
-                  {isApprovedAwaitingFinalPublish(item) ? (
-                    <p className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-950 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-100">
-                      {approvedAwaitingFinalPublishMessage(item)}
-                    </p>
+
+                  {awaitingPublish ? (
+                    <div className="flex flex-col gap-1 rounded-xl border border-sky-100 bg-sky-50/60 p-3 text-xs text-sky-900">
+                      <p>{approvedAwaitingFinalPublishMessage(item)}</p>
+                    </div>
                   ) : null}
+
                   {item.status === 'approved'
                     && String(item.seriesPublicationStatus ?? item.series?.publicationStatus ?? '').toLowerCase() === 'completed' ? (
-                    <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100">
-                      Series đã hoàn thành (<code className="text-[10px]">publication_status = completed</code>).
-                    </p>
+                    <div className="flex flex-col gap-1 rounded-xl border border-emerald-100 bg-emerald-50/60 p-3 text-xs text-emerald-900">
+                      <p>
+                        Series đã hoàn thành (
+                        <code className="text-[10px]">publication_status = completed</code>
+                        ).
+                      </p>
+                    </div>
                   ) : null}
+
                   {item.adminNote ? (
-                    <p className="rounded-md border bg-muted/40 px-3 py-2 text-xs">
-                      <span className="font-medium">Ghi chú Admin: </span>
-                      {item.adminNote}
-                    </p>
+                    <div className="flex flex-col gap-1 rounded-xl border border-sky-100 bg-sky-50/60 p-3 text-xs text-sky-900">
+                      <p className="font-medium">Ghi chú Admin</p>
+                      <p>{item.adminNote}</p>
+                    </div>
                   ) : null}
+
                   {item.autoCancelMessage ? (
-                    <p className="text-xs text-slate-600 dark:text-slate-300">
+                    <p className="text-xs text-slate-600">
                       {item.autoCancelMessage}
                     </p>
                   ) : null}
+
                   {item.decidedAt && item.status !== 'pending' ? (
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="text-[11px] font-normal text-gray-400">
                       Quyết định lúc {formatSeriesEndDateTime(item.decidedAt)}
                     </p>
                   ) : null}
-                </CardContent>
-              </Card>
+                </article>
               )
             })}
           </div>

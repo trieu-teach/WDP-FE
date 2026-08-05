@@ -14,6 +14,7 @@ import {
   Maximize2,
   Plus,
   Star,
+  AlertTriangle,
 } from "lucide-react";
 import Header from "@/components/User/Header/Header.jsx";
 import Footer from "@/components/User/Footer/Footer.jsx";
@@ -47,6 +48,7 @@ import { cn } from "@/lib/utils";
 import { ebEvaluationsService } from "@/api/ebEvaluations.service.js";
 import { ebScoresService } from "@/api/ebScores.service.js";
 import { mangakaProfileService } from "@/api/mangakaProfile.service.js";
+import { seriesService } from "@/api/series.service.js";
 import { getApiErrorMessage } from "@/api/http.js";
 import { updateSeriesEbAssessmentInWorkspace } from "@/utils/mangakaWorkspaceReader.js";
 import { placeholderPageDataUrl } from "@/utils/placeholderPageDataUrl.js";
@@ -620,11 +622,25 @@ export default function Eb() {
   const [suggestedRubricId, setSuggestedRubricId] = useState("");
   /** null = dùng gợi ý BE (không gửi rubric_id); string = EB override từ alternatives */
   const [rubricOverrideId, setRubricOverrideId] = useState(null);
+  const [rubricAltTab, setRubricAltTab] = useState("all");
   const [rubricSuggestMeta, setRubricSuggestMeta] = useState({
     reason: "",
     isFallback: false,
+    canSuggest: true,
     seriesInfo: null,
     alternatives: [],
+    sameFamilyAlternatives: [],
+    crossFamilyAlternatives: [],
+    sourceGenres: [],
+    sourceFamily: null,
+    matchedFamilies: [],
+    matchedGenreChips: [],
+    validation: null,
+    debug: null,
+  });
+  const [showRubricDebug, setShowRubricDebug] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return new URLSearchParams(window.location.search).get("debug") === "true";
   });
   const [contentLevels, setContentLevels] = useState(buildEmptyContentLevels);
   const [ageSafety, setAgeSafety] = useState(null);
@@ -949,43 +965,86 @@ export default function Eb() {
   );
   const hasExtension = Boolean(selectedRubric?.hasExtension && extensionKeys.length);
 
+  const visibleRubricAlternatives = useMemo(() => {
+    if (rubricAltTab === "same") return rubricSuggestMeta.sameFamilyAlternatives ?? [];
+    if (rubricAltTab === "cross") return rubricSuggestMeta.crossFamilyAlternatives ?? [];
+    return rubricSuggestMeta.alternatives ?? [];
+  }, [
+    rubricAltTab,
+    rubricSuggestMeta.alternatives,
+    rubricSuggestMeta.crossFamilyAlternatives,
+    rubricSuggestMeta.sameFamilyAlternatives,
+  ]);
+
+  const applySuggestedRubric = useCallback((suggested, seriesId, { toastWarnings = true } = {}) => {
+    if (!suggested?.rubric && suggested?.canSuggest !== false) return;
+
+    if (suggested.rubric) {
+      setSuggestedRubricId(suggested.rubric.id);
+      setSelectedRubricId(suggested.rubric.id);
+    }
+    setRubricOverrideId(null);
+    setRubricAltTab("all");
+    setRubricSuggestMeta({
+      reason: suggested.reason,
+      isFallback: suggested.isFallback,
+      canSuggest: suggested.canSuggest,
+      seriesInfo: suggested.seriesInfo,
+      alternatives: suggested.alternatives ?? [],
+      sameFamilyAlternatives: suggested.sameFamilyAlternatives ?? [],
+      crossFamilyAlternatives: suggested.crossFamilyAlternatives ?? [],
+      sourceGenres: suggested.sourceGenres ?? [],
+      sourceFamily: suggested.sourceFamily,
+      matchedFamilies: suggested.matchedFamilies ?? [],
+      matchedGenreChips: suggested.matchedGenreChips ?? [],
+      validation: suggested.validation,
+      debug: suggested.debug,
+    });
+
+    if (toastWarnings) {
+      for (const warning of suggested.validation?.warnings ?? []) {
+        if (warning?.message) {
+          toast.warning(warning.message, { duration: 7000 });
+        }
+      }
+    }
+
+    setRubrics((prev) => {
+      const byId = new Map(prev.map((r) => [r.id, r]));
+      if (suggested.rubric) byId.set(suggested.rubric.id, suggested.rubric);
+      for (const alt of [
+        ...(suggested.alternatives ?? []),
+        ...(suggested.sameFamilyAlternatives ?? []),
+        ...(suggested.crossFamilyAlternatives ?? []),
+      ]) {
+        byId.set(alt.id, alt);
+      }
+      return [...byId.values()];
+    });
+
+    if (suggested.seriesInfo) {
+      setSeriesContext((prev) => ({
+        ...(prev ?? {}),
+        seriesId: prev?.seriesId || seriesId,
+        ageRating: suggested.seriesInfo.ageRating ?? prev?.ageRating ?? null,
+        genre: suggested.seriesInfo.genre?.length
+          ? suggested.seriesInfo.genre
+          : (prev?.genre ?? []),
+        name: suggested.seriesInfo.name || prev?.name || "",
+      }));
+    }
+  }, []);
+
   useEffect(() => {
     if (!activeSeriesId) return;
     let cancelled = false;
     void (async () => {
       try {
-        const body = await ebEvaluationsService.suggestRubric(activeSeriesId);
+        const body = await ebEvaluationsService.suggestRubric(activeSeriesId, {
+          debug: showRubricDebug,
+        });
         if (cancelled) return;
-        const suggested = mapSuggestedRubricResponse(body);
-        if (!suggested.rubric) return;
-        setSuggestedRubricId(suggested.rubric.id);
-        setRubricOverrideId(null);
-        setRubricSuggestMeta({
-          reason: suggested.reason,
-          isFallback: suggested.isFallback,
-          seriesInfo: suggested.seriesInfo,
-          alternatives: suggested.alternatives ?? [],
-        });
-        setRubrics(() => {
-          const byId = new Map();
-          byId.set(suggested.rubric.id, suggested.rubric);
-          for (const alt of suggested.alternatives ?? []) {
-            byId.set(alt.id, alt);
-          }
-          return [...byId.values()];
-        });
-        setSelectedRubricId(suggested.rubric.id);
-        if (suggested.seriesInfo) {
-          setSeriesContext((prev) => ({
-            ...(prev ?? {}),
-            seriesId: prev?.seriesId || activeSeriesId,
-            ageRating: suggested.seriesInfo.ageRating ?? prev?.ageRating ?? null,
-            genre: suggested.seriesInfo.genre?.length
-              ? suggested.seriesInfo.genre
-              : (prev?.genre ?? []),
-            name: suggested.seriesInfo.name || prev?.name || "",
-          }));
-        }
+        applySuggestedRubric(mapSuggestedRubricResponse(body), activeSeriesId);
       } catch {
         // giữ default khi suggest lỗi
       }
@@ -993,7 +1052,7 @@ export default function Eb() {
     return () => {
       cancelled = true;
     };
-  }, [activeSeriesId]);
+  }, [activeSeriesId, applySuggestedRubric, showRubricDebug]);
 
   useEffect(() => {
     setScores(buildInitialScores(coreScoreKeys));
@@ -1689,25 +1748,54 @@ export default function Eb() {
 
                 <div className="space-y-3 rounded-2xl border border-gray-100 bg-white p-4 shadow-2xs">
                   <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">
                         Thể loại
                       </p>
-                      <p className="mt-0.5 font-medium text-gray-900">
-                        {(seriesContext?.genre ?? activeChapter?.genre ?? [])[0]
-                          || (selectedRubric?.sourceGenre
-                            && !String(selectedRubric.sourceGenre).startsWith("__")
-                            ? selectedRubric.sourceGenre
-                            : null)
-                          || (selectedRubric?.genreFamily
-                            && !String(selectedRubric.genreFamily).startsWith("__")
-                            ? selectedRubric.genreFamily
-                            : null)
-                          || "Chưa xác định"}
-                        {(seriesContext?.genre ?? []).length > 1
-                          ? ` (+${seriesContext.genre.length - 1})`
-                          : ""}
-                      </p>
+                      {(rubricSuggestMeta.matchedGenreChips?.length
+                        || rubricSuggestMeta.sourceGenres?.length) ? (
+                        <div className="mt-1.5 flex flex-wrap gap-1.5">
+                          {(rubricSuggestMeta.matchedGenreChips?.length
+                            ? rubricSuggestMeta.matchedGenreChips
+                            : (rubricSuggestMeta.sourceGenres ?? []).map((g) => ({
+                                label: rubricSuggestMeta.sourceFamily
+                                  ? `${rubricSuggestMeta.sourceFamily} (${g})`
+                                  : g,
+                              }))
+                          ).map((chip, idx) => (
+                            <span
+                              key={`${chip.label}-${idx}`}
+                              className="inline-flex rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] font-medium text-gray-800"
+                            >
+                              {chip.label}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="mt-0.5 font-medium text-gray-900">
+                          {(seriesContext?.genre ?? activeChapter?.genre ?? [])[0]
+                            || (selectedRubric?.sourceGenre
+                              && !String(selectedRubric.sourceGenre).startsWith("__")
+                              ? selectedRubric.sourceGenre
+                              : null)
+                            || (selectedRubric?.genreFamily
+                              && !String(selectedRubric.genreFamily).startsWith("__")
+                              ? selectedRubric.genreFamily
+                              : null)
+                            || "Chưa xác định"}
+                          {(seriesContext?.genre ?? []).length > 1
+                            ? ` (+${seriesContext.genre.length - 1})`
+                            : ""}
+                        </p>
+                      )}
+                      {rubricSuggestMeta.sourceFamily ? (
+                        <p className="mt-1 text-[11px] text-gray-500">
+                          Family chính:{" "}
+                          <span className="font-medium text-gray-700">
+                            {rubricSuggestMeta.sourceFamily}
+                          </span>
+                        </p>
+                      ) : null}
                     </div>
                     <div>
                       <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">
@@ -1731,7 +1819,81 @@ export default function Eb() {
                     ) : null}
                   </div>
 
-                  {rubricSuggestMeta.isFallback || rubricSuggestMeta.reason ? (
+                  {rubricSuggestMeta.canSuggest === false
+                    || (rubricSuggestMeta.validation?.errors?.length > 0) ? (
+                    <div className="space-y-2 rounded-xl border border-red-200 bg-red-50/90 px-3.5 py-2.5 text-xs text-red-900">
+                      <p className="flex items-center gap-1.5 font-semibold">
+                        <AlertTriangle className="size-3.5 shrink-0" />
+                        Không gợi ý được rubric tự động
+                      </p>
+                      {(rubricSuggestMeta.validation?.errors?.length
+                        ? rubricSuggestMeta.validation.errors
+                        : [{ message: rubricSuggestMeta.reason || "Series thiếu genre/độ tuổi khớp ma trận." }]
+                      ).map((err, idx) => (
+                        <div key={`${err.code || "err"}-${idx}`} className="leading-relaxed text-red-800/90">
+                          <p>{err.message}</p>
+                          {err.suggested ? (
+                            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                              <p className="text-red-700/80">
+                                Gợi ý dùng: <strong>{err.suggested}</strong>
+                              </p>
+                              {err.code === "INVALID_AGE_RATING" && activeSeriesId ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 border-red-200 bg-white text-[11px] text-red-800 shadow-none hover:bg-red-50"
+                                  onClick={() => {
+                                    void (async () => {
+                                      try {
+                                        await seriesService.update(activeSeriesId, {
+                                          age_rating: err.suggested,
+                                        });
+                                        toast.success(`Đã cập nhật độ tuổi thành "${err.suggested}"`);
+                                        const body = await ebEvaluationsService.suggestRubric(
+                                          activeSeriesId,
+                                          { debug: showRubricDebug },
+                                        );
+                                        applySuggestedRubric(
+                                          mapSuggestedRubricResponse(body),
+                                          activeSeriesId,
+                                          { toastWarnings: false },
+                                        );
+                                        setSeriesContext((prev) => ({
+                                          ...(prev ?? {}),
+                                          seriesId: prev?.seriesId || activeSeriesId,
+                                          ageRating: err.suggested,
+                                        }));
+                                      } catch (e) {
+                                        toast.error(
+                                          getApiErrorMessage(e)
+                                          || "Không cập nhật được độ tuổi series",
+                                        );
+                                      }
+                                    })();
+                                  }}
+                                >
+                                  Sửa thành {err.suggested}
+                                </Button>
+                              ) : null}
+                            </div>
+                          ) : null}
+                          {err.invalidCombinations?.length ? (
+                            <ul className="mt-1 list-inside list-disc text-[11px] text-red-700/80">
+                              {err.invalidCombinations.map((combo, i) => (
+                                <li key={`${combo.family}-${combo.age_rating}-${i}`}>
+                                  {combo.family} · {combo.age_rating ?? combo.ageRating}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : null}
+                        </div>
+                      ))}
+                      <p className="text-[11px] text-red-700/80">
+                        Hãy chọn rubric thủ công từ danh sách bên dưới hoặc tải lại toàn bộ rubrics.
+                      </p>
+                    </div>
+                  ) : rubricSuggestMeta.isFallback || rubricSuggestMeta.reason ? (
                     <div className="rounded-xl border border-amber-200 bg-amber-50/90 px-3.5 py-2.5 text-xs text-amber-900">
                       <p className="font-semibold">Cần chọn rubric phù hợp</p>
                       <p className="mt-0.5 leading-relaxed text-amber-800/90">
@@ -1741,11 +1903,64 @@ export default function Eb() {
                     </div>
                   ) : null}
 
-                  {rubricSuggestMeta.alternatives?.length > 0 ? (
-                    <div className="space-y-1.5 border-t border-gray-100 pt-3">
-                      <Label htmlFor="eb-rubric-alt" className="text-xs text-gray-600">
-                        Đổi rubric (tuỳ chọn)
-                      </Label>
+                  {(rubricSuggestMeta.sameFamilyAlternatives?.length > 0
+                    || rubricSuggestMeta.crossFamilyAlternatives?.length > 0
+                    || rubricSuggestMeta.alternatives?.length > 0
+                    || rubricSuggestMeta.canSuggest === false) ? (
+                    <div className="space-y-2 border-t border-gray-100 pt-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <Label className="text-xs text-gray-600">
+                          Đổi rubric (tuỳ chọn)
+                        </Label>
+                        {import.meta.env.DEV ? (
+                          <button
+                            type="button"
+                            className="text-[11px] font-medium text-gray-500 underline-offset-2 hover:text-gray-800 hover:underline"
+                            onClick={() => setShowRubricDebug((v) => !v)}
+                          >
+                            {showRubricDebug ? "Tắt debug" : "Bật debug"}
+                          </button>
+                        ) : null}
+                      </div>
+
+                      <div className="flex flex-wrap gap-1 rounded-xl bg-gray-100/70 p-1 text-[11px] font-medium">
+                        {[
+                          { id: "all", label: "Tất cả" },
+                          {
+                            id: "same",
+                            label: "Cùng thể loại, đổi độ tuổi",
+                            count: rubricSuggestMeta.sameFamilyAlternatives?.length ?? 0,
+                          },
+                          {
+                            id: "cross",
+                            label: "Khác thể loại, cùng độ tuổi",
+                            count: rubricSuggestMeta.crossFamilyAlternatives?.length ?? 0,
+                          },
+                        ].map((tab) => (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            className={cn(
+                              "rounded-lg px-2.5 py-1.5 transition-colors",
+                              rubricAltTab === tab.id
+                                ? "bg-white font-semibold text-gray-900 shadow-2xs"
+                                : "text-gray-500 hover:text-gray-800",
+                            )}
+                            onClick={() => setRubricAltTab(tab.id)}
+                          >
+                            {tab.label}
+                            {tab.count != null ? ` (${tab.count})` : ""}
+                          </button>
+                        ))}
+                      </div>
+
+                      {rubricAltTab === "cross"
+                        && (rubricSuggestMeta.crossFamilyAlternatives?.length ?? 0) > 0 ? (
+                        <p className="text-[11px] text-sky-700">
+                          Có thể dùng rubric theo thể loại khác (cùng độ tuổi).
+                        </p>
+                      ) : null}
+
                       <Select
                         value={rubricOverrideId ?? "__auto__"}
                         onValueChange={(value) => {
@@ -1774,7 +1989,7 @@ export default function Eb() {
                               }`
                               : ""}
                           </SelectItem>
-                          {rubricSuggestMeta.alternatives.map((alt) => (
+                          {visibleRubricAlternatives.map((alt) => (
                             <SelectItem key={alt.id} value={alt.id}>
                               {(alt.genreFamily
                                 && !String(alt.genreFamily).startsWith("__")
@@ -1784,8 +1999,29 @@ export default function Eb() {
                               {alt.ageRating ? ` · ${alt.ageRating}` : ""}
                             </SelectItem>
                           ))}
+                          {rubricSuggestMeta.canSuggest === false
+                            ? rubrics
+                              .filter((r) => r.id !== suggestedRubricId
+                                && !visibleRubricAlternatives.some((a) => a.id === r.id))
+                              .map((alt) => (
+                                <SelectItem key={alt.id} value={alt.id}>
+                                  {(alt.genreFamily
+                                    && !String(alt.genreFamily).startsWith("__")
+                                    ? alt.genreFamily
+                                    : alt.name)
+                                    || "Rubric"}
+                                  {alt.ageRating ? ` · ${alt.ageRating}` : ""}
+                                </SelectItem>
+                              ))
+                            : null}
                         </SelectContent>
                       </Select>
+
+                      {showRubricDebug && rubricSuggestMeta.debug ? (
+                        <pre className="max-h-48 overflow-auto rounded-xl border border-gray-200 bg-gray-50 p-2.5 text-[10px] leading-relaxed text-gray-700">
+                          {JSON.stringify(rubricSuggestMeta.debug, null, 2)}
+                        </pre>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>

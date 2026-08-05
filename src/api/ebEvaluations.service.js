@@ -174,12 +174,13 @@ export const ebEvaluationsService = {
     return http.get('/eb-evaluations/rubrics', { params }).then(unwrap)
   },
 
-  /** GET /eb-evaluations/suggest-rubric/:seriesId → suggested_rubric + alternatives */
-  suggestRubric(seriesId) {
+  /** GET /eb-evaluations/suggest-rubric/:seriesId[?debug=true] */
+  suggestRubric(seriesId, { debug = false } = {}) {
     const id = String(seriesId ?? '').trim()
     if (!id) return Promise.reject(new Error('seriesId required'))
+    const params = debug ? { debug: true } : undefined
     return http
-      .get(`/eb-evaluations/suggest-rubric/${id}`)
+      .get(`/eb-evaluations/suggest-rubric/${id}`, { params })
       .then(unwrap)
   },
 

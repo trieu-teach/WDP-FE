@@ -119,7 +119,7 @@ export default function EbHistoryDetail() {
         name: detail.appliedRubricId || "Rubric đã áp dụng",
         weights: detail.appliedRubricWeights || {},
         total_weight: detail.appliedRubricTotalWeight,
-        has_extension: Boolean(
+        has_extensions: Boolean(
           detail.memberScores?.some((m) => m.extensionScores?.length),
         ),
       })

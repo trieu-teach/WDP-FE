@@ -406,8 +406,8 @@ function SeriesCard({
   return (
     <Card
       className={cn(
-        "group relative gap-0 overflow-hidden rounded-xl border-border/70 p-0 shadow-sm",
-        "transition-all duration-200 hover:-translate-y-0.5 hover:border-border hover:shadow-md",
+        "group relative gap-0 overflow-hidden rounded-2xl border border-gray-100 bg-white p-0",
+        "cursor-pointer transition-all duration-200 hover:-translate-y-1 hover:border-gray-200 hover:shadow-md",
         isAdminHidden && "opacity-90",
       )}
       title={
@@ -448,7 +448,7 @@ function SeriesCard({
             ) : null}
           </div>
           {series.needsFullDebutPipeline ? (
-            <Badge className="absolute left-2.5 top-2.5 z-10 gap-1 bg-amber-500 text-white shadow-sm hover:bg-amber-500">
+            <Badge className="absolute left-2.5 top-2.5 z-10 gap-1 rounded-full border border-white/20 bg-black/60 px-2.5 py-0.5 text-[11px] font-medium text-white shadow-sm backdrop-blur-md hover:bg-black/60">
               <Sparkles className="size-3" />
               Lần đầu
             </Badge>
@@ -1768,7 +1768,7 @@ export default function Mangaka() {
           className="pointer-events-none absolute inset-0 z-[1] bg-gradient-to-r from-black/80 via-black/40 to-transparent"
           aria-hidden
         />
-        <div className="page-container relative z-[2] px-8 pt-10 pb-12">
+        <div className="page-container relative z-[2] px-8 pb-12 pt-16 md:pt-20">
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div className="max-w-2xl space-y-3">
               <Badge
@@ -1790,7 +1790,7 @@ export default function Mangaka() {
               </div>
               <div className="min-w-0 pr-1">
                 <p className="truncate text-sm font-medium text-white">{mangakaName}</p>
-                <p className="text-xs text-white/75">Tác giả · Workspace</p>
+                <p className="text-xs text-white/75">Mangaka</p>
               </div>
             </div>
           </div>
@@ -1836,40 +1836,45 @@ export default function Mangaka() {
                         : ""}
                     </p>
                   </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex items-center gap-1.5 rounded-xl bg-red-600 px-4 py-2 text-xs font-medium text-white shadow-xs transition-colors hover:bg-red-700"
+                    onClick={openAddSeriesModal}
+                  >
+                    <Plus className="size-4" />
+                    Đăng ký series
+                  </Button>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5 rounded-xl bg-gray-100/70 p-1 text-xs font-medium">
+                    {[
+                      { value: "all", label: "Tất cả" },
+                      { value: "needs_fix", label: "Cần chỉnh EB" },
+                      { value: "revision", label: "Revision" },
+                      { value: "rejected", label: "Từ chối" },
+                    ].map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        className={cn(
+                          "rounded-lg px-3 py-1.5 text-xs transition-colors",
+                          seriesStatusFilter === opt.value
+                            ? "bg-white font-semibold text-gray-900 shadow-2xs"
+                            : "text-gray-500 hover:text-gray-800",
+                        )}
+                        onClick={() => setSeriesStatusFilter(opt.value)}
+                      >
+                        {opt.label}
+                        {opt.value === "needs_fix" && needsEbFixCount > 0
+                          ? ` (${needsEbFixCount})`
+                          : ""}
+                      </button>
+                    ))}
+                  </div>
+
                   <div className="flex flex-wrap items-center justify-end gap-2">
-                    <div className="flex flex-wrap gap-1.5">
-                      {[
-                        { value: "all", label: "Tất cả" },
-                        { value: "needs_fix", label: "Cần chỉnh EB" },
-                        { value: "revision", label: "Revision" },
-                        { value: "rejected", label: "Từ chối" },
-                      ].map((opt) => (
-                        <Button
-                          key={opt.value}
-                          type="button"
-                          size="sm"
-                          variant={seriesStatusFilter === opt.value ? "default" : "outline"}
-                          className={cn(
-                            "h-8 rounded-lg text-xs",
-                            opt.value === "revision"
-                              && seriesStatusFilter !== opt.value
-                              && "border-amber-200/80 text-amber-800 dark:border-amber-500/30 dark:text-amber-200",
-                            opt.value === "rejected"
-                              && seriesStatusFilter !== opt.value
-                              && "border-rose-200/70 text-rose-800 dark:border-rose-500/30 dark:text-rose-200",
-                            opt.value === "needs_fix"
-                              && seriesStatusFilter !== opt.value
-                              && "border-amber-200/70 text-amber-900 dark:border-amber-500/30 dark:text-amber-100",
-                          )}
-                          onClick={() => setSeriesStatusFilter(opt.value)}
-                        >
-                          {opt.label}
-                          {opt.value === "needs_fix" && needsEbFixCount > 0
-                            ? ` (${needsEbFixCount})`
-                            : ""}
-                        </Button>
-                      ))}
-                    </div>
                     <DropdownMenu
                       open={teRevisionInboxOpen}
                       onOpenChange={setTeRevisionInboxOpen}
@@ -1934,15 +1939,6 @@ export default function Mangaka() {
                         ) : null}
                       </Link>
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-9 gap-1.5 rounded-lg border-rose-200/80 bg-rose-50/70 text-rose-800 hover:bg-rose-100 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200 dark:hover:bg-rose-500/15"
-                      onClick={openAddSeriesModal}
-                    >
-                      <Plus className="size-4" />
-                      Đăng ký series
-                    </Button>
                   </div>
                 </div>
 
@@ -1976,7 +1972,7 @@ export default function Mangaka() {
                     }
                   />
                 ) : (
-                  <div className="mk-series-grid grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  <div className="mk-series-grid grid grid-cols-1 gap-5 sm:grid-cols-2 md:grid-cols-3">
                     {filteredSeriesList.map((s) => (
                       <SeriesCard
                         key={s.id}
@@ -2319,23 +2315,21 @@ export default function Mangaka() {
                 </CardHeader>
                 <CardContent className="space-y-3">
                   {pendingReviews.length > 0 ? (
-                    <div className="flex items-center justify-between gap-3 rounded-xl border border-rose-200/80 bg-rose-50/70 px-3.5 py-3 dark:border-rose-500/25 dark:bg-rose-500/10">
+                    <div className="space-y-2.5 rounded-2xl border border-red-100 bg-gradient-to-br from-red-50 to-orange-50/50 p-4 shadow-2xs">
                       <div className="min-w-0">
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-rose-700 dark:text-rose-300">
+                        <p className="inline-flex rounded-md bg-red-100/80 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-red-600">
                           Ưu tiên
                         </p>
-                        <p className="mt-0.5 text-sm text-foreground">
+                        <p className="mt-1 text-sm text-foreground">
                           <strong>{pendingReviews.length}</strong> chapter chờ duyệt Assistant
                         </p>
                       </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-8 shrink-0 rounded-lg border-rose-300 bg-white/80 text-rose-800 hover:bg-rose-100 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-200 dark:hover:bg-rose-500/20"
-                        asChild
+                      <Link
+                        to="/mangaka/review"
+                        className="block w-full rounded-xl bg-red-600 py-2 text-center text-xs font-medium text-white shadow-2xs transition-colors hover:bg-red-700"
                       >
-                        <Link to="/mangaka/review">Duyệt</Link>
-                      </Button>
+                        Duyệt
+                      </Link>
                     </div>
                   ) : null}
 
