@@ -205,7 +205,7 @@ function PeriodTooltip({ active, payload, label, coinRate }) {
   )
 }
 
-function SeriesRow({ item, max, coinRate }) {
+function SeriesRow({ item, index = 0, max, coinRate }) {
   const gross = parseDisplay(item.gross_revenue_coin_display ?? item.gross_revenue_coin, 0)
   const creator = parseDisplay(item.creator_revenue_coin_display ?? item.creator_revenue_coin, 0)
   const platform = parseDisplay(item.platform_fee_coin_display ?? item.platform_fee_coin, 0)
@@ -214,16 +214,18 @@ function SeriesRow({ item, max, coinRate }) {
   const pct = max > 0 ? Math.max(2, (gross / max) * 100) : 2
   const thumb = resolveSeriesThumbUrl(item.thumbnail ?? item.cover_image_url)
   const initials = (item.series_name ?? item.series_slug ?? '?').slice(0, 2).toUpperCase()
+  // BE đôi khi không trả field `rank` — fallback theo index mảng để luôn hiện số thứ tự.
+  const rank = Number(item.rank ?? item.position ?? index + 1) || index + 1
   return (
     <li className="flex items-start gap-3 px-4 py-3">
       <div className={cn(
         'flex size-8 shrink-0 items-center justify-center rounded-xl text-xs font-bold',
-        item.rank === 1 ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300' :
-        item.rank === 2 ? 'bg-slate-100 text-slate-600 dark:bg-slate-500/20 dark:text-slate-300' :
-        item.rank === 3 ? 'bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-300' :
+        rank === 1 ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300' :
+        rank === 2 ? 'bg-slate-100 text-slate-600 dark:bg-slate-500/20 dark:text-slate-300' :
+        rank === 3 ? 'bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-300' :
         'bg-muted text-muted-foreground'
       )}>
-        {item.rank ?? '—'}
+        {rank}
       </div>
       <Avatar size="sm" className="size-9 shrink-0">
         {thumb ? <AvatarImage src={thumb} alt={item.series_name ?? ''} /> : null}
@@ -773,10 +775,11 @@ export default function Finance() {
             </p>
           ) : (
             <ul className="divide-y rounded-lg border bg-card">
-              {topSeries.map((s) => (
+              {topSeries.map((s, index) => (
                 <SeriesRow
-                  key={s.series_id ?? s.rank ?? s.series_name}
+                  key={s.series_id ?? s.rank ?? s.series_name ?? index}
                   item={s}
+                  index={index}
                   max={topSeriesMax}
                   coinRate={coinRate}
                 />

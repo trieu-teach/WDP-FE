@@ -7,6 +7,7 @@ import {
   Calendar,
   ChevronLeft,
   ChevronRight,
+  Coins,
   Flag,
   LayoutDashboard,
   LogOut,
@@ -34,6 +35,7 @@ const NAV_ITEMS = [
     section: 'Quản lý',
     links: [
       { id: 'users', label: 'Người dùng', icon: UsersIcon },
+      { id: 'coin-packages', label: 'Gói nạp Coin', icon: Coins },
       { id: 'notifications', label: 'Thông báo', icon: Bell },
       { id: 'end-requests', label: 'Yêu cầu kết thúc', icon: Flag },
       { id: 'profile', label: 'Hồ sơ', icon: UserCircle },

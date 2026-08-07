@@ -724,26 +724,73 @@ export const realService = {
 
   // ===== Coin Packages =====
 
+  /** Map 1 item coin-package từ BE → UI. */
+  _mapCoinPackage(s) {
+    if (!s || typeof s !== 'object') return null
+    return {
+      id: s._id ?? s.id,
+      name: s.name ?? '',
+      description: s.description ?? '',
+      priceVnd: Number(s.price_vnd ?? s.priceVnd ?? 0) || 0,
+      coinAmount: Number(s.coin_amount ?? s.coinAmount ?? 0) || 0,
+      bonusCoin: Number(s.bonus_coin ?? s.bonusCoin ?? 0) || 0,
+      totalCoin: Number(s.total_coin ?? s.totalCoin ?? 0) || 0,
+      sortOrder: Number(s.sort_order ?? s.sortOrder ?? 0) || 0,
+      isActive: Boolean(s.is_active ?? s.isActive ?? true),
+      createdAt: s.createdAt ?? s.created_at ?? null,
+      updatedAt: s.updatedAt ?? s.updated_at ?? null,
+    }
+  },
+
   /**
-   * GET /admin/coin-packages — Danh sách gói coin.
-   * Response: items: [{ _id, vnd_price, coin_amount, bonus_coin, display_order, is_active }]
+   * GET /admin/coin-packages — Danh sách gói coin cho reader nạp.
+   * Trả về mảng đã chuẩn hoá: [{ id, name, description, priceVnd, coinAmount,
+   *   bonusCoin, totalCoin, sortOrder, isActive, createdAt, updatedAt }]
    */
-  getCoinPackages: () => instance.get('/admin/coin-packages').then(unwrap),
+  getCoinPackages: () =>
+    instance
+      .get('/admin/coin-packages')
+      .then((res) => {
+        const items = Array.isArray(res?.data) ? res.data : Array.isArray(res) ? res : []
+        return items.map((s) => realService._mapCoinPackage(s)).filter(Boolean)
+      }),
 
   /**
    * POST /admin/coin-packages — Tạo gói coin.
-   * Body: { vnd_price, coin_amount, bonus_coin, display_order, is_active }
+   * FE gửi field theo spec BE (price_vnd, sort_order, is_active, coin_amount,
+   * bonus_coin ở dạng STRING 2 chữ số thập phân vd "200.00").
    */
-  createCoinPackage: (data) => instance.post('/admin/coin-packages', data).then(unwrap),
+  createCoinPackage: (data) => {
+    const payload = {
+      name: String(data.name ?? '').trim(),
+      description: data.description ? String(data.description).trim() : '',
+      price_vnd: Number(data.priceVnd ?? data.price_vnd ?? 0),
+      coin_amount: String(data.coinAmount ?? '0'),
+      bonus_coin: String(data.bonusCoin ?? '0'),
+      sort_order: Number(data.sortOrder ?? 0),
+      is_active: Boolean(data.isActive ?? true),
+    }
+    return instance.post('/admin/coin-packages', payload).then(unwrap)
+  },
 
   /**
    * PATCH /admin/coin-packages/:id — Cập nhật gói coin.
-   * Body: partial of create fields.
+   * Gửi partial các field; đảm bảo coin_amount / bonus_coin luôn là string 2dp.
    */
-  updateCoinPackage: (id, data) => instance.patch(`/admin/coin-packages/${id}`, data).then(unwrap),
+  updateCoinPackage: (id, data) => {
+    const payload = {}
+    if (data.name != null) payload.name = String(data.name).trim()
+    if (data.description != null) payload.description = String(data.description).trim()
+    if (data.priceVnd != null) payload.price_vnd = Number(data.priceVnd)
+    if (data.coinAmount != null) payload.coin_amount = String(data.coinAmount)
+    if (data.bonusCoin != null) payload.bonus_coin = String(data.bonusCoin)
+    if (data.sortOrder != null) payload.sort_order = Number(data.sortOrder)
+    if (data.isActive != null) payload.is_active = Boolean(data.isActive)
+    return instance.patch(`/admin/coin-packages/${id}`, payload).then(unwrap)
+  },
 
   /**
-   * DELETE /admin/coin-packages/:id — Xoá gói coin.
+   * DELETE /admin/coin-packages/:id — Vô hiệu hoá gói (soft-delete BE).
    */
   deleteCoinPackage: (id) => instance.delete(`/admin/coin-packages/${id}`).then(unwrap),
 
