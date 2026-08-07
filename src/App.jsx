@@ -13,6 +13,7 @@ import AdminWithdrawals from '@/pages/Admin/Withdrawals/AdminWithdrawals.jsx'
 import PublicationCalendar from '@/pages/Admin/PublicationCalendar/PublicationCalendar.jsx'
 import EndRequests from '@/pages/Admin/EndRequests/EndRequests.jsx'
 import AdminNotifications from '@/pages/Admin/Notifications/AdminNotifications.jsx'
+import CoinPackages from '@/pages/Admin/CoinPackages/CoinPackages.jsx'
 import Home from '@/pages/User/Home/Home.jsx'
 import Login from '@/pages/User/Login/Login.jsx'
 import Register from '@/pages/User/Register/Register.jsx'
@@ -138,6 +139,7 @@ export default function App() {
           <Route path="users" element={<Users />} />
           <Route path="end-requests" element={<EndRequests />} />
           <Route path="notifications" element={<AdminNotifications />} />
+          <Route path="coin-packages" element={<CoinPackages />} />
           <Route path="profile" element={<Profile />} />
           <Route path="*" element={<Navigate to="dashboard" replace />} />
         </Route>

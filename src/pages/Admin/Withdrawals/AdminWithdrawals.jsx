@@ -49,13 +49,20 @@ import {
 } from '@/utils/coinFormatter.js'
 import { cn } from '@/lib/utils'
 
+const STATUS_LABELS = {
+  pending: 'Chờ duyệt',
+  approved: 'Đã duyệt',
+  completed: 'Hoàn tất',
+  rejected: 'Từ chối',
+  cancelled: 'Đã huỷ',
+}
+
 const STATUS_OPTIONS = [
   { value: 'all', label: 'Tất cả' },
-  { value: 'pending', label: 'Chờ duyệt' },
-  { value: 'approved', label: 'Đã duyệt' },
-  { value: 'completed', label: 'Hoàn tất' },
-  { value: 'rejected', label: 'Từ chối' },
-  { value: 'cancelled', label: 'Đã huỷ' },
+  { value: 'pending', label: STATUS_LABELS.pending },
+  { value: 'approved', label: STATUS_LABELS.approved },
+  { value: 'completed', label: STATUS_LABELS.completed },
+  { value: 'rejected', label: STATUS_LABELS.rejected },
 ]
 
 const STATUS_TONES = {
@@ -68,7 +75,7 @@ const STATUS_TONES = {
 
 function StatusPill({ status }) {
   const cfg = STATUS_TONES[status]
-  const label = STATUS_OPTIONS.find((o) => o.value === status)?.label ?? status ?? '—'
+  const label = STATUS_LABELS[status] ?? status ?? '—'
   return (
     <span
       className={cn(
@@ -95,16 +102,49 @@ function mapRow(raw) {
     'vnd_amount',
     'amount_vnd',
   ])
-  const user = r.user && typeof r.user === 'object'
+  // BE có thể populate user dưới nhiều dạng: r.user_id (object, hay gặp nhất),
+  // r.user (object), r.creator, r.requested_by, hoặc flat fields.
+  // Thử lần lượt các vị trí phổ biến để tránh hiện "—" khi data thật vẫn còn.
+  const userSources = [r.user, r.user_id, r.creator, r.requested_by, r.mangaka].filter(
+    (u) => u && typeof u === 'object',
+  )
+  const pickUserField = (...keys) => {
+    for (const u of userSources) {
+      for (const k of keys) {
+        const v = u[k]
+        if (v != null && String(v).trim() !== '') return String(v).trim()
+      }
+    }
+    for (const k of keys) {
+      const v = r[k]
+      if (v != null && String(v).trim() !== '') return String(v).trim()
+    }
+    return ''
+  }
+  const user = userSources.length > 0
     ? {
-        id: r.user._id ?? r.user.id ?? r.user_id ?? null,
-        name: r.user.full_name ?? r.user.fullName ?? r.user.name ?? r.user.username ?? '—',
-        role: r.user.role ?? '',
-        avatarUrl: r.user.avatar_url ?? r.user.avatarUrl ?? '',
+        id:
+          userSources[0]._id ??
+          userSources[0].id ??
+          r.user_id ??
+          r.creator_id ??
+          null,
+        name:
+          pickUserField('full_name', 'fullName', 'name', 'username') || '—',
+        role:
+          pickUserField('role', 'user_role') ||
+          userSources[0].role ||
+          '',
+        avatarUrl:
+          pickUserField('avatar_url', 'avatarUrl', 'avatar') || '',
       }
     : {
-        id: r.user_id ?? null,
-        name: r.user_name ?? r.full_name ?? '—',
+        id: r.user_id ?? r.creator_id ?? null,
+        name:
+          [r.user_name, r.full_name, r.creator_name, r.username]
+            .find((v) => v != null && String(v).trim() !== '')
+            ?.toString()
+            .trim() || '—',
         role: r.user_role ?? '',
         avatarUrl: '',
       }
@@ -137,13 +177,6 @@ function mapRow(raw) {
 function ActionDialog({ open, action, request, onClose, onConfirm }) {
   const [adminNote, setAdminNote] = useState('')
   const [submitting, setSubmitting] = useState(false)
-
-  useEffect(() => {
-    if (open) {
-      setAdminNote('')
-      setSubmitting(false)
-    }
-  }, [open, request?.id])
 
   if (!request || !action) return null
 
@@ -278,7 +311,11 @@ export default function AdminWithdrawals() {
     }
   }, [statusFilter, page])
 
+  // Data fetching trong effect — pattern chuẩn theo React docs
+  // (https://react.dev/learn/synchronizing-with-effects). `load` async, setState bên trong
+  // diễn ra SAU await nên không gây cascading render. Tắt rule cho wrapper effect này.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load()
   }, [load])
 
@@ -524,13 +561,16 @@ export default function AdminWithdrawals() {
         </CardContent>
       </Card>
 
-      <ActionDialog
-        open={Boolean(action)}
-        action={action?.kind}
-        request={action?.request}
-        onClose={closeAction}
-        onConfirm={handleConfirm}
-      />
+      {action ? (
+        <ActionDialog
+          key={`${action.kind}-${action.request?.id ?? 'new'}`}
+          open
+          action={action.kind}
+          request={action.request}
+          onClose={closeAction}
+          onConfirm={handleConfirm}
+        />
+      ) : null}
     </div>
   )
 }
