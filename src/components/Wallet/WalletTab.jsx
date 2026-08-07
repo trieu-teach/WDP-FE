@@ -331,8 +331,8 @@ export default function WalletTab() {
               Chưa có giao dịch nào.
             </p>
           ) : (
-            <ScrollArea className="max-h-96 pr-2">
-              <ul className="divide-y divide-zinc-100">
+            <ScrollArea className="h-96 rounded-md border border-zinc-200">
+              <ul className="divide-y divide-zinc-100 px-1">
                 {filteredLedger.map((entry) => (
                   <LedgerRow
                     key={entry.id ?? `${entry.createdAt}-${entry.amountCoin}`}

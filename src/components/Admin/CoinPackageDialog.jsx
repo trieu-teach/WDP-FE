@@ -23,20 +23,25 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
-import { formatCoinString, formatVnd } from '@/utils/coinFormatter.js'
+import {
+  DEFAULT_COIN_TO_VND_RATE,
+  formatCoinString,
+  formatVnd,
+  vndToCoin,
+} from '@/utils/coinFormatter.js'
 
 const NAME_MAX = 100
 const DESC_MAX = 500
 const MIN_PRICE = 1000
 const MAX_DECIMALS = 2
+/** BE lưu `sort_order` để tương thích; FE mặc định 0 và không cho Admin nhập. */
+const DEFAULT_SORT_ORDER = 0
 
 const DEFAULT_FORM = {
   name: '',
   description: '',
   priceVnd: '',
-  coinAmount: '',
   bonusCoin: '0',
-  sortOrder: '0',
   isActive: true,
 }
 
@@ -47,9 +52,7 @@ function buildInitialForm(pkg, isEdit) {
     name: pkg.name ?? '',
     description: pkg.description ?? '',
     priceVnd: pkg.priceVnd > 0 ? String(pkg.priceVnd) : '',
-    coinAmount: pkg.coinAmount > 0 ? pkg.coinAmount.toFixed(MAX_DECIMALS) : '',
     bonusCoin: pkg.bonusCoin > 0 ? pkg.bonusCoin.toFixed(MAX_DECIMALS) : '0',
-    sortOrder: String(pkg.sortOrder ?? 0),
     isActive: Boolean(pkg.isActive),
   }
 }
@@ -133,9 +136,12 @@ export default function CoinPackageDialog({ pkg, open, onClose, onSaved }) {
     set(key, sanitizeIntString(raw))
   }
 
-  const coinAmountNum = parseDecimal(form.coinAmount)
+  const priceVndNum = parseInt(form.priceVnd)
+  const coinAmountPreview = priceVndNum > 0
+    ? vndToCoin(priceVndNum, DEFAULT_COIN_TO_VND_RATE)
+    : 0
   const bonusCoinNum = parseDecimal(form.bonusCoin)
-  const totalCoinPreview = coinAmountNum + bonusCoinNum
+  const totalCoinPreview = coinAmountPreview + bonusCoinNum
 
   function validate() {
     const next = {}
@@ -153,16 +159,8 @@ export default function CoinPackageDialog({ pkg, open, onClose, onSaved }) {
       next.priceVnd = `Tối thiểu ${formatVnd(MIN_PRICE)}`
     }
 
-    const coinAmount = parseDecimal(form.coinAmount)
-    if (!form.coinAmount || coinAmount <= 0) {
-      next.coinAmount = 'Coin cơ bản phải lớn hơn 0'
-    }
-
     const bonusCoin = parseDecimal(form.bonusCoin)
     if (bonusCoin < 0) next.bonusCoin = 'Coin thưởng không được âm'
-
-    const sortOrder = parseInt(form.sortOrder)
-    if (sortOrder < 0) next.sortOrder = 'Thứ tự phải ≥ 0'
 
     setErrors(next)
     return Object.keys(next).length === 0
@@ -171,13 +169,17 @@ export default function CoinPackageDialog({ pkg, open, onClose, onSaved }) {
   async function handleSave() {
     if (!validate()) return
     setSaving(true)
+    // Coin cơ bản TỰ TÍNH từ priceVnd ngay trước khi submit — không phụ thuộc state cũ
+    // (FE trước đây có input coinAmount riêng, dễ lệch với priceVnd).
+    const priceVnd = parseInt(form.priceVnd)
+    const coinAmount = vndToCoin(priceVnd, DEFAULT_COIN_TO_VND_RATE)
     const payload = {
       name: form.name.trim(),
       description: form.description.trim(),
-      priceVnd: parseInt(form.priceVnd),
-      coinAmount: sanitizeDecimalString(form.coinAmount),
-      bonusCoin: sanitizeDecimalString(form.bonusCoin),
-      sortOrder: parseInt(form.sortOrder),
+      priceVnd,
+      coinAmount,
+      bonusCoin: parseDecimal(form.bonusCoin),
+      sortOrder: DEFAULT_SORT_ORDER,
       isActive: Boolean(form.isActive),
     }
     try {
@@ -287,7 +289,7 @@ export default function CoinPackageDialog({ pkg, open, onClose, onSaved }) {
             ) : null}
           </div>
 
-          {/* Giá VND + Coin cơ bản */}
+          {/* Giá VND + Coin cơ bản (read-only) */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label className="text-sm font-medium text-foreground">
@@ -305,38 +307,25 @@ export default function CoinPackageDialog({ pkg, open, onClose, onSaved }) {
               </div>
               {errors.priceVnd ? (
                 <p className="text-xs text-destructive">{errors.priceVnd}</p>
-              ) : (
-                <p className="text-[11px] text-muted-foreground">
-                  Tối thiểu {formatVnd(MIN_PRICE)}, chỉ nhập số nguyên.
-                </p>
-              )}
+              ) : null}
             </div>
 
             <div className="space-y-2">
-              <Label className="text-sm font-medium text-foreground">
-                Coin cơ bản <span className="text-destructive">*</span>
-              </Label>
-              <div className="relative">
-                <Input
-                  inputMode="decimal"
-                  value={form.coinAmount}
-                  onChange={(e) => setDecimal('coinAmount', e.target.value)}
-                  placeholder="200.00"
-                  className={cn('h-10 pl-10', errors.coinAmount && 'border-destructive')}
-                />
-                <Coins className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-amber-500" />
+              <Label className="text-sm font-medium text-foreground">Coin cơ bản</Label>
+              <div
+                className={cn(
+                  'flex h-10 items-center rounded-md border border-dashed border-amber-300/60 bg-gradient-to-r from-amber-50 to-orange-50 px-3 text-sm font-semibold text-amber-700 dark:from-amber-950/30 dark:to-orange-950/20 dark:text-amber-300',
+                )}
+              >
+                <span className="flex items-center gap-1.5">
+                  <Coins className="size-4" />
+                  {formatCoinString(coinAmountPreview.toFixed(MAX_DECIMALS))} Coin
+                </span>
               </div>
-              {errors.coinAmount ? (
-                <p className="text-xs text-destructive">{errors.coinAmount}</p>
-              ) : (
-                <p className="text-[11px] text-muted-foreground">
-                  Tối đa {MAX_DECIMALS} chữ số thập phân, lớn hơn 0.
-                </p>
-              )}
             </div>
           </div>
 
-          {/* Coin thưởng + Thứ tự */}
+          {/* Coin thưởng (nhập tay) */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label className="text-sm font-medium text-foreground">Coin thưởng</Label>
@@ -352,43 +341,7 @@ export default function CoinPackageDialog({ pkg, open, onClose, onSaved }) {
               </div>
               {errors.bonusCoin ? (
                 <p className="text-xs text-destructive">{errors.bonusCoin}</p>
-              ) : (
-                <p className="text-[11px] text-muted-foreground">Không bắt buộc, không âm.</p>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <Label className="text-sm font-medium text-foreground">Thứ tự hiển thị</Label>
-              <Input
-                inputMode="numeric"
-                value={form.sortOrder}
-                onChange={(e) => setInt('sortOrder', e.target.value)}
-                placeholder="0"
-                className={cn('h-10', errors.sortOrder && 'border-destructive')}
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Số nhỏ hiển thị trước. Mặc định 0.
-              </p>
-            </div>
-          </div>
-
-          {/* Tổng Coin (read-only) + Trạng thái */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label className="text-sm font-medium text-foreground">Tổng Coin</Label>
-              <div
-                className={cn(
-                  'flex h-10 items-center justify-between rounded-md border border-dashed border-amber-300/60 bg-gradient-to-r from-amber-50 to-orange-50 px-3 text-sm font-semibold text-amber-700 dark:from-amber-950/30 dark:to-orange-950/20 dark:text-amber-300',
-                )}
-              >
-                <span className="flex items-center gap-1.5">
-                  <Coins className="size-4" />
-                  {formatCoinString(totalCoinPreview.toFixed(MAX_DECIMALS))} Coin
-                </span>
-                <span className="text-[11px] font-normal text-amber-600/80 dark:text-amber-400/70">
-                  tự tính
-                </span>
-              </div>
+              ) : null}
             </div>
 
             <div className="space-y-2">
@@ -415,6 +368,21 @@ export default function CoinPackageDialog({ pkg, open, onClose, onSaved }) {
                   </SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+          </div>
+
+          {/* Tổng Coin (read-only) */}
+          <div className="space-y-2">
+            <Label className="text-sm font-medium text-foreground">Tổng Coin nhận</Label>
+            <div
+              className={cn(
+                'flex h-10 items-center rounded-md border border-dashed border-amber-300/60 bg-gradient-to-r from-amber-50 to-orange-50 px-3 text-sm font-semibold text-amber-700 dark:from-amber-950/30 dark:to-orange-950/20 dark:text-amber-300',
+              )}
+            >
+              <span className="flex items-center gap-1.5">
+                <Coins className="size-4" />
+                {formatCoinString(totalCoinPreview.toFixed(MAX_DECIMALS))} Coin
+              </span>
             </div>
           </div>
         </div>

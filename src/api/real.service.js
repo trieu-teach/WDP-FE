@@ -32,6 +32,9 @@ function formatActivityTime(iso) {
   }
 }
 
+/** 1 Coin = COIN_UNIT_SCALE CoinUnit. BE lưu coin_amount/bonus_coin/total_coin ở đơn vị CoinUnit. */
+const COIN_UNIT_SCALE = 100
+
 function mapMangaListItem(s, index = 0) {
   const title = s.title ?? s.name ?? '—'
   const tags = Array.isArray(s.tags)
@@ -724,22 +727,48 @@ export const realService = {
 
   // ===== Coin Packages =====
 
-  /** Map 1 item coin-package từ BE → UI. */
+  /**
+   * Quy ước BE (2026-08-08):
+   * - coin_amount / bonus_coin / total_coin là CoinUnit (100 CoinUnit = 1 Coin).
+   * - BE có thể trả kèm *_display (string "200.00") cho UI; ưu tiên *_display.
+   * - Nếu không có display, lấy raw CoinUnit và chia 100.
+   * - Phải check `undefined`/`null` rồi mới convert Number — KHÔNG dùng `|| fallback`
+   *   vì "0.00" là giá trị hợp lệ (truthy) nhưng các falsy khác sẽ nuốt giá trị.
+   */
   _mapCoinPackage(s) {
     if (!s || typeof s !== 'object') return null
+    const priceVnd = Number(s.price_vnd ?? s.priceVnd ?? 0) || 0
+    const coinAmount = realService._packageCoinValue(s.coin_amount_display, s.coin_amount)
+    const bonusCoin = realService._packageCoinValue(s.bonus_coin_display, s.bonus_coin)
+    const totalCoin = realService._packageCoinValue(s.total_coin_display, s.total_coin)
+    const sortOrder = Number(s.sort_order ?? s.sortOrder ?? 0) || 0
+    const isActiveRaw = s.is_active ?? s.isActive
+    const isActive = typeof isActiveRaw === 'boolean'
+      ? isActiveRaw
+      : (isActiveRaw === 'true' || isActiveRaw === 1 || isActiveRaw === '1')
     return {
       id: s._id ?? s.id,
       name: s.name ?? '',
       description: s.description ?? '',
-      priceVnd: Number(s.price_vnd ?? s.priceVnd ?? 0) || 0,
-      coinAmount: Number(s.coin_amount ?? s.coinAmount ?? 0) || 0,
-      bonusCoin: Number(s.bonus_coin ?? s.bonusCoin ?? 0) || 0,
-      totalCoin: Number(s.total_coin ?? s.totalCoin ?? 0) || 0,
-      sortOrder: Number(s.sort_order ?? s.sortOrder ?? 0) || 0,
-      isActive: Boolean(s.is_active ?? s.isActive ?? true),
+      priceVnd,
+      coinAmount,
+      bonusCoin,
+      totalCoin,
+      sortOrder,
+      isActive,
       createdAt: s.createdAt ?? s.created_at ?? null,
       updatedAt: s.updatedAt ?? s.updated_at ?? null,
     }
+  },
+
+  /** Helper: lấy giá trị Coin từ display (string) hoặc raw CoinUnit (number). */
+  _packageCoinValue(displayValue, rawUnitValue) {
+    if (displayValue !== undefined && displayValue !== null) {
+      const display = Number(displayValue)
+      if (Number.isFinite(display)) return display
+    }
+    const units = Number(rawUnitValue)
+    return Number.isFinite(units) ? units / COIN_UNIT_SCALE : 0
   },
 
   /**
@@ -759,14 +788,15 @@ export const realService = {
    * POST /admin/coin-packages — Tạo gói coin.
    * FE gửi field theo spec BE (price_vnd, sort_order, is_active, coin_amount,
    * bonus_coin ở dạng STRING 2 chữ số thập phân vd "200.00").
+   * KHÔNG nhân Coin với 100 ở FE — Backend tự chuyển Coin → CoinUnit.
    */
   createCoinPackage: (data) => {
     const payload = {
       name: String(data.name ?? '').trim(),
       description: data.description ? String(data.description).trim() : '',
       price_vnd: Number(data.priceVnd ?? data.price_vnd ?? 0),
-      coin_amount: String(data.coinAmount ?? '0'),
-      bonus_coin: String(data.bonusCoin ?? '0'),
+      coin_amount: realService._formatCoinAmountString(data.coinAmount),
+      bonus_coin: realService._formatCoinAmountString(data.bonusCoin),
       sort_order: Number(data.sortOrder ?? 0),
       is_active: Boolean(data.isActive ?? true),
     }
@@ -782,11 +812,18 @@ export const realService = {
     if (data.name != null) payload.name = String(data.name).trim()
     if (data.description != null) payload.description = String(data.description).trim()
     if (data.priceVnd != null) payload.price_vnd = Number(data.priceVnd)
-    if (data.coinAmount != null) payload.coin_amount = String(data.coinAmount)
-    if (data.bonusCoin != null) payload.bonus_coin = String(data.bonusCoin)
+    if (data.coinAmount != null) payload.coin_amount = realService._formatCoinAmountString(data.coinAmount)
+    if (data.bonusCoin != null) payload.bonus_coin = realService._formatCoinAmountString(data.bonusCoin)
     if (data.sortOrder != null) payload.sort_order = Number(data.sortOrder)
     if (data.isActive != null) payload.is_active = Boolean(data.isActive)
     return instance.patch(`/admin/coin-packages/${id}`, payload).then(unwrap)
+  },
+
+  /** Format Coin (number hoặc string) thành string thập phân 2dp để gửi BE (vd 200 → "200.00"). */
+  _formatCoinAmountString(value) {
+    const n = Number(value)
+    if (!Number.isFinite(n)) return '0.00'
+    return n.toFixed(2)
   },
 
   /**
@@ -820,7 +857,10 @@ export const realService = {
     const query = { page: 1, limit: 20 }
     if (params.page) query.page = Number(params.page)
     if (params.limit) query.limit = Number(params.limit)
-    if (params.status) query.status = params.status
+    // Tuyệt đối KHÔNG gửi status=all — BE hiểu đó là status thật → danh sách rỗng.
+    if (params.status && params.status !== 'all') {
+      query.status = params.status
+    }
     // Cố ý KHÔNG gửi `search` — BE hiện không hỗ trợ và FE đã loại bỏ chức năng tìm kiếm.
     return instance.get('/withdrawals/admin/all', { params: query }).then((res) => {
       const root = res && typeof res === 'object' ? res : {}

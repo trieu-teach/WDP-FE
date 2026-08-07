@@ -85,11 +85,7 @@ export default function CoinPackages() {
       .getCoinPackages()
       .then((data) => {
         if (cancelled) return
-        const sorted = [...data].sort((a, b) => {
-          if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder
-          return new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0)
-        })
-        setItems(sorted)
+        setItems(Array.isArray(data) ? data : [])
       })
       .catch((err) => {
         if (cancelled) return
@@ -112,11 +108,7 @@ export default function CoinPackages() {
       .getCoinPackages()
       .then((data) => {
         if (cancelled) return
-        const sorted = [...data].sort((a, b) => {
-          if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder
-          return new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0)
-        })
-        setItems(sorted)
+        setItems(Array.isArray(data) ? data : [])
         setLoading(false)
       })
       .catch((err) => {
@@ -129,9 +121,21 @@ export default function CoinPackages() {
     }
   }, [])
 
+  // Sort theo giá VND tăng dần (phụ: createdAt tăng dần → tên vi-VN) — không mutate `items`.
+  const sortedItems = useMemo(() => {
+    const locale = 'vi'
+    return [...items].sort((a, b) => {
+      if (a.priceVnd !== b.priceVnd) return a.priceVnd - b.priceVnd
+      const aDate = new Date(a.createdAt || 0).getTime()
+      const bDate = new Date(b.createdAt || 0).getTime()
+      if (aDate !== bDate) return aDate - bDate
+      return String(a.name || '').localeCompare(String(b.name || ''), locale)
+    })
+  }, [items])
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    return items.filter((p) => {
+    return sortedItems.filter((p) => {
       if (statusFilter === 'active' && !p.isActive) return false
       if (statusFilter === 'inactive' && p.isActive) return false
       if (!q) return true
@@ -140,7 +144,7 @@ export default function CoinPackages() {
         (p.description || '').toLowerCase().includes(q)
       )
     })
-  }, [items, search, statusFilter])
+  }, [sortedItems, search, statusFilter])
 
   const stats = useMemo(() => {
     const active = items.filter((p) => p.isActive).length
@@ -337,12 +341,12 @@ export default function CoinPackages() {
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/30 hover:bg-muted/30">
+                  <TableHead className="w-12 text-center font-semibold">STT</TableHead>
                   <TableHead className="font-semibold">Tên gói</TableHead>
                   <TableHead className="font-semibold">Giá VND</TableHead>
                   <TableHead className="text-right font-semibold">Coin cơ bản</TableHead>
                   <TableHead className="text-right font-semibold">Coin thưởng</TableHead>
                   <TableHead className="text-right font-semibold">Tổng Coin</TableHead>
-                  <TableHead className="text-center font-semibold">Thứ tự</TableHead>
                   <TableHead className="font-semibold">Trạng thái</TableHead>
                   <TableHead className="font-semibold">Ngày cập nhật</TableHead>
                   <TableHead className="text-right font-semibold">Hành động</TableHead>
@@ -359,6 +363,11 @@ export default function CoinPackages() {
                       transition={{ duration: 0.18, delay: Math.min(idx * 0.02, 0.2) }}
                       className="border-b border-border/50 transition-colors hover:bg-muted/30"
                     >
+                      <TableCell className="text-center">
+                        <span className="inline-flex size-7 items-center justify-center rounded-md bg-muted/70 text-xs font-medium text-muted-foreground">
+                          {idx + 1}
+                        </span>
+                      </TableCell>
                       <TableCell className="max-w-[260px]">
                         <div className="flex items-center gap-2.5">
                           <div
@@ -402,11 +411,6 @@ export default function CoinPackages() {
                         <span className="inline-flex items-center gap-1 rounded-md bg-gradient-to-r from-amber-500/10 to-orange-500/10 px-2 py-0.5 text-sm font-semibold text-amber-700 dark:text-amber-300">
                           <Coins className="size-3.5" />
                           {formatCoinString(pkg.totalCoin)}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <span className="inline-flex size-7 items-center justify-center rounded-md bg-muted/70 text-xs font-medium text-muted-foreground">
-                          {pkg.sortOrder}
                         </span>
                       </TableCell>
                       <TableCell>
