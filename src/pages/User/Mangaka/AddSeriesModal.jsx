@@ -127,9 +127,9 @@ export default function AddSeriesModal({
     e.preventDefault()
     setTouched(true)
     if (!validation.ok) return
+    // Không reset form tại đây — parent đóng modal khi thành công;
+    // nếu API lỗi thì giữ nguyên dữ liệu đã nhập.
     onSubmit(form, { mode: isEdit ? 'edit' : 'create', seriesId: initialSeries?.id })
-    if (!isEdit) setForm(createEmptySeriesForm(authorName))
-    setTouched(false)
   }
 
   const err = (key) => (touched ? validation.errors[key] : null)
